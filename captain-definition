@@ -1,0 +1,75 @@
+{
+   "schemaVersion": 2,
+   "dockerfilePath": "./Dockerfile",
+   "buildArguments": {
+      "CACHE_BUST": "latest"
+   },
+   "expose": {
+      "api": {
+         "containerPort": 4006,
+         "httpPort": 80,
+         "httpsPort": 443
+      }
+   },
+   "healthcheck": {
+      "path": "/api/v1/health",
+      "port": 4006,
+      "interval": 30,
+      "timeout": 10,
+      "retries": 3,
+      "startPeriod": 30
+   },
+   "notify": {
+      "webhook": "",
+      "slack": "",
+      "discord": ""
+   },
+   "customDomain": "",
+   "forceSsl": true,
+   "appName": "extrahand-admin-service",
+   "hasPersistentData": false,
+   "description": "ExtraHand Admin Service - Tasker onboarding, leads management, approval and activation workflows",
+   "instanceCount": 1,
+   "tags": [
+      "nodejs",
+      "typescript",
+      "express",
+      "admin",
+      "extrahand",
+      "tasker-onboarding",
+      "leads",
+      "approval",
+      "activation"
+   ],
+   "envVars": {
+      "NODE_ENV": "production",
+      "PORT": "4006",
+      "LOG_LEVEL": "info",
+      "MONGODB_URI": "YOUR_MONGODB_URI_HERE",
+      "MONGO_DB": "extrahand",
+      "FIREBASE_PROJECT_ID": "YOUR_FIREBASE_PROJECT_ID",
+      "FIREBASE_PRIVATE_KEY": "YOUR_FIREBASE_PRIVATE_KEY",
+      "FIREBASE_CLIENT_EMAIL": "YOUR_FIREBASE_CLIENT_EMAIL",
+      "SERVICE_AUTH_TOKEN": "YOUR_SERVICE_AUTH_TOKEN_HERE",
+      "USER_SERVICE_URL": "http://srv-captain--extrahand-user-service:4001",
+      "VERIFICATION_SERVICE_URL": "http://srv-captain--extrahand-user-verification:4004"
+   },
+   "volumes": [
+      {
+         "name": "app-logs",
+         "path": "/app/logs"
+      }
+   ],
+   "restart": {
+      "policy": "unless-stopped",
+      "maximumRetryCount": 10
+   },
+   "resources": {
+      "memory": "512Mi",
+      "cpu": "0.5"
+   },
+   "networking": {
+      "publishAllPorts": false,
+      "enableTcpProxy": false
+   }
+}
