@@ -44,6 +44,7 @@ export interface UpdateLeadData {
   city?: string;
   state?: string;
   address?: string;
+  pincode?: string;
   primarySkill?: string;
   source?: LeadSource;
   sourceDetails?: string;
@@ -200,7 +201,6 @@ export class LeadService {
         `Primary skill assigned: ${primarySkillName}`,
         data.addedBy,
         data.addedByName,
-        undefined,
         { skillName: primarySkillName, category: primarySkillCategory }
       );
 

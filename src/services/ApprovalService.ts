@@ -338,7 +338,7 @@ export class ApprovalService {
             pendingDocuments: filteredPendingDocs
           };
         })
-        .filter((lead): lead is ILead & { pendingDocuments: Array<{ index: number; type: ILead['documents'][0]['type']; url?: string; uploadedAt?: Date }> } => lead !== null);
+        .filter((lead): lead is NonNullable<typeof lead> => lead !== null) as (ILead & { pendingDocuments: Array<{ index: number; type: ILead['documents'][0]['type']; url?: string; uploadedAt?: Date }> })[];
 
       // Apply pagination after filtering
       const total = leadsWithPendingDocs.length;

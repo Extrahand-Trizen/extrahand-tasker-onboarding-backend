@@ -28,7 +28,7 @@ export class DuplicateCheckService {
         });
         return {
           isDuplicate: true,
-          existingLead: existingLead as ILead,
+          existingLead: existingLead as unknown as ILead,
           matchType: 'phone'
         };
       }
@@ -67,7 +67,7 @@ export class DuplicateCheckService {
         });
         return {
           isDuplicate: true,
-          existingLead: existingLead as ILead,
+          existingLead: existingLead as unknown as ILead,
           matchType: 'name_city'
         };
       }

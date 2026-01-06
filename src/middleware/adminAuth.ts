@@ -9,6 +9,13 @@ export interface AdminRequest extends Request {
     name?: string;
     role?: string;
   };
+  // Alias for backward compatibility
+  user?: {
+    uid: string;
+    email?: string;
+    name?: string;
+    role?: string;
+  };
 }
 
 export const adminAuthMiddleware = async (
@@ -40,6 +47,9 @@ export const adminAuthMiddleware = async (
         name: decodedToken.name,
         role: decodedToken.role || 'marketing' // Default role, can be set in Firebase custom claims
       };
+      
+      // Set user alias for backward compatibility
+      req.user = req.admin;
 
       logger.debug('Admin authenticated', {
         uid: decodedToken.uid,

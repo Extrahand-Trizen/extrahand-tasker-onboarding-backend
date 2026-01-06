@@ -1,5 +1,28 @@
-import { format } from 'date-fns';
 import { BUILT_IN_VARIABLES } from './templateVariables';
+
+/**
+ * Simple date formatting function (replaces date-fns)
+ */
+function formatDate(date: Date, formatStr: string): string {
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = date.getFullYear();
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  const seconds = String(date.getSeconds()).padStart(2, '0');
+  
+  // Common format patterns
+  const formats: Record<string, string> = {
+    'yyyy-MM-dd': `${year}-${month}-${day}`,
+    'dd/MM/yyyy': `${day}/${month}/${year}`,
+    'MM/dd/yyyy': `${month}/${day}/${year}`,
+    'dd-MM-yyyy': `${day}-${month}-${year}`,
+    'yyyy-MM-dd HH:mm:ss': `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`,
+    'dd MMM yyyy': `${day} ${date.toLocaleString('en-US', { month: 'short' })} ${year}`,
+  };
+  
+  return formats[formatStr] || date.toLocaleDateString('en-IN');
+}
 
 /**
  * Replace variables in template content with actual values
@@ -46,7 +69,7 @@ function formatVariable(value: any, varName: string, modifiers: string): string 
   if (modifiers.startsWith('format:')) {
     const formatStr = modifiers.replace(/^format:/, '').replace(/^["']|["']$/g, '');
     if (value instanceof Date) {
-      return format(value, formatStr);
+      return formatDate(value, formatStr);
     }
   }
   

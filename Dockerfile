@@ -63,7 +63,7 @@ FROM base AS production
 # Set default environment variables (can be overridden at runtime)
 # Sensitive variables should be provided via CapRover envVars, not build args
 ENV NODE_ENV=production
-ENV PORT=4006
+ENV PORT=4008
 ENV LOG_LEVEL=info
 
 # Note: The following environment variables should be set at runtime via CapRover:
@@ -108,11 +108,11 @@ RUN rm -rf \
 USER nodeuser
 
 # Expose port
-EXPOSE 4006
+EXPOSE 4008
 
 # ✅ HEALTH CHECK - Check localhost inside container
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD curl -f http://localhost:4006/api/v1/health || exit 1
+    CMD curl -f http://localhost:4008/api/v1/health || exit 1
 
 # Use dumb-init for proper signal handling
 ENTRYPOINT ["dumb-init", "--"]
