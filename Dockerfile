@@ -16,31 +16,48 @@ RUN addgroup -g 1001 -S nodejs && \
 # Dependencies stage
 FROM base AS dependencies
 
+# Accept build cache buster argument
+ARG CACHE_BUST=no-cache
+
 # Copy package files
 COPY package.json package-lock.json* ./
 
-# Install production dependencies only
-RUN if [ -f package-lock.json ]; then \
-      npm ci --omit=dev && npm cache clean --force; \
+# Install production dependencies only (aggressive cache busting)
+# Using timestamp to ensure fresh builds
+RUN BUILD_TIMESTAMP=$(date -u +%Y%m%d%H%M%S) && \
+    npm cache clean --force && \
+    if [ -f package-lock.json ]; then \
+      npm ci --omit=dev --prefer-offline=false && npm cache clean --force; \
     else \
-      npm install --omit=dev && npm cache clean --force; \
-    fi
+      npm install --omit=dev --prefer-offline=false && npm cache clean --force; \
+    fi && \
+    echo "Cache bust: ${CACHE_BUST}" > /tmp/deps-cache-bust.txt && \
+    echo "Build timestamp: ${BUILD_TIMESTAMP}" >> /tmp/deps-cache-bust.txt && \
+    rm -rf /root/.npm /tmp/npm-* && \
+    cat /tmp/deps-cache-bust.txt
 
 # Build stage
 FROM base AS build
 
 # Accept build cache buster argument
-ARG CACHE_BUST=1
+ARG CACHE_BUST=no-cache
 
 # Copy package files
 COPY package.json package-lock.json* ./
 
-# Install all dependencies (including dev dependencies for TypeScript)
-RUN if [ -f package-lock.json ]; then \
-      npm ci; \
+# Install all dependencies (including dev dependencies for TypeScript) - aggressive cache busting
+# Using timestamp to ensure fresh builds
+RUN BUILD_TIMESTAMP=$(date -u +%Y%m%d%H%M%S) && \
+    npm cache clean --force && \
+    if [ -f package-lock.json ]; then \
+      npm ci --prefer-offline=false && npm cache clean --force; \
     else \
-      npm install; \
-    fi
+      npm install --prefer-offline=false && npm cache clean --force; \
+    fi && \
+    echo "Cache bust: ${CACHE_BUST}" > /tmp/build-cache-bust.txt && \
+    echo "Build timestamp: ${BUILD_TIMESTAMP}" >> /tmp/build-cache-bust.txt && \
+    rm -rf /root/.npm /tmp/npm-* && \
+    cat /tmp/build-cache-bust.txt
 
 # Copy TypeScript configuration
 COPY tsconfig.json ./
@@ -48,11 +65,19 @@ COPY tsconfig.json ./
 # Copy source code
 COPY src ./src
 
-# ✨ CRITICAL: Add cache buster to force fresh code copy
-RUN echo "Cache bust: ${CACHE_BUST}" > /tmp/cache-bust.txt
+# ✨ CRITICAL: Add cache buster to force fresh code copy and build
+ARG CACHE_BUST=no-cache
+RUN BUILD_TIMESTAMP=$(date -u +%Y%m%d%H%M%S) && \
+    echo "Cache bust: ${CACHE_BUST}" > /tmp/cache-bust.txt && \
+    echo "Build timestamp: ${BUILD_TIMESTAMP}" >> /tmp/cache-bust.txt && \
+    echo "Source files count: $(find src -type f | wc -l)" >> /tmp/cache-bust.txt && \
+    cat /tmp/cache-bust.txt
 
 # Build TypeScript to JavaScript
-RUN npm run build
+RUN BUILD_TIMESTAMP=$(date -u +%Y%m%d%H%M%S) && \
+    npm run build && \
+    echo "Build completed at: ${BUILD_TIMESTAMP}" >> /tmp/cache-bust.txt && \
+    cat /tmp/cache-bust.txt
 
 # Remove dev dependencies after build
 RUN npm prune --production
