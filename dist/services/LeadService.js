@@ -34,15 +34,32 @@ class LeadService {
             const initialStatus = data.status && ['lead_added', 'contacted', 'interested'].includes(data.status)
                 ? data.status
                 : 'lead_added';
+            // Support both new (primaryCategory) and legacy (primarySkill) field names
+            const primarySkillCategory = (data.primaryCategory || data.primarySkill || '').trim();
+            const secondaryCategoryValue = (data.secondaryCategory || data.secondarySkill || '').trim();
+            if (!primarySkillCategory) {
+                throw new Error('Primary category is required');
+            }
+            if (!secondaryCategoryValue) {
+                throw new Error('Secondary category is required');
+            }
+            if (!data.experienceLevel) {
+                throw new Error('Experience level is required');
+            }
             // Map primary skill category to human-readable name
-            const primarySkillCategory = data.primarySkill.trim();
             const primarySkillNameMap = {
-                'home_services': 'Home Services',
-                'cleaning': 'Cleaning Services',
-                'delivery': 'Delivery & Transport',
+                'cleaning': 'Cleaning',
+                'handyperson': 'Handyperson',
+                'moving': 'Moving & Delivery',
+                'gardening': 'Gardening',
+                'business': 'Business Services',
+                'marketing': 'Marketing & Design',
+                'tech': 'Tech Support',
+                'tutoring': 'Tutoring',
+                'photography': 'Photography',
                 'beauty': 'Beauty & Wellness',
-                'tech': 'Tech Services',
-                'tutoring': 'Education & Tutoring',
+                'pet-care': 'Pet Care',
+                'events': 'Events & Entertainment',
                 'other': 'Other'
             };
             const primarySkillName = primarySkillNameMap[primarySkillCategory] || primarySkillCategory;
@@ -58,8 +75,13 @@ class LeadService {
                 address: data.address?.trim(),
                 pincode: data.pincode?.trim(),
                 primarySkill: primarySkillCategory,
+                secondarySkill: secondaryCategoryValue,
+                experienceLevel: data.experienceLevel,
+                workingDays: data.workingDays?.trim(),
+                preferredTimeSlot: data.preferredTimeSlot?.trim(),
                 source: data.source,
                 sourceDetails: data.sourceDetails?.trim(),
+                agentCampaignId: data.agentCampaignId?.trim(),
                 addedBy: data.addedBy,
                 addedByName: data.addedByName,
                 status: initialStatus,
@@ -88,7 +110,7 @@ class LeadService {
             // Log activity for lead creation
             await this.logActivity(leadId, 'status_change', `Lead created with status: lead_added`, data.addedBy, data.addedByName);
             // Log activity for primary skill assignment
-            await this.logActivity(leadId, 'skill_assigned', `Primary skill assigned: ${primarySkillName}`, data.addedBy, data.addedByName, undefined, { skillName: primarySkillName, category: primarySkillCategory });
+            await this.logActivity(leadId, 'skill_assigned', `Primary skill assigned: ${primarySkillName}`, data.addedBy, data.addedByName, { skillName: primarySkillName, category: primarySkillCategory });
             logger_1.default.info('Lead created', {
                 leadId,
                 name: data.name,
@@ -242,22 +264,35 @@ class LeadService {
             if (!(0, permissions_1.canUpdateStatus)(currentRole, currentStatus, newStatus)) {
                 throw new Error(`Role '${currentRole}' cannot update status from '${currentStatus}' to '${newStatus}'`);
             }
+            // ✅ Auto-transition: When marketing sets status to 'documents_submitted', 
+            // automatically transition to 'under_verification' so lead appears in verification queue
+            let finalStatus = newStatus;
+            if (newStatus === 'documents_submitted' && currentStatus !== 'under_verification' && currentStatus !== 'approved' && currentStatus !== 'activated') {
+                finalStatus = 'under_verification';
+                logger_1.default.info('Auto-transitioning lead from documents_submitted to under_verification', {
+                    leadId,
+                    changedBy: data.changedBy
+                });
+            }
             // Update status
-            lead.status = newStatus;
+            lead.status = finalStatus;
             lead.statusHistory.push({
-                status: newStatus,
+                status: finalStatus,
                 changedBy: data.changedBy,
                 changedByName: data.changedByName,
                 changedAt: new Date(),
-                notes: data.notes
+                notes: newStatus === 'documents_submitted' && finalStatus === 'under_verification'
+                    ? (data.notes || '') + ' (Auto-transitioned to verification queue)'
+                    : data.notes
             });
             const updatedLead = await lead.save();
             // Log activity
-            await this.logActivity(leadId, 'status_change', `Status changed from ${currentStatus} to ${newStatus}`, data.changedBy, data.changedByName, { oldStatus: currentStatus, newStatus });
+            await this.logActivity(leadId, 'status_change', `Status changed from ${currentStatus} to ${finalStatus}${finalStatus !== newStatus ? ` (requested: ${newStatus})` : ''}`, data.changedBy, data.changedByName, { oldStatus: currentStatus, newStatus: finalStatus, requestedStatus: newStatus });
             logger_1.default.info('Lead status updated', {
                 leadId,
                 oldStatus: currentStatus,
-                newStatus,
+                newStatus: finalStatus,
+                requestedStatus: newStatus,
                 changedBy: data.changedBy
             });
             return updatedLead;
@@ -328,7 +363,7 @@ class LeadService {
     /**
      * Verify or reject a document
      */
-    static async verifyDocument(leadId, documentIndex, status, verifiedBy, verifiedByName, rejectionReason) {
+    static async verifyDocument(leadId, documentIndex, status, verifiedBy, verifiedByName, rejectionReason, exactDetails) {
         try {
             const lead = await Lead_1.default.findOne({ leadId });
             if (!lead) {
@@ -343,6 +378,58 @@ class LeadService {
             document.verifiedAt = new Date();
             if (status === 'rejected' && rejectionReason) {
                 document.rejectionReason = rejectionReason;
+                // Clear exact details if rejecting
+                document.exactAadhaarNumber = undefined;
+                document.exactPANNumber = undefined;
+                document.exactAddressDetails = undefined;
+            }
+            else if (status === 'verified') {
+                // ✅ MANDATORY: Exact details must be provided when verifying Aadhaar, PAN, or Address Proof
+                if (document.type === 'aadhaar') {
+                    if (!exactDetails || !exactDetails.exactAadhaarNumber) {
+                        throw new Error('Exact Aadhaar number is mandatory when verifying Aadhaar document');
+                    }
+                    // Validate Aadhaar format (12 digits)
+                    const cleaned = exactDetails.exactAadhaarNumber.replace(/\D/g, '');
+                    if (cleaned.length !== 12) {
+                        throw new Error('Aadhaar number must be exactly 12 digits');
+                    }
+                    document.exactAadhaarNumber = cleaned;
+                    logger_1.default.info('Stored exact Aadhaar number for document verification', {
+                        leadId,
+                        documentIndex,
+                        masked: `${cleaned.slice(0, 4)} ${cleaned.slice(4, 8)} ${cleaned.slice(8)}`
+                    });
+                }
+                else if (document.type === 'pan') {
+                    if (!exactDetails || !exactDetails.exactPANNumber) {
+                        throw new Error('Exact PAN number is mandatory when verifying PAN document');
+                    }
+                    // Validate PAN format (10 characters: 5 letters, 4 digits, 1 letter)
+                    const cleaned = exactDetails.exactPANNumber.replace(/[^A-Z0-9]/gi, '').toUpperCase();
+                    if (cleaned.length !== 10 || !/^[A-Z]{5}\d{4}[A-Z]{1}$/.test(cleaned)) {
+                        throw new Error('PAN number must be in format ABCDE1234F');
+                    }
+                    document.exactPANNumber = cleaned;
+                    logger_1.default.info('Stored exact PAN number for document verification', {
+                        leadId,
+                        documentIndex,
+                        masked: `${cleaned.slice(0, 2)}XXXX${cleaned.slice(6)}`
+                    });
+                }
+                else if (document.type === 'address_proof') {
+                    if (!exactDetails || !exactDetails.exactAddressDetails) {
+                        throw new Error('Exact address details are mandatory when verifying Address Proof document');
+                    }
+                    if (exactDetails.exactAddressDetails.trim().length < 10) {
+                        throw new Error('Address details must be at least 10 characters long');
+                    }
+                    document.exactAddressDetails = exactDetails.exactAddressDetails.trim();
+                    logger_1.default.info('Stored exact address details for document verification', {
+                        leadId,
+                        documentIndex
+                    });
+                }
             }
             const updatedLead = await lead.save();
             // Log activity

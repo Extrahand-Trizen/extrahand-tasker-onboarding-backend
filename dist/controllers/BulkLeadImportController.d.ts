@@ -8,7 +8,7 @@ export declare class BulkLeadImportController {
     static bulkImport(req: AdminRequest, res: Response): Promise<void>;
     /**
      * Download CSV template
-     * GET /api/v1/admin/caos/leads/bulk-import/template
+     * GET /api/v1/admin/caos/leads/bulk-import/template?primaryCategory=handyperson&secondaryCategory=Plumbing
      */
     static downloadTemplate(req: AdminRequest, res: Response): Promise<void>;
     /**
@@ -21,5 +21,10 @@ export declare class BulkLeadImportController {
      * GET /api/v1/admin/caos/leads/bulk-import/:importId
      */
     static getImportDetails(req: AdminRequest, res: Response): Promise<void>;
+    /**
+     * Export UIDs from import (CSV format with uid, name, phone)
+     * GET /api/v1/admin/caos/leads/bulk-import/:importId/export-uids
+     */
+    static exportUids(req: AdminRequest, res: Response): Promise<void>;
 }
 //# sourceMappingURL=BulkLeadImportController.d.ts.map

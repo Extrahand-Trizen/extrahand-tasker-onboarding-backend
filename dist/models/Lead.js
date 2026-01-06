@@ -86,6 +86,26 @@ const LeadSchema = new mongoose_1.Schema({
         type: String,
         trim: true
     },
+    agentCampaignId: {
+        type: String,
+        trim: true
+    },
+    secondarySkill: {
+        type: String,
+        trim: true
+    },
+    experienceLevel: {
+        type: String,
+        enum: ['beginner', 'intermediate', 'experienced']
+    },
+    workingDays: {
+        type: String,
+        trim: true
+    },
+    preferredTimeSlot: {
+        type: String,
+        trim: true
+    },
     addedBy: {
         type: String,
         required: true,
@@ -169,7 +189,12 @@ const LeadSchema = new mongoose_1.Schema({
             // Manual entry fields (masked for compliance)
             aadhaarNumber: String, // Masked: XXXX XXXX 1234
             panNumber: String, // Masked: ABXXXX1234
-            addressDetails: String // Manual address entry
+            addressDetails: String, // Manual address entry
+            // ✅ Exact details (unmasked) - entered by operations/admin during verification
+            // These are used during account creation to store in verification service
+            exactAadhaarNumber: String, // Full 12-digit Aadhaar: 1234 5678 9012 (stored securely)
+            exactPANNumber: String, // Full PAN: ABCDE1234F (stored securely)
+            exactAddressDetails: String // Full address details (unmasked, stored securely)
         }],
     verificationStatus: {
         aadhaar: {

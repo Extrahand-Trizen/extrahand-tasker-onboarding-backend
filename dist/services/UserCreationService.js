@@ -133,7 +133,7 @@ class UserCreationService {
             email: null,
             phone: this.formatPhone(userData.phone),
             userType: 'individual',
-            roles: ['tasker'],
+            roles: ['helper'],
             location: location,
             isAdminVerified: metadata.isAdminVerified,
             phoneVerified: metadata.phoneVerified,
@@ -144,12 +144,12 @@ class UserCreationService {
             isBankVerified: false,
             isFaceVerified: false,
             skills: {
-                primaryCategory: this.validatePrimaryCategory(userData.primarySkill),
+                primaryCategory: this.validatePrimaryCategory(userData.primaryCategory || userData.primarySkill),
                 list: skills,
                 updatedAt: new Date()
             },
             roleVerifications: {
-                tasker: {
+                helper: {
                     canAcceptTasks: false,
                     requirements: {
                         aadhaar: false,
@@ -187,13 +187,13 @@ class UserCreationService {
         return profileData;
     }
     /**
-     * Create tasker user in Firebase + Profile (legacy method for single user)
+     * Create helper user in Firebase + Profile (legacy method for single user)
      */
-    static async createTasker(userData) {
+    static async createHelper(userData) {
         try {
             // 1. Generate temporary email (required by Firebase)
             const phoneDigits = userData.phone.replace(/\D/g, '');
-            const tempEmail = `tasker_${phoneDigits}_${Date.now()}@extrahand.temp`;
+            const tempEmail = `helper_${phoneDigits}_${Date.now()}@extrahand.temp`;
             const tempPassword = this.generateTempPassword();
             // 2. Format phone number (E.164 format)
             const formattedPhone = this.formatPhone(userData.phone);
@@ -211,7 +211,7 @@ class UserCreationService {
                 isAdminVerified: true,
                 phoneVerified: false
             });
-            logger_1.default.info('Tasker created via bulk upload', {
+            logger_1.default.info('Helper created via bulk upload', {
                 uid: userRecord.uid,
                 phone: formattedPhone,
                 name: userData.name
@@ -219,11 +219,11 @@ class UserCreationService {
             return userRecord.uid;
         }
         catch (error) {
-            logger_1.default.error('Failed to create tasker', {
+            logger_1.default.error('Failed to create helper', {
                 error: error.message,
                 userData: { name: userData.name, phone: userData.phone }
             });
-            throw new Error(`Failed to create tasker: ${error.message}`);
+            throw new Error(`Failed to create helper: ${error.message}`);
         }
     }
     /**
@@ -252,7 +252,7 @@ class UserCreationService {
                 email: null,
                 phone: this.formatPhone(userData.phone),
                 userType: 'individual',
-                roles: ['tasker'],
+                roles: ['helper'],
                 // Location - matches Profile model
                 location: location,
                 // Admin verification flags
@@ -267,13 +267,13 @@ class UserCreationService {
                 isFaceVerified: false,
                 // Skills - matches exact Profile model structure
                 skills: {
-                    primaryCategory: this.validatePrimaryCategory(userData.primarySkill),
+                    primaryCategory: this.validatePrimaryCategory(userData.primaryCategory || userData.primarySkill),
                     list: skills,
                     updatedAt: new Date()
                 },
                 // Role verifications - matches Profile model
                 roleVerifications: {
-                    tasker: {
+                    helper: {
                         canAcceptTasks: false, // Cannot accept until verified
                         requirements: {
                             aadhaar: false,
@@ -331,40 +331,100 @@ class UserCreationService {
         }
     }
     /**
+     * Map experience level to years of experience range
+     */
+    static mapExperienceLevelToYears(experienceLevel, yearsOfExperience) {
+        // If yearsOfExperience is provided, use it
+        if (yearsOfExperience !== undefined && yearsOfExperience !== null && !isNaN(yearsOfExperience)) {
+            return yearsOfExperience;
+        }
+        // Otherwise, map experience level to a representative value
+        const level = (experienceLevel || '').toLowerCase();
+        switch (level) {
+            case 'beginner':
+                return 1; // 0-1 years, use 1 as representative
+            case 'intermediate':
+                return 3; // 2-4 years, use 3 as representative
+            case 'experienced':
+                return 6; // 5+ years, use 6 as representative
+            default:
+                return 1; // Default to beginner
+        }
+    }
+    /**
      * Parse skills from CSV - matches Profile model skills.list structure
      */
     static parseSkills(userData) {
-        const skillsList = userData.skillsList || '';
-        if (!skillsList)
-            return [];
-        // Support comma or pipe separated
-        const skillNames = skillsList.split(/[,|]/).map(s => s.trim()).filter(Boolean);
-        const primaryCategory = this.validatePrimaryCategory(userData.primarySkill);
-        return skillNames.map(skillName => ({
-            name: skillName,
-            category: primaryCategory, // Use primaryCategory as category for each skill
-            level: 'intermediate', // Default level
-            certified: false,
-            verified: false
-        }));
+        // Use secondaryCategory as the skill name, or fall back to primaryCategory
+        const skillName = userData.secondaryCategory || userData.secondarySkill || userData.primarySkill || userData.primaryCategory || 'General Service';
+        const primaryCategory = this.validatePrimaryCategory(userData.primaryCategory || userData.primarySkill);
+        // Map experience level to years of experience
+        const yearsOfExperience = this.mapExperienceLevelToYears(userData.experienceLevel, userData.yearsOfExperience);
+        return [{
+                name: skillName,
+                category: primaryCategory,
+                yearsOfExperience: yearsOfExperience,
+                certified: false,
+                verified: false
+            }];
     }
     /**
      * Validate primaryCategory against Profile model enum
      */
     static validatePrimaryCategory(category) {
-        const validCategories = ['home_services', 'cleaning', 'delivery', 'beauty', 'tech', 'tutoring', 'other'];
+        const validCategories = [
+            'cleaning',
+            'handyperson',
+            'moving',
+            'gardening',
+            'business',
+            'marketing',
+            'tech',
+            'tutoring',
+            'photography',
+            'beauty',
+            'pet-care',
+            'events',
+            'other'
+        ];
         const normalized = category?.toLowerCase() || 'other';
         // Map common variations to valid categories
         const categoryMap = {
-            'home services': 'home_services',
-            'home-services': 'home_services',
-            'home_services': 'home_services',
+            // Legacy mappings for backward compatibility
+            'home services': 'handyperson',
+            'home-services': 'handyperson',
+            'home_services': 'handyperson',
+            'delivery': 'moving',
+            'delivery & transport': 'moving',
+            'delivery and transport': 'moving',
+            // Current categories
             'cleaning': 'cleaning',
-            'delivery': 'delivery',
-            'beauty': 'beauty',
+            'handyperson': 'handyperson',
+            'handy person': 'handyperson',
+            'moving': 'moving',
+            'moving & delivery': 'moving',
+            'moving and delivery': 'moving',
+            'gardening': 'gardening',
+            'business': 'business',
+            'business services': 'business',
+            'marketing': 'marketing',
+            'marketing & design': 'marketing',
+            'marketing and design': 'marketing',
             'tech': 'tech',
+            'tech support': 'tech',
             'technology': 'tech',
             'tutoring': 'tutoring',
+            'education & tutoring': 'tutoring',
+            'education and tutoring': 'tutoring',
+            'photography': 'photography',
+            'beauty': 'beauty',
+            'beauty & wellness': 'beauty',
+            'beauty and wellness': 'beauty',
+            'pet care': 'pet-care',
+            'pet-care': 'pet-care',
+            'events': 'events',
+            'events & entertainment': 'events',
+            'events and entertainment': 'events',
             'other': 'other'
         };
         const mapped = categoryMap[normalized] || 'other';
@@ -459,7 +519,7 @@ class UserCreationService {
         if (userData.skillsList) {
             const skills = this.parseSkills(userData);
             updatePayload.skills = {
-                primaryCategory: this.validatePrimaryCategory(userData.primarySkill),
+                primaryCategory: this.validatePrimaryCategory(userData.primaryCategory || userData.primarySkill),
                 list: skills,
                 updatedAt: new Date()
             };

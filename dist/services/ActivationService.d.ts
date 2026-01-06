@@ -24,7 +24,8 @@ export declare class ActivationService {
         }>;
     }>;
     /**
-     * Store masked Aadhaar/PAN data in verification service
+     * Store exact Aadhaar/PAN/Address data in verification service
+     * Uses exact (unmasked) details entered during document verification
      */
     private static storeVerificationData;
     /**

@@ -216,6 +216,36 @@ class ApprovalController {
             });
         }
     }
+    /**
+     * Get verification queue (leads with pending documents)
+     * GET /api/v1/admin/caos/leads/verification-queue
+     */
+    static async getVerificationQueue(req, res) {
+        try {
+            const { documentType, status, city, page, limit } = req.query;
+            const result = await ApprovalService_1.ApprovalService.getVerificationQueue({
+                documentType: documentType,
+                status: status,
+                city: city,
+                page: page ? parseInt(page) : undefined,
+                limit: limit ? parseInt(limit) : undefined
+            });
+            res.json({
+                success: true,
+                data: result
+            });
+        }
+        catch (error) {
+            logger_1.default.error('Error fetching verification queue', {
+                error: error.message,
+                userId: req.user?.uid
+            });
+            res.status(500).json({
+                success: false,
+                error: error.message || 'Failed to fetch verification queue'
+            });
+        }
+    }
 }
 exports.ApprovalController = ApprovalController;
 //# sourceMappingURL=ApprovalController.js.map

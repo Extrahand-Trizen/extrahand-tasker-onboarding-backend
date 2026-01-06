@@ -10,7 +10,7 @@ exports.PERMISSIONS = {
         canCreateLead: true,
         canUpdateLead: true,
         canDeleteLead: false,
-        canUpdateStatus: ['lead_added', 'contacted', 'interested'],
+        canUpdateStatus: ['lead_added', 'contacted', 'interested', 'documents_submitted'], // ✅ Marketing can move up to documents_submitted
         canViewDocuments: true,
         canUploadDocuments: false,
         canVerifyDocuments: false,
@@ -115,12 +115,13 @@ function canUpdateStatus(role, currentStatus, newStatus) {
         return currentStatus === 'approved'; // Can only activate from approved status
     }
     if (Array.isArray(permissions.canUpdateStatus)) {
-        // Marketing can only move forward in pipeline
+        // Marketing can only move forward in pipeline (up to documents_submitted)
         if (role === 'marketing') {
-            const statusOrder = ['lead_added', 'contacted', 'interested'];
+            const statusOrder = ['lead_added', 'contacted', 'interested', 'documents_submitted'];
             const currentIndex = statusOrder.indexOf(currentStatus);
             const newIndex = statusOrder.indexOf(newStatus);
-            return currentIndex >= 0 && newIndex >= 0 && newIndex > currentIndex;
+            // ✅ Allow moving forward in pipeline, or staying at same status
+            return currentIndex >= 0 && newIndex >= 0 && newIndex >= currentIndex && newIndex <= statusOrder.length - 1;
         }
         return permissions.canUpdateStatus.includes(newStatus);
     }

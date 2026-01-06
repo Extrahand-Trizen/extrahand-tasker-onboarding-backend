@@ -1,5 +1,5 @@
 import mongoose, { Document } from 'mongoose';
-export interface IBulkImport extends Document {
+export interface IBulkImport extends Omit<Document, 'errors'> {
     importId: string;
     adminUid: string;
     fileName: string;

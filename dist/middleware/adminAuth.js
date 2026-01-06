@@ -27,6 +27,8 @@ const adminAuthMiddleware = async (req, res, next) => {
                 name: decodedToken.name,
                 role: decodedToken.role || 'marketing' // Default role, can be set in Firebase custom claims
             };
+            // Set user alias for backward compatibility
+            req.user = req.admin;
             logger_1.default.debug('Admin authenticated', {
                 uid: decodedToken.uid,
                 email: decodedToken.email,

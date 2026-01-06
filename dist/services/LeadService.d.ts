@@ -8,9 +8,16 @@ export interface CreateLeadData {
     state?: string;
     address?: string;
     pincode?: string;
-    primarySkill: string;
+    primaryCategory?: string;
+    primarySkill?: string;
+    secondaryCategory?: string;
+    secondarySkill?: string;
+    experienceLevel: 'beginner' | 'intermediate' | 'experienced';
+    workingDays?: string;
+    preferredTimeSlot?: string;
     source: LeadSource;
     sourceDetails?: string;
+    agentCampaignId?: string;
     addedBy: string;
     addedByName?: string;
     status?: LeadStatus;
@@ -29,6 +36,7 @@ export interface UpdateLeadData {
     city?: string;
     state?: string;
     address?: string;
+    pincode?: string;
     primarySkill?: string;
     source?: LeadSource;
     sourceDetails?: string;
@@ -96,7 +104,11 @@ export declare class LeadService {
     /**
      * Verify or reject a document
      */
-    static verifyDocument(leadId: string, documentIndex: number, status: 'verified' | 'rejected', verifiedBy: string, verifiedByName?: string, rejectionReason?: string): Promise<ILead | null>;
+    static verifyDocument(leadId: string, documentIndex: number, status: 'verified' | 'rejected', verifiedBy: string, verifiedByName?: string, rejectionReason?: string, exactDetails?: {
+        exactAadhaarNumber?: string;
+        exactPANNumber?: string;
+        exactAddressDetails?: string;
+    }): Promise<ILead | null>;
     /**
      * Delete a document
      */

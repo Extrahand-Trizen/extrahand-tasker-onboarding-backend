@@ -20,6 +20,9 @@ export interface ILeadDocument {
     aadhaarNumber?: string;
     panNumber?: string;
     addressDetails?: string;
+    exactAadhaarNumber?: string;
+    exactPANNumber?: string;
+    exactAddressDetails?: string;
 }
 export interface ILeadSkill {
     name: string;
@@ -74,6 +77,11 @@ export interface ILead extends Document {
     pincode?: string;
     source: LeadSource;
     sourceDetails?: string;
+    agentCampaignId?: string;
+    secondarySkill?: string;
+    experienceLevel?: 'beginner' | 'intermediate' | 'experienced';
+    workingDays?: string;
+    preferredTimeSlot?: string;
     addedBy: string;
     addedByName?: string;
     status: LeadStatus;

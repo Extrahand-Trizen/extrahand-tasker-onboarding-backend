@@ -19,24 +19,26 @@ class BulkUploadController {
             if (!req.file) {
                 return res.status(400).json({
                     success: false,
-                    error: 'File is required'
+                    error: "File is required",
                 });
             }
-            const adminUid = req.headers['x-user-id'];
+            const adminUid = req.headers["x-user-id"];
             if (!adminUid) {
                 return res.status(401).json({
                     success: false,
-                    error: 'Admin UID required'
+                    error: "Admin UID required",
                 });
             }
-            const result = await BulkUploadService_1.BulkUploadService.processBulkUpload(req.file.buffer, req.file.originalname, adminUid);
+            const primaryCategory = req.body.primaryCategory;
+            const secondaryCategory = req.body.secondaryCategory;
+            const result = await BulkUploadService_1.BulkUploadService.processBulkUpload(req.file.buffer, req.file.originalname, adminUid, primaryCategory, secondaryCategory);
             res.json({
                 success: true,
-                data: result
+                data: result,
             });
         }
         catch (error) {
-            logger_1.default.error('Bulk upload error', { error: error.message });
+            logger_1.default.error("Bulk upload error", { error: error.message });
             next(error);
         }
     }
@@ -44,29 +46,96 @@ class BulkUploadController {
      * Download CSV template based on operation type
      */
     static async downloadTemplate(req, res) {
-        const operationType = req.query.operation || 'create';
-        let csv = '';
-        if (operationType === 'create') {
-            csv = `name,phone,email,address,city,state,pincode,primarySkill
-John Doe,+919876543210,john@example.com,123 Main St,Mumbai,Maharashtra,400001,home_services
-Raj Kumar,+919876543211,raj@example.com,456 Worker Lane,Delhi,Delhi,110001,delivery`;
+        const operationType = req.query.operation || "create";
+        const primaryCategory = req.query.primaryCategory;
+        const secondaryCategory = req.query.secondaryCategory;
+        let csv = "";
+        if (operationType === "create") {
+            // If categories are provided, exclude them from template (they'll be applied automatically)
+            const includeCategoryColumns = !primaryCategory || !secondaryCategory;
+            const headers = [
+                "Full Name",
+                "Phone Number",
+                "Email (optional)",
+                "City / Area",
+                "State (optional)",
+                "Address",
+                "Pincode",
+                ...(includeCategoryColumns
+                    ? ["Primary Category", "Secondary Category"]
+                    : []),
+                "Experience Level (beginner/intermediate/experienced)",
+                "Years of Experience (optional)",
+                "Working Days (optional)",
+                "Preferred Time Slot (optional)",
+                "Source (referral/campaign/walk-in/agent/other)",
+            ];
+            const exampleRow1 = [
+                "John Doe",
+                "9876543210",
+                "john@example.com",
+                "Delhi",
+                "Delhi",
+                "123 Main Street Connaught Place",
+                "110001",
+                ...(includeCategoryColumns
+                    ? [primaryCategory || "handyperson", secondaryCategory || "Plumbing"]
+                    : []),
+                "intermediate",
+                "3",
+                "Mon-Fri",
+                "Morning",
+                "referral",
+            ];
+            const exampleRow2 = [
+                "Raj Kumar",
+                "9876543211",
+                "raj@example.com",
+                "Mumbai",
+                "Maharashtra",
+                "456 Worker Lane Andheri West",
+                "400053",
+                ...(includeCategoryColumns
+                    ? [primaryCategory || "handyperson", secondaryCategory || "Plumbing"]
+                    : []),
+                "experienced",
+                "5",
+                "Mon-Sat",
+                "Afternoon",
+                "campaign",
+            ];
+            // Add note at the top if categories are pre-selected
+            if (primaryCategory && secondaryCategory) {
+                csv += `# Template for ${primaryCategory} - ${secondaryCategory}\n`;
+                csv += `# Categories are pre-selected and will be applied to all rows automatically\n`;
+                csv += `# You don't need to include category columns in your CSV\n`;
+            }
+            csv += headers.join(",") + "\n";
+            csv +=
+                exampleRow1
+                    .map((val, idx) => (idx === 1 || idx === 6 ? `"${val}"` : val))
+                    .join(",") + "\n";
+            csv += exampleRow2
+                .map((val, idx) => (idx === 1 || idx === 6 ? `"${val}"` : val))
+                .join(",");
         }
-        else if (operationType === 'update') {
-            csv = `operation,uid,name,phone,email,address,city,state,pincode,primarySkill,isActive
-update,firebase-uid-123,John Updated,+919876543210,john@example.com,456 New St,Mumbai,Maharashtra,400002,home_services,true
-update,firebase-uid-456,Jane Updated,+919876543211,jane@example.com,789 Updated Lane,Delhi,Delhi,110002,delivery,false`;
+        else if (operationType === "update") {
+            csv = `operation,uid,name,phone,email (optional),address,city,state (optional),pincode,primaryCategory,secondaryCategory,experienceLevel,yearsOfExperience (optional),workingDays (optional),preferredTimeSlot (optional),isActive
+update,firebase-uid-123,John Updated,9876543210,john@example.com,456 New St,Mumbai,Maharashtra,400002,handyperson,Electrical,intermediate,3,Mon-Fri,Morning,true
+update,firebase-uid-456,Jane Updated,9876543211,jane@example.com,789 Updated Lane,Delhi,Delhi,110002,cleaning,Deep Cleaning,experienced,6,Mon-Sat,Afternoon,false`;
         }
-        else if (operationType === 'delete') {
+        else if (operationType === "delete") {
             csv = `operation,uid,reason
 delete,firebase-uid-123,User requested deletion
 delete,firebase-uid-456,Account suspended`;
         }
         else {
-            csv = `name,phone,email,address,city,state,pincode,primarySkill
-John Doe,+919876543210,john@example.com,123 Main St,Mumbai,Maharashtra,400001,home_services`;
+            csv = `Full Name,Phone Number,Email (optional),City / Area,State (optional),Address,Pincode,Primary Category,Secondary Category,Experience Level (beginner/intermediate/experienced),Years of Experience (optional),Working Days (optional),Preferred Time Slot (optional),Source (referral/campaign/walk-in/agent/other)
+John Doe,9876543210,john@example.com,Delhi,Delhi,123 Main Street Connaught Place,110001,handyperson,Plumbing,intermediate,3,Mon-Fri,Morning,referral
+Raj Kumar,9876543211,raj@example.com,Mumbai,Maharashtra,456 Worker Lane Andheri West,400053,cleaning,House Cleaning,experienced,5,Mon-Sat,Afternoon,campaign`;
         }
-        res.setHeader('Content-Type', 'text/csv');
-        res.setHeader('Content-Disposition', `attachment; filename=tasker-${operationType}-template.csv`);
+        res.setHeader("Content-Type", "text/csv");
+        res.setHeader("Content-Disposition", `attachment; filename=tasker-${operationType}-template.csv`);
         res.send(csv);
     }
     /**
@@ -74,7 +143,7 @@ John Doe,+919876543210,john@example.com,123 Main St,Mumbai,Maharashtra,400001,ho
      */
     static async getImportHistory(req, res, next) {
         try {
-            const adminUid = req.headers['x-user-id'];
+            const adminUid = req.headers["x-user-id"];
             const page = parseInt(req.query.page) || 1;
             const limit = parseInt(req.query.limit) || 20;
             const skip = (page - 1) * limit;
@@ -84,7 +153,7 @@ John Doe,+919876543210,john@example.com,123 Main St,Mumbai,Maharashtra,400001,ho
                     .skip(skip)
                     .limit(limit)
                     .lean(),
-                BulkImport_1.default.countDocuments({ adminUid })
+                BulkImport_1.default.countDocuments({ adminUid }),
             ]);
             res.json({
                 success: true,
@@ -94,9 +163,9 @@ John Doe,+919876543210,john@example.com,123 Main St,Mumbai,Maharashtra,400001,ho
                         page,
                         limit,
                         total,
-                        totalPages: Math.ceil(total / limit)
-                    }
-                }
+                        totalPages: Math.ceil(total / limit),
+                    },
+                },
             });
         }
         catch (error) {
@@ -113,12 +182,12 @@ John Doe,+919876543210,john@example.com,123 Main St,Mumbai,Maharashtra,400001,ho
             if (!importRecord) {
                 return res.status(404).json({
                     success: false,
-                    error: 'Import not found'
+                    error: "Import not found",
                 });
             }
             res.json({
                 success: true,
-                data: importRecord
+                data: importRecord,
             });
         }
         catch (error) {
@@ -138,7 +207,7 @@ John Doe,+919876543210,john@example.com,123 Main St,Mumbai,Maharashtra,400001,ho
             if (!importRecord) {
                 return res.status(404).json({
                     success: false,
-                    error: 'Import not found'
+                    error: "Import not found",
                 });
             }
             // importedUserIds now contains leadIds (for backward compatibility)
@@ -147,21 +216,21 @@ John Doe,+919876543210,john@example.com,123 Main St,Mumbai,Maharashtra,400001,ho
             const paginatedIds = leadIds.slice(skip, skip + limit);
             // Fetch lead details for paginated leadIds
             const leads = await Lead_1.default.find({ leadId: { $in: paginatedIds } })
-                .select('leadId name phone email city state address pincode primarySkill status creationMethod')
+                .select("leadId name phone email city state address pincode primarySkill status creationMethod")
                 .lean();
             // Map leads to user format for backward compatibility
-            const users = leads.map(lead => ({
+            const users = leads.map((lead) => ({
                 uid: lead.leadId, // Using leadId as uid for display
-                name: lead.name || '',
-                phone: lead.phone || '',
-                email: lead.email || '',
-                city: lead.city || '',
-                state: lead.state || '',
-                address: lead.address || '',
-                pincode: lead.pincode || '',
-                primarySkill: lead.primarySkill || '',
+                name: lead.name || "",
+                phone: lead.phone || "",
+                email: lead.email || "",
+                city: lead.city || "",
+                state: lead.state || "",
+                address: lead.address || "",
+                pincode: lead.pincode || "",
+                primarySkill: lead.primarySkill || "",
                 status: lead.status,
-                creationMethod: lead.creationMethod
+                creationMethod: lead.creationMethod,
             }));
             res.json({
                 success: true,
@@ -171,13 +240,13 @@ John Doe,+919876543210,john@example.com,123 Main St,Mumbai,Maharashtra,400001,ho
                         page,
                         limit,
                         total,
-                        totalPages: Math.ceil(total / limit)
-                    }
-                }
+                        totalPages: Math.ceil(total / limit),
+                    },
+                },
             });
         }
         catch (error) {
-            logger_1.default.error('Get imported users error', { error: error.message });
+            logger_1.default.error("Get imported users error", { error: error.message });
             next(error);
         }
     }
@@ -191,7 +260,7 @@ John Doe,+919876543210,john@example.com,123 Main St,Mumbai,Maharashtra,400001,ho
             if (!importRecord) {
                 return res.status(404).json({
                     success: false,
-                    error: 'Import not found'
+                    error: "Import not found",
                 });
             }
             // Fetch user details for all UIDs
@@ -205,45 +274,45 @@ John Doe,+919876543210,john@example.com,123 Main St,Mumbai,Maharashtra,400001,ho
                     try {
                         const response = await axios_1.default.get(`${env_1.env.USER_SERVICE_URL}/api/v1/profiles/${uid}`, {
                             headers: {
-                                'X-Service-Auth': env_1.env.SERVICE_AUTH_TOKEN,
-                                'X-Service-Name': 'admin-service'
-                            }
+                                "X-Service-Auth": env_1.env.SERVICE_AUTH_TOKEN,
+                                "X-Service-Name": "admin-service",
+                            },
                         });
                         return {
                             uid,
-                            name: response.data?.profile?.name || response.data?.name || '',
-                            phone: response.data?.profile?.phone || response.data?.phone || ''
+                            name: response.data?.profile?.name || response.data?.name || "",
+                            phone: response.data?.profile?.phone || response.data?.phone || "",
                         };
                     }
                     catch (error) {
                         // If profile not found, just return uid
-                        return { uid, name: '', phone: '' };
+                        return { uid, name: "", phone: "" };
                     }
                 }));
                 batchResults.forEach((result, index) => {
-                    if (result.status === 'fulfilled') {
+                    if (result.status === "fulfilled") {
                         userDetails.push(result.value);
                     }
                     else {
                         // If failed, still include the UID
                         const uid = batch[index];
-                        userDetails.push({ uid, name: '', phone: '' });
+                        userDetails.push({ uid, name: "", phone: "" });
                     }
                 });
             }
             // Generate CSV
-            let csv = 'uid,name,phone\n';
+            let csv = "uid,name,phone\n";
             userDetails.forEach((user) => {
-                const name = (user.name || '').replace(/"/g, '""'); // Escape quotes
-                const phone = (user.phone || '').replace(/"/g, '""');
+                const name = (user.name || "").replace(/"/g, '""'); // Escape quotes
+                const phone = (user.phone || "").replace(/"/g, '""');
                 csv += `"${user.uid}","${name}","${phone}"\n`;
             });
-            res.setHeader('Content-Type', 'text/csv');
-            res.setHeader('Content-Disposition', `attachment; filename=user-uids-${importId}.csv`);
+            res.setHeader("Content-Type", "text/csv");
+            res.setHeader("Content-Disposition", `attachment; filename=user-uids-${importId}.csv`);
             res.send(csv);
         }
         catch (error) {
-            logger_1.default.error('Export UIDs error', { error: error.message });
+            logger_1.default.error("Export UIDs error", { error: error.message });
             next(error);
         }
     }

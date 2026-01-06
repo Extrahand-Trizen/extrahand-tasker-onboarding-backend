@@ -131,22 +131,38 @@ class ActivationService {
                 }
             }
             // Extract Aadhaar and PAN from lead documents
+            // ✅ Extract verified documents for onboarding activation
+            // This is ONLY for the onboarding system - doesn't affect mobile/website verification flows
             const aadhaarDoc = lead.documents?.find(doc => doc.type === 'aadhaar' && doc.status === 'verified');
             const panDoc = lead.documents?.find(doc => doc.type === 'pan' && doc.status === 'verified');
-            const hasAadhaar = !!aadhaarDoc?.aadhaarNumber;
-            const hasPAN = !!panDoc?.panNumber;
-            // Get masked values (already masked if manually entered, or we'll mask them)
-            let maskedAadhaar;
-            let maskedPAN;
-            if (hasAadhaar && aadhaarDoc?.aadhaarNumber) {
-                // If already masked (format: XXXX XXXX 1234), use as is
-                // Otherwise, it shouldn't happen but we'll handle it
-                maskedAadhaar = aadhaarDoc.aadhaarNumber;
-            }
-            if (hasPAN && panDoc?.panNumber) {
-                // If already masked (format: ABXXXX1234), use as is
-                maskedPAN = panDoc.panNumber;
-            }
+            const addressDoc = lead.documents?.find(doc => doc.type === 'address_proof' && doc.status === 'verified');
+            // ✅ Check if verified documents exist (for setting profile flags)
+            // Set flags based on document existence and verification status, not just exact details
+            const hasAadhaar = !!aadhaarDoc && aadhaarDoc.status === 'verified';
+            const hasPAN = !!panDoc && panDoc.status === 'verified';
+            const hasAddress = !!addressDoc && addressDoc.status === 'verified';
+            // ✅ Extract exact details (unmasked) for storage in verification service
+            // Prefer exact details (entered during verification) over masked values
+            // Exact details are entered by operations/admin during document verification
+            const exactAadhaar = aadhaarDoc?.exactAadhaarNumber || aadhaarDoc?.aadhaarNumber;
+            const exactPAN = panDoc?.exactPANNumber || panDoc?.panNumber;
+            const exactAddress = addressDoc?.exactAddressDetails || addressDoc?.addressDetails;
+            logger_1.default.info('Extracting verification data for account creation (onboarding flow only)', {
+                leadId,
+                hasAadhaarDoc: !!aadhaarDoc,
+                hasPanDoc: !!panDoc,
+                hasAddressDoc: !!addressDoc,
+                hasAadhaar: hasAadhaar,
+                hasPAN: hasPAN,
+                hasAddress: hasAddress,
+                hasExactAadhaar: !!aadhaarDoc?.exactAadhaarNumber,
+                hasExactPAN: !!panDoc?.exactPANNumber,
+                hasExactAddress: !!addressDoc?.exactAddressDetails,
+                hasMaskedAadhaar: !!aadhaarDoc?.aadhaarNumber,
+                hasMaskedPAN: !!panDoc?.panNumber,
+                aadhaarDocStatus: aadhaarDoc?.status,
+                panDocStatus: panDoc?.status
+            });
             // Create Profile in MongoDB via User Service API
             const profileData = {
                 uid: userRecord.uid,
@@ -159,7 +175,8 @@ class ActivationService {
                 location: {
                     city: lead.city,
                     state: lead.state || null,
-                    address: lead.address || null
+                    // ✅ Use exact address from verified document if available, otherwise use lead address
+                    address: exactAddress || lead.address || null
                 },
                 skills: {
                     list: lead.skills.map(skill => ({
@@ -189,12 +206,16 @@ class ActivationService {
                 });
                 profileCreated = true;
                 logger_1.default.info('Profile created for lead', { leadId, firebaseUid: userRecord.uid });
-                // Store masked Aadhaar/PAN in verification service if they exist
-                if (hasAadhaar || hasPAN) {
+                // ✅ Store exact details (unmasked) in verification service
+                // These will be used for user verification and profile creation
+                if (hasAadhaar || hasPAN || hasAddress) {
                     try {
+                        // ✅ Store exact details (unmasked) in verification service
+                        // These will be used for user verification and profile creation
                         await this.storeVerificationData(userRecord.uid, {
-                            aadhaarNumber: maskedAadhaar,
-                            panNumber: maskedPAN
+                            aadhaarNumber: exactAadhaar,
+                            panNumber: exactPAN,
+                            addressDetails: exactAddress
                         });
                         logger_1.default.info('Verification data stored for activated lead', {
                             leadId,
@@ -299,7 +320,8 @@ class ActivationService {
         return { success, failed };
     }
     /**
-     * Store masked Aadhaar/PAN data in verification service
+     * Store exact Aadhaar/PAN/Address data in verification service
+     * Uses exact (unmasked) details entered during document verification
      */
     static async storeVerificationData(uid, data) {
         if (!env_1.env.VERIFICATION_SERVICE_URL) {
@@ -309,12 +331,36 @@ class ActivationService {
         const verificationRecords = [];
         // Process Aadhaar
         if (data.aadhaarNumber) {
-            verificationRecords.push({ type: 'aadhaar', maskedValue: data.aadhaarNumber });
+            // ✅ Store exact value (verification service will handle masking if needed)
+            // Note: Verification service currently expects maskedValue, but we're sending exact
+            // The service should be updated to accept exact values, or we mask here
+            // For now, if it's already masked (contains X), use as is, otherwise mask it
+            let aadhaarValue = data.aadhaarNumber;
+            if (!aadhaarValue.includes('X')) {
+                // It's an exact value, mask it: XXXX XXXX 1234
+                const cleaned = aadhaarValue.replace(/\D/g, '');
+                if (cleaned.length === 12) {
+                    aadhaarValue = `XXXX XXXX ${cleaned.slice(8)}`;
+                }
+            }
+            verificationRecords.push({ type: 'aadhaar', maskedValue: aadhaarValue });
         }
         // Process PAN
         if (data.panNumber) {
-            verificationRecords.push({ type: 'pan', maskedValue: data.panNumber });
+            // ✅ Store exact value (verification service will handle masking if needed)
+            let panValue = data.panNumber;
+            if (!panValue.includes('X')) {
+                // It's an exact value, mask it: ABXXXX1234
+                const cleaned = panValue.replace(/[^A-Z0-9]/gi, '').toUpperCase();
+                if (cleaned.length === 10) {
+                    panValue = `${cleaned.slice(0, 2)}XXXX${cleaned.slice(6)}`;
+                }
+            }
+            verificationRecords.push({ type: 'pan', maskedValue: panValue });
         }
+        // ✅ Note: Address details are not stored in verification service currently
+        // They are stored in the profile's location.address field
+        // If verification service needs address, it should be added to the model
         // Store each verification record
         for (const record of verificationRecords) {
             try {

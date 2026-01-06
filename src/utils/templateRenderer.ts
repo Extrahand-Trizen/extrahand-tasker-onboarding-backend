@@ -154,7 +154,7 @@ export function getDefaultVariableValues(): Record<string, any> {
   
   // Add system defaults
   defaults.platformName = 'ExtraHand';
-  defaults.currentDate = format(new Date(), 'dd MMM yyyy');
+  defaults.currentDate = formatDate(new Date(), 'dd MMM yyyy');
   defaults.currentYear = new Date().getFullYear().toString();
   defaults.supportEmail = 'support@extrahand.com';
   defaults.websiteUrl = 'https://extrahand.com';

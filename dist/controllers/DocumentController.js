@@ -5,7 +5,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.DocumentController = void 0;
 const LeadService_1 = require("../services/LeadService");
-const ApprovalService_1 = require("../services/ApprovalService");
 const logger_1 = __importDefault(require("../config/logger"));
 const compliance_1 = require("../utils/compliance");
 class DocumentController {
@@ -137,65 +136,42 @@ class DocumentController {
                 });
                 return;
             }
-            // Create new document - AUTO-VERIFY on upload
+            // ✅ Document status based on role:
+            // - Marketing: 'pending' (needs verification by operations team)
+            // - Operations/Admin: 'verified' (trusted uploaders can auto-verify)
+            // - Default: 'pending' (safe default - requires manual verification)
+            const adminRole = req.admin?.role || 'marketing';
+            const isMarketing = adminRole === 'marketing';
+            const isOperationsOrAdmin = adminRole === 'operations' || adminRole === 'admin';
+            // ✅ Only operations and admin can auto-verify documents
+            // Marketing and any other role (or missing role) will have documents set to 'pending'
+            const documentStatus = isOperationsOrAdmin ? 'verified' : 'pending';
+            logger_1.default.info('Document upload - role-based status assignment', {
+                leadId,
+                adminRole,
+                isMarketing,
+                isOperationsOrAdmin,
+                documentStatus,
+                documentType: type,
+                adminUid: req.admin?.uid
+            });
             const newDocument = {
                 type: type,
                 url,
                 uploadedAt: new Date(),
-                status: 'verified', // Auto-verify documents when uploaded
-                verifiedBy: req.admin.uid,
-                verifiedAt: new Date(),
+                status: documentStatus, // Marketing uploads need verification, operations/admin auto-verify
+                ...(isOperationsOrAdmin ? {
+                    verifiedBy: req.admin.uid,
+                    verifiedAt: new Date()
+                } : {}),
                 ...(maskedAadhaar && { aadhaarNumber: maskedAadhaar }),
                 ...(maskedPAN && { panNumber: maskedPAN }),
                 ...(addressDetailsText && { addressDetails: addressDetailsText }),
             };
             // Add document to lead
             const updatedLead = await LeadService_1.LeadService.addDocument(leadId, newDocument);
-            // Check if lead should be auto-approved (refresh lead to get latest state)
-            if (updatedLead) {
-                // Refresh lead from database to ensure we have latest documents
-                const freshLead = await LeadService_1.LeadService.getLeadById(leadId);
-                if (freshLead) {
-                    const criteria = ApprovalService_1.ApprovalService.checkApprovalCriteria(freshLead);
-                    if (criteria.canApprove && freshLead.status !== 'approved' && freshLead.status !== 'activated') {
-                        // Auto-approve if all criteria met
-                        try {
-                            await LeadService_1.LeadService.updateStatus(leadId, {
-                                status: 'approved',
-                                notes: 'Auto-approved: All documents verified and criteria met',
-                                changedBy: 'system',
-                                changedByName: 'System (Auto-approval)'
-                            }, 'admin');
-                            logger_1.default.info('Lead auto-approved after document upload', {
-                                leadId,
-                                criteria: {
-                                    hasRequiredDocuments: criteria.hasRequiredDocuments,
-                                    hasVerifiedDocuments: criteria.hasVerifiedDocuments,
-                                    hasSkills: criteria.hasSkills,
-                                    hasRequiredFields: criteria.hasRequiredFields
-                                }
-                            });
-                        }
-                        catch (error) {
-                            logger_1.default.error('Error auto-approving lead after document upload', {
-                                leadId,
-                                error: error.message,
-                                currentStatus: freshLead.status,
-                                stack: error.stack
-                            });
-                            // Don't fail the document upload if auto-approval fails
-                        }
-                    }
-                    else {
-                        logger_1.default.debug('Lead not ready for auto-approval', {
-                            leadId,
-                            canApprove: criteria.canApprove,
-                            currentStatus: freshLead.status,
-                            missingRequirements: criteria.missingRequirements
-                        });
-                    }
-                }
-            }
+            // ✅ Auto-approval removed: Leads will not be automatically approved after document upload
+            // Approval must be done manually by the verification/operations team through the approval queue
             res.json({
                 success: true,
                 data: updatedLead,
@@ -228,7 +204,9 @@ class DocumentController {
                 return;
             }
             const { leadId, documentIndex } = req.params;
-            const { status, rejectionReason } = req.body;
+            const { status, rejectionReason, 
+            // ✅ Exact details (unmasked) - entered by operations/admin during verification
+            exactAadhaarNumber, exactPANNumber, exactAddressDetails } = req.body;
             if (!status || !['verified', 'rejected'].includes(status)) {
                 res.status(400).json({
                     success: false,
@@ -266,7 +244,39 @@ class DocumentController {
                 });
                 return;
             }
-            const updatedLead = await LeadService_1.LeadService.verifyDocument(leadId, index, status, req.admin.uid, req.admin.name, rejectionReason);
+            // ✅ Validate exact details if verifying
+            if (status === 'verified') {
+                const document = lead.documents[index];
+                // ✅ Require exact details when verifying Aadhaar, PAN, or Address Proof
+                if (document.type === 'aadhaar' && !exactAadhaarNumber) {
+                    res.status(400).json({
+                        success: false,
+                        error: 'Exact Aadhaar number is required when verifying Aadhaar document',
+                    });
+                    return;
+                }
+                if (document.type === 'pan' && !exactPANNumber) {
+                    res.status(400).json({
+                        success: false,
+                        error: 'Exact PAN number is required when verifying PAN document',
+                    });
+                    return;
+                }
+                if (document.type === 'address_proof' && !exactAddressDetails) {
+                    res.status(400).json({
+                        success: false,
+                        error: 'Exact address details are required when verifying Address Proof document',
+                    });
+                    return;
+                }
+            }
+            const updatedLead = await LeadService_1.LeadService.verifyDocument(leadId, index, status, req.admin.uid, req.admin.name, rejectionReason, 
+            // ✅ Pass exact details for storage
+            status === 'verified' ? {
+                exactAadhaarNumber,
+                exactPANNumber,
+                exactAddressDetails
+            } : undefined);
             res.json({
                 success: true,
                 data: updatedLead,

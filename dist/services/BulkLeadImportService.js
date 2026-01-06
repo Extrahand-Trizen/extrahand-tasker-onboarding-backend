@@ -21,30 +21,51 @@ class BulkLeadImportService {
         const normalized = skill.toLowerCase().trim();
         // Map human-readable names to enum values
         const skillMap = {
+            // Legacy mappings for backward compatibility
+            'home services': 'handyperson',
+            'home service': 'handyperson',
+            'home_services': 'handyperson',
+            'plumbing': 'handyperson', // Plumbing falls under handyperson
+            'electrician': 'handyperson', // Electrician falls under handyperson
+            'delivery & transport': 'moving',
+            'delivery and transport': 'moving',
+            'delivery': 'moving',
+            // Current categories
             'cleaning services': 'cleaning',
             'cleaning': 'cleaning',
-            'home services': 'home_services',
-            'home service': 'home_services',
-            'home_services': 'home_services',
-            'delivery & transport': 'delivery',
-            'delivery and transport': 'delivery',
-            'delivery': 'delivery',
-            'beauty & wellness': 'beauty',
-            'beauty and wellness': 'beauty',
-            'beauty': 'beauty',
+            'handyperson': 'handyperson',
+            'handy person': 'handyperson',
+            'moving': 'moving',
+            'moving & delivery': 'moving',
+            'moving and delivery': 'moving',
+            'gardening': 'gardening',
+            'business': 'business',
+            'business services': 'business',
+            'marketing': 'marketing',
+            'marketing & design': 'marketing',
+            'marketing and design': 'marketing',
             'tech services': 'tech',
             'tech service': 'tech',
+            'tech support': 'tech',
             'tech': 'tech',
+            'technology': 'tech',
             'education & tutoring': 'tutoring',
             'education and tutoring': 'tutoring',
             'tutoring': 'tutoring',
-            'plumbing': 'home_services', // Plumbing falls under home services
-            'electrician': 'home_services', // Electrician falls under home services
+            'photography': 'photography',
+            'beauty & wellness': 'beauty',
+            'beauty and wellness': 'beauty',
+            'beauty': 'beauty',
+            'pet care': 'pet-care',
+            'pet-care': 'pet-care',
+            'events': 'events',
+            'events & entertainment': 'events',
+            'events and entertainment': 'events',
             'other': 'other',
         };
         return skillMap[normalized] || normalized; // Return mapped value or original if not found
     }
-    static parseCSV(fileBuffer) {
+    static parseCSV(fileBuffer, defaultPrimaryCategory, defaultSecondaryCategory) {
         try {
             const records = (0, sync_1.parse)(fileBuffer.toString(), {
                 columns: true,
@@ -52,15 +73,37 @@ class BulkLeadImportService {
                 trim: true,
             });
             return records.map((record) => {
-                // Get primary skill from various possible column names
-                const rawSkill = record.primarySkill
+                // Get primary category/skill from CSV or use default provided
+                const rawPrimaryCategory = record.primaryCategory
+                    || record['Primary Category']
+                    || record.primarySkill
                     || record['Primary Skill']
                     || record['Primary Skill (Service Category)']
                     || record['Service Category']
                     || record['Skill']
+                    || defaultPrimaryCategory
                     || '';
                 // Map human-readable skill to enum value
-                const mappedSkill = rawSkill ? BulkLeadImportService.mapSkillToEnum(rawSkill) : '';
+                const mappedPrimaryCategory = rawPrimaryCategory ? BulkLeadImportService.mapSkillToEnum(rawPrimaryCategory) : '';
+                // Get secondary category from CSV or use default provided
+                const rawSecondaryCategory = record.secondaryCategory
+                    || record['Secondary Category']
+                    || record.secondarySkill
+                    || record['Secondary Skill']
+                    || defaultSecondaryCategory
+                    || '';
+                // Parse experience level
+                const experienceLevel = (record.experienceLevel || record['Experience Level'] || '').toLowerCase();
+                const validExperienceLevels = ['beginner', 'intermediate', 'experienced'];
+                const mappedExperienceLevel = validExperienceLevels.includes(experienceLevel)
+                    ? experienceLevel
+                    : undefined;
+                // Parse years of experience (optional)
+                const yearsOfExperience = record.yearsOfExperience
+                    || record['Years of Experience']
+                    || record['Years Of Experience']
+                    ? parseInt(record.yearsOfExperience || record['Years of Experience'] || record['Years Of Experience'] || '0', 10)
+                    : undefined;
                 return {
                     name: record.name || record['Full Name'] || '',
                     phone: record.phone || record['Phone Number'] || record['Mobile Number'] || record['Phone'] || '',
@@ -69,8 +112,15 @@ class BulkLeadImportService {
                     state: record.state || record['State'] || '',
                     address: record.address || record['Address'] || '',
                     pincode: record.pincode || record['Pincode'] || record['Pin Code'] || record['PIN'] || '',
-                    primarySkill: mappedSkill,
+                    primaryCategory: mappedPrimaryCategory,
+                    primarySkill: mappedPrimaryCategory, // For backward compatibility
+                    secondaryCategory: rawSecondaryCategory,
+                    experienceLevel: mappedExperienceLevel,
+                    yearsOfExperience: isNaN(yearsOfExperience) ? undefined : yearsOfExperience,
+                    workingDays: record.workingDays || record['Working Days'] || '',
+                    preferredTimeSlot: record.preferredTimeSlot || record['Preferred Time Slot'] || record['Preferred TimeSlot'] || '',
                     source: (record.source || record['Source'] || 'referral').toLowerCase(),
+                    sourceDetails: record.sourceDetails || record['Source Details'] || '',
                 };
             });
         }
@@ -101,14 +151,41 @@ class BulkLeadImportService {
         if (!row.address || row.address.trim().length < 5) {
             return { valid: false, error: 'Address is required (minimum 5 characters)' };
         }
-        if (!row.primarySkill || row.primarySkill.trim().length < 2) {
-            return { valid: false, error: 'Primary skill is required' };
+        const primaryCategory = (row.primaryCategory || row.primarySkill || '').trim();
+        if (!primaryCategory || primaryCategory.length < 2) {
+            return { valid: false, error: 'Primary category is required' };
         }
-        // Validate primary skill is one of the allowed categories
-        const validSkills = ['home_services', 'cleaning', 'delivery', 'beauty', 'tech', 'tutoring', 'other'];
-        const normalizedSkill = row.primarySkill.toLowerCase().trim();
-        if (!validSkills.includes(normalizedSkill)) {
-            return { valid: false, error: `Invalid primary skill. Must be one of: ${validSkills.join(', ')}` };
+        // Validate primary category is one of the allowed categories
+        const validCategories = [
+            'cleaning',
+            'handyperson',
+            'moving',
+            'gardening',
+            'business',
+            'marketing',
+            'tech',
+            'tutoring',
+            'photography',
+            'beauty',
+            'pet-care',
+            'events',
+            'other'
+        ];
+        const normalizedCategory = primaryCategory.toLowerCase().trim();
+        if (!validCategories.includes(normalizedCategory)) {
+            return { valid: false, error: `Invalid primary category. Must be one of: ${validCategories.join(', ')}` };
+        }
+        // Validate secondary category is provided (either in CSV or as default)
+        if (!row.secondaryCategory || row.secondaryCategory.trim().length < 1) {
+            return { valid: false, error: 'Secondary category is required (either in CSV or provided as default)' };
+        }
+        // Validate experience level is provided
+        if (!row.experienceLevel) {
+            return { valid: false, error: 'Experience level is required (beginner, intermediate, or experienced)' };
+        }
+        const validExperienceLevels = ['beginner', 'intermediate', 'experienced'];
+        if (!validExperienceLevels.includes(row.experienceLevel.toLowerCase())) {
+            return { valid: false, error: `Invalid experience level. Must be one of: ${validExperienceLevels.join(', ')}` };
         }
         if (row.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.email)) {
             return { valid: false, error: 'Invalid email format' };
@@ -126,7 +203,7 @@ class BulkLeadImportService {
     /**
      * Bulk import leads from CSV
      */
-    static async bulkImportLeads(fileBuffer, fileName, adminUid, adminName, source) {
+    static async bulkImportLeads(fileBuffer, fileName, adminUid, adminName, source, defaultPrimaryCategory, defaultSecondaryCategory) {
         const importId = `IMPORT-${Date.now()}-${(0, uuid_1.v4)().substring(0, 8).toUpperCase()}`;
         // Create import record
         const importRecord = new BulkImport_1.default({
@@ -142,8 +219,8 @@ class BulkLeadImportService {
             importedUserIds: [],
         });
         try {
-            // Parse CSV
-            const rows = this.parseCSV(fileBuffer);
+            // Parse CSV with default categories
+            const rows = this.parseCSV(fileBuffer, defaultPrimaryCategory, defaultSecondaryCategory);
             importRecord.totalRows = rows.length;
             const importedLeadIds = [];
             const errors = [];
@@ -176,7 +253,7 @@ class BulkLeadImportService {
                     }
                     // Use provided source or row source
                     const leadSource = source || row.source || 'referral';
-                    // Create lead
+                    // Create lead with all fields from Add Tasker form
                     const lead = await LeadService_1.LeadService.createLead({
                         name: row.name.trim(),
                         phone: normalizedPhone,
@@ -185,7 +262,13 @@ class BulkLeadImportService {
                         state: row.state.trim(), // Required in bulk import
                         address: row.address.trim(), // Required in bulk import
                         pincode: row.pincode?.trim(),
-                        primarySkill: row.primarySkill.trim(),
+                        primaryCategory: (row.primaryCategory || row.primarySkill || '').trim(),
+                        primarySkill: (row.primaryCategory || row.primarySkill || '').trim(), // For backward compatibility
+                        secondaryCategory: row.secondaryCategory?.trim() || '',
+                        secondarySkill: row.secondaryCategory?.trim() || '', // For backward compatibility
+                        experienceLevel: row.experienceLevel || 'beginner', // Default to beginner if not provided
+                        workingDays: row.workingDays?.trim(),
+                        preferredTimeSlot: row.preferredTimeSlot?.trim(),
                         source: leadSource,
                         sourceDetails: row.sourceDetails?.trim() || (leadSource !== row.source ? `Bulk import: ${row.source}` : undefined),
                         addedBy: adminUid,
@@ -245,8 +328,9 @@ class BulkLeadImportService {
     }
     /**
      * Generate CSV template for lead import
+     * If categories are provided, they will be pre-filled in the template (or columns removed)
      */
-    static generateTemplate() {
+    static generateTemplate(primaryCategory, secondaryCategory) {
         // Helper function to escape CSV values
         const escapeCSV = (value) => {
             // If value contains comma, quote, or newline, wrap in quotes and escape quotes
@@ -255,16 +339,22 @@ class BulkLeadImportService {
             }
             return value;
         };
+        // If categories are provided, exclude them from template (they'll be applied automatically)
+        const includeCategoryColumns = !primaryCategory || !secondaryCategory;
         const headers = [
             'Full Name',
             'Phone Number',
-            'Email',
+            'Email (optional)',
             'City / Area',
-            'State',
+            'State (optional)',
             'Address',
             'Pincode',
-            'Primary Skill (Service Category)',
-            'Source (Referral, Campaign, Walk-In, Agent, Other)',
+            ...(includeCategoryColumns ? ['Primary Category', 'Secondary Category'] : []),
+            'Experience Level (beginner/intermediate/experienced)',
+            'Years of Experience (optional)',
+            'Working Days (optional)',
+            'Preferred Time Slot (optional)',
+            'Source (referral/campaign/walk-in/agent/other)',
             // 'Source Details',
             // 'Status'
         ];
@@ -276,7 +366,11 @@ class BulkLeadImportService {
             'Delhi',
             '123 Main Street, Connaught Place',
             '110001',
-            'home_services',
+            ...(includeCategoryColumns ? [primaryCategory || 'handyperson', secondaryCategory || 'Plumbing'] : []),
+            'intermediate',
+            '3',
+            'Mon-Fri',
+            'Morning',
             'referral',
             // 'Facebook Ad',
             // 'contacted'
@@ -286,12 +380,23 @@ class BulkLeadImportService {
         const escapedHeaders = headers.map(escapeCSV).join(',');
         const escapedRow = exampleRow.map((val, idx) => {
             // Quote phone numbers and pincodes to prevent Excel auto-formatting
-            if (idx === 1 || idx === 6) {
+            // Adjust indices: phone is always index 1, pincode index depends on whether categories are included
+            const phoneIndex = 1;
+            const pincodeIndex = includeCategoryColumns ? 6 : 6; // Pincode is always 6th column (after name, phone, email, city, state, address)
+            if (idx === phoneIndex || idx === pincodeIndex) {
                 return `"${val}"`;
             }
             return escapeCSV(val);
         }).join(',');
-        return [escapedHeaders, escapedRow].join('\n');
+        // Add note at the top if categories are pre-selected
+        let csvContent = '';
+        if (primaryCategory && secondaryCategory) {
+            csvContent += `# Template for ${primaryCategory} - ${secondaryCategory}\n`;
+            csvContent += `# Categories are pre-selected and will be applied to all rows automatically\n`;
+            csvContent += `# You don't need to include category columns in your CSV\n`;
+        }
+        csvContent += `${escapedHeaders}\n${escapedRow}`;
+        return csvContent;
     }
     /**
      * Get import history

@@ -6,6 +6,7 @@ const BulkOperationsController_1 = require("../controllers/BulkOperationsControl
 const DocumentController_1 = require("../controllers/DocumentController");
 const SkillController_1 = require("../controllers/SkillController");
 const ActivationController_1 = require("../controllers/ActivationController");
+const ApprovalController_1 = require("../controllers/ApprovalController");
 const adminAuth_1 = require("../middleware/adminAuth");
 const roleAuth_1 = require("../middleware/roleAuth");
 const router = (0, express_1.Router)();
@@ -17,6 +18,8 @@ router.post('/', (0, roleAuth_1.requirePermission)('canCreateLead'), LeadControl
 router.get('/', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.searchLeads);
 // Check for duplicates
 router.post('/duplicate-check', (0, roleAuth_1.requirePermission)('canCreateLead'), LeadController_1.LeadController.checkDuplicate);
+// Verification queue (must be before /:leadId to avoid route conflict)
+router.get('/verification-queue', (0, roleAuth_1.requirePermission)('canVerifyDocuments'), ApprovalController_1.ApprovalController.getVerificationQueue);
 // Activation queue (must be before /:leadId to avoid route conflict)
 router.get('/activation-queue', (0, roleAuth_1.requirePermission)('canActivate'), ActivationController_1.ActivationController.getActivationQueue);
 // Get lead by ID

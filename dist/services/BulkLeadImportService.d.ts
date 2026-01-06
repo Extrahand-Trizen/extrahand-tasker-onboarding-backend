@@ -8,7 +8,13 @@ export interface BulkLeadImportRow {
     state: string;
     address: string;
     pincode?: string;
-    primarySkill: string;
+    primaryCategory?: string;
+    primarySkill?: string;
+    secondaryCategory?: string;
+    experienceLevel?: 'beginner' | 'intermediate' | 'experienced';
+    yearsOfExperience?: number;
+    workingDays?: string;
+    preferredTimeSlot?: string;
     source: LeadSource;
     sourceDetails?: string;
 }
@@ -32,7 +38,7 @@ export declare class BulkLeadImportService {
      * Map human-readable skill names to enum values
      */
     static mapSkillToEnum(skill: string): string;
-    static parseCSV(fileBuffer: Buffer): BulkLeadImportRow[];
+    static parseCSV(fileBuffer: Buffer, defaultPrimaryCategory?: string, defaultSecondaryCategory?: string): BulkLeadImportRow[];
     /**
      * Validate import row
      */
@@ -43,11 +49,12 @@ export declare class BulkLeadImportService {
     /**
      * Bulk import leads from CSV
      */
-    static bulkImportLeads(fileBuffer: Buffer, fileName: string, adminUid: string, adminName?: string, source?: LeadSource): Promise<BulkLeadImportResult>;
+    static bulkImportLeads(fileBuffer: Buffer, fileName: string, adminUid: string, adminName?: string, source?: LeadSource, defaultPrimaryCategory?: string, defaultSecondaryCategory?: string): Promise<BulkLeadImportResult>;
     /**
      * Generate CSV template for lead import
+     * If categories are provided, they will be pre-filled in the template (or columns removed)
      */
-    static generateTemplate(): string;
+    static generateTemplate(primaryCategory?: string, secondaryCategory?: string): string;
     /**
      * Get import history
      */

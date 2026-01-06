@@ -1,4 +1,4 @@
-import { Request, Response, NextFunction } from 'express';
+import { Request, Response, NextFunction } from "express";
 export declare class BulkUploadController {
     /**
      * Upload and process CSV/Excel file

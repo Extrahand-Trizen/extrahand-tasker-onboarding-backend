@@ -1,4 +1,4 @@
-import { ILead } from '../models/Lead';
+import { ILead, LeadStatus } from '../models/Lead';
 export interface ApprovalCriteria {
     hasRequiredDocuments: boolean;
     hasVerifiedDocuments: boolean;
@@ -41,6 +41,32 @@ export declare class ApprovalService {
         total: number;
         page: number;
         limit: number;
+    }>;
+    /**
+     * Get verification queue - leads with pending documents
+     * GET /api/v1/admin/caos/leads/verification-queue
+     */
+    static getVerificationQueue(filters?: {
+        documentType?: string;
+        status?: LeadStatus;
+        city?: string;
+        page?: number;
+        limit?: number;
+    }): Promise<{
+        leads: Array<ILead & {
+            pendingDocuments: Array<{
+                index: number;
+                type: ILead['documents'][0]['type'];
+                url?: string;
+                uploadedAt?: Date;
+            }>;
+        }>;
+        pagination: {
+            page: number;
+            limit: number;
+            total: number;
+            totalPages: number;
+        };
     }>;
 }
 //# sourceMappingURL=ApprovalService.d.ts.map

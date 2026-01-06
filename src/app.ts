@@ -11,7 +11,6 @@ import activationRoutes from './routes/activation';
 import analyticsRoutes from './routes/analytics';
 import uploadsRoutes from './routes/uploads';
 import adminUsersRoutes from './routes/adminUsers';
-import emailTemplatesRoutes from './routes/emailTemplates';
 import { errorHandler } from './middleware/errorHandler';
 import logger from './config/logger';
 
@@ -54,7 +53,6 @@ app.use('/api/v1/admin/caos/leads', activationRoutes);
 app.use('/api/v1/admin/caos/analytics', analyticsRoutes);
 app.use('/api/v1/admin/uploads', uploadsRoutes);
 app.use('/api/v1/admin/admin-users', adminUsersRoutes);
-app.use('/api/v1/admin/email-templates', emailTemplatesRoutes);
 
 // Error handler
 app.use(errorHandler);

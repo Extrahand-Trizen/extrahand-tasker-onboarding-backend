@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -6,6 +39,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.BulkLeadImportController = void 0;
 const BulkLeadImportService_1 = require("../services/BulkLeadImportService");
 const logger_1 = __importDefault(require("../config/logger"));
+const BulkImport_1 = __importDefault(require("../models/BulkImport"));
+const Lead_1 = __importDefault(require("../models/Lead"));
 class BulkLeadImportController {
     /**
      * Bulk import leads from CSV
@@ -28,8 +63,8 @@ class BulkLeadImportController {
                 });
                 return;
             }
-            const { source } = req.body; // Optional: override source for all leads
-            const result = await BulkLeadImportService_1.BulkLeadImportService.bulkImportLeads(file.buffer, file.originalname, req.admin.uid, req.admin.name, source);
+            const { source, primaryCategory, secondaryCategory } = req.body; // Optional: override for all leads
+            const result = await BulkLeadImportService_1.BulkLeadImportService.bulkImportLeads(file.buffer, file.originalname, req.admin.uid, req.admin.name, source, primaryCategory, secondaryCategory);
             res.json({
                 success: true,
                 data: result,
@@ -50,13 +85,18 @@ class BulkLeadImportController {
     }
     /**
      * Download CSV template
-     * GET /api/v1/admin/caos/leads/bulk-import/template
+     * GET /api/v1/admin/caos/leads/bulk-import/template?primaryCategory=handyperson&secondaryCategory=Plumbing
      */
     static async downloadTemplate(req, res) {
         try {
-            const template = BulkLeadImportService_1.BulkLeadImportService.generateTemplate();
+            const primaryCategory = req.query.primaryCategory;
+            const secondaryCategory = req.query.secondaryCategory;
+            const template = BulkLeadImportService_1.BulkLeadImportService.generateTemplate(primaryCategory, secondaryCategory);
+            const filename = primaryCategory && secondaryCategory
+                ? `tasker-import-${primaryCategory}-${secondaryCategory.replace(/\s+/g, '-')}-template.csv`
+                : 'tasker-import-template.csv';
             res.setHeader('Content-Type', 'text/csv');
-            res.setHeader('Content-Disposition', 'attachment; filename="lead-import-template.csv"');
+            res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
             res.send(template);
         }
         catch (error) {
@@ -131,6 +171,129 @@ class BulkLeadImportController {
             res.status(500).json({
                 success: false,
                 error: 'Failed to fetch import details',
+                message: error.message,
+            });
+        }
+    }
+    /**
+     * Export UIDs from import (CSV format with uid, name, phone)
+     * GET /api/v1/admin/caos/leads/bulk-import/:importId/export-uids
+     */
+    static async exportUids(req, res) {
+        try {
+            if (!req.admin) {
+                res.status(401).json({
+                    success: false,
+                    error: 'Authentication required',
+                });
+                return;
+            }
+            const { importId } = req.params;
+            const importRecord = await BulkImport_1.default.findOne({ importId });
+            if (!importRecord) {
+                res.status(404).json({
+                    success: false,
+                    error: 'Import not found',
+                });
+                return;
+            }
+            // For lead imports, importedUserIds contains leadIds
+            // We need to get the Firebase UIDs from the leads' activationData
+            const leadIds = importRecord.importedUserIds || [];
+            if (leadIds.length === 0) {
+                res.status(400).json({
+                    success: false,
+                    error: 'No imported leads found for this import',
+                });
+                return;
+            }
+            // Fetch leads and get Firebase UIDs from activationData
+            const leads = await Lead_1.default.find({ leadId: { $in: leadIds } })
+                .select('leadId name phone email activationData')
+                .lean();
+            // Filter leads that have been activated (have firebaseUid)
+            const activatedLeads = leads.filter(lead => lead.activationData?.firebaseUid);
+            if (activatedLeads.length === 0) {
+                res.status(400).json({
+                    success: false,
+                    error: 'No activated users found. Leads need to be activated first to have Firebase UIDs.',
+                });
+                return;
+            }
+            // Fetch user details for all Firebase UIDs
+            const firebaseUids = activatedLeads.map(lead => lead.activationData.firebaseUid);
+            const userDetails = [];
+            // Use lead data as fallback, but try to fetch from user service for latest data
+            const { env } = await Promise.resolve().then(() => __importStar(require('../config/env')));
+            const axios = (await Promise.resolve().then(() => __importStar(require('axios')))).default;
+            const BATCH_SIZE = 50;
+            for (let i = 0; i < firebaseUids.length; i += BATCH_SIZE) {
+                const batch = firebaseUids.slice(i, i + BATCH_SIZE);
+                const batchResults = await Promise.allSettled(batch.map(async (uid) => {
+                    const lead = activatedLeads.find(l => l.activationData?.firebaseUid === uid);
+                    const leadData = {
+                        uid,
+                        name: lead?.name || '',
+                        phone: lead?.phone || '',
+                        leadId: lead?.leadId || ''
+                    };
+                    try {
+                        const response = await axios.get(`${env.USER_SERVICE_URL}/api/v1/profiles/${uid}`, {
+                            headers: {
+                                'X-Service-Auth': env.SERVICE_AUTH_TOKEN,
+                                'X-Service-Name': 'admin-service'
+                            }
+                        });
+                        return {
+                            uid,
+                            name: response.data?.profile?.name || response.data?.name || leadData.name,
+                            phone: response.data?.profile?.phone || response.data?.phone || leadData.phone,
+                            leadId: leadData.leadId
+                        };
+                    }
+                    catch (error) {
+                        // If profile not found, use lead data
+                        return leadData;
+                    }
+                }));
+                batchResults.forEach((result) => {
+                    if (result.status === 'fulfilled') {
+                        userDetails.push(result.value);
+                    }
+                    else {
+                        // If failed, use lead data as fallback
+                        const uid = batch[result.status === 'rejected' ? batch.indexOf(result.reason) : -1];
+                        const lead = activatedLeads.find(l => l.activationData?.firebaseUid === uid);
+                        if (lead) {
+                            userDetails.push({
+                                uid,
+                                name: lead.name || '',
+                                phone: lead.phone || '',
+                                leadId: lead.leadId
+                            });
+                        }
+                    }
+                });
+            }
+            // Generate CSV
+            let csv = 'uid,name,phone,leadId\n';
+            userDetails.forEach((user) => {
+                const name = (user.name || '').replace(/"/g, '""'); // Escape quotes
+                const phone = (user.phone || '').replace(/"/g, '""');
+                csv += `"${user.uid}","${name}","${phone}","${user.leadId}"\n`;
+            });
+            res.setHeader('Content-Type', 'text/csv');
+            res.setHeader('Content-Disposition', `attachment; filename=user-uids-${importId}.csv`);
+            res.send(csv);
+        }
+        catch (error) {
+            logger_1.default.error('Export UIDs error', {
+                error: error.message,
+                importId: req.params.importId,
+            });
+            res.status(500).json({
+                success: false,
+                error: 'Failed to export UIDs',
                 message: error.message,
             });
         }

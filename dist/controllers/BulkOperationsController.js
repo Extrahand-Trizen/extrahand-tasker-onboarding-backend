@@ -129,7 +129,7 @@ class BulkOperationsController {
                         category: s.category,
                         level: s.level || 'experienced',
                         toolsAvailable: s.toolsAvailable || false,
-                        assignedBy: req.admin.uid,
+                        assignedBy: req.admin?.uid || req.user?.uid || 'system',
                         assignedAt: new Date(),
                     }));
                     await LeadService_1.LeadService.updateLead(leadId, {

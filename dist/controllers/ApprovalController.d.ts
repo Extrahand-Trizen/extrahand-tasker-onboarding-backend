@@ -21,5 +21,10 @@ export declare class ApprovalController {
      * POST /api/v1/admin/caos/leads/bulk-approve
      */
     static bulkApproveLeads(req: AdminRequest, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
+    /**
+     * Get verification queue (leads with pending documents)
+     * GET /api/v1/admin/caos/leads/verification-queue
+     */
+    static getVerificationQueue(req: AdminRequest, res: Response): Promise<void>;
 }
 //# sourceMappingURL=ApprovalController.d.ts.map

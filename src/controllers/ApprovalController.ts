@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { AdminRequest } from '../middleware/adminAuth';
 import { ApprovalService } from '../services/ApprovalService';
 import { LeadService } from '../services/LeadService';
+import { UserRole } from '../lib/permissions';
 import logger from '../config/logger';
 
 export class ApprovalController {
@@ -130,7 +131,7 @@ export class ApprovalController {
         notes: notes || 'Lead approved',
         changedBy: userId,
         changedByName: userName
-      }, req.user?.role || 'admin');
+      }, (req.user?.role as UserRole) || 'admin');
 
       res.json({
         success: true,
@@ -200,7 +201,7 @@ export class ApprovalController {
             notes: notes || 'Bulk approved',
             changedBy: userId,
             changedByName: userName
-          }, req.user?.role || 'admin');
+          }, (req.user?.role as UserRole) || 'admin');
 
           success.push(leadId);
         } catch (error: any) {

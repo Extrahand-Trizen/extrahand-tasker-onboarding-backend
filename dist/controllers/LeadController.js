@@ -21,13 +21,33 @@ class LeadController {
                 });
                 return;
             }
-            const { name, phone, email, city, state, address, primarySkill, source, sourceDetails } = req.body;
-            // Validation
-            if (!name || !phone || !city || !primarySkill || !source) {
+            const { name, phone, email, city, state, address, pincode, primaryCategory, primarySkill, // Legacy support
+            secondaryCategory, secondarySkill, // Legacy support
+            experienceLevel, workingDays, preferredTimeSlot, source, sourceDetails } = req.body;
+            // Validation - support both new and legacy field names
+            const primaryCategoryValue = primaryCategory || primarySkill;
+            const secondaryCategoryValue = secondaryCategory || secondarySkill;
+            if (!name || !phone || !city || !primaryCategoryValue || !source) {
                 res.status(400).json({
                     success: false,
                     error: 'Missing required fields',
-                    message: 'Name, phone, city, primarySkill, and source are required'
+                    message: 'Name, phone, city, primary category, and source are required'
+                });
+                return;
+            }
+            if (!secondaryCategoryValue) {
+                res.status(400).json({
+                    success: false,
+                    error: 'Missing required fields',
+                    message: 'Secondary category is required'
+                });
+                return;
+            }
+            if (!experienceLevel) {
+                res.status(400).json({
+                    success: false,
+                    error: 'Missing required fields',
+                    message: 'Experience level is required'
                 });
                 return;
             }
@@ -38,7 +58,14 @@ class LeadController {
                 city,
                 state,
                 address,
-                primarySkill,
+                pincode,
+                primaryCategory: primaryCategoryValue,
+                primarySkill: primarySkill, // For backward compatibility
+                secondaryCategory: secondaryCategoryValue,
+                secondarySkill: secondarySkill, // For backward compatibility
+                experienceLevel,
+                workingDays,
+                preferredTimeSlot,
                 source,
                 sourceDetails,
                 addedBy: req.admin.uid,

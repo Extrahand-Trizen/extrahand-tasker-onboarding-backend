@@ -45,13 +45,17 @@ export declare class UserCreationService {
         phoneVerified: boolean;
     }): any;
     /**
-     * Create tasker user in Firebase + Profile (legacy method for single user)
+     * Create helper user in Firebase + Profile (legacy method for single user)
      */
-    static createTasker(userData: ParsedUser): Promise<string>;
+    static createHelper(userData: ParsedUser): Promise<string>;
     /**
      * Create profile in User Service - matches exact Profile model structure
      */
     private static createProfile;
+    /**
+     * Map experience level to years of experience range
+     */
+    private static mapExperienceLevelToYears;
     /**
      * Parse skills from CSV - matches Profile model skills.list structure
      */

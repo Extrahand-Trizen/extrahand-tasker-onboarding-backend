@@ -1,5 +1,5 @@
 export interface ParsedUser {
-    operation?: 'create' | 'update' | 'delete';
+    operation?: "create" | "update" | "delete";
     uid?: string;
     name?: string;
     phone?: string;
@@ -8,14 +8,23 @@ export interface ParsedUser {
     city?: string;
     state?: string;
     pincode?: string;
-    skillsList?: string;
+    primaryCategory?: string;
     primarySkill?: string;
+    secondaryCategory?: string;
+    secondarySkill?: string;
+    experienceLevel?: string;
+    yearsOfExperience?: number;
+    workingDays?: string;
+    preferredTimeSlot?: string;
+    source?: string;
+    agentCampaignId?: string;
+    skillsList?: string;
     isActive?: boolean;
     reason?: string;
 }
 export interface BulkUploadResult {
     importId: string;
-    operation: 'create' | 'update' | 'delete' | 'mixed';
+    operation: "create" | "update" | "delete" | "mixed";
     success: number;
     failed: number;
     errors: Array<{
@@ -33,7 +42,7 @@ export declare class BulkUploadService {
     /**
      * Parse CSV/Excel file
      */
-    static parseFile(buffer: Buffer, fileName: string): ParsedUser[];
+    static parseFile(buffer: Buffer, fileName: string, defaultPrimaryCategory?: string, defaultSecondaryCategory?: string): ParsedUser[];
     /**
      * Normalize records to ParsedUser format
      */
@@ -48,7 +57,7 @@ export declare class BulkUploadService {
     /**
      * Process bulk operations (create, update, delete) - Optimized with Firebase and MongoDB bulk operations
      */
-    static processBulkUpload(fileBuffer: Buffer, fileName: string, adminUid: string): Promise<BulkUploadResult>;
+    static processBulkUpload(fileBuffer: Buffer, fileName: string, adminUid: string, defaultPrimaryCategory?: string, defaultSecondaryCategory?: string): Promise<BulkUploadResult>;
     /**
      * Process bulk creates - Creates leads + Firebase users + MongoDB profiles
      * OPTIMIZED: Uses bulk duplicate checks to minimize database queries and API calls
