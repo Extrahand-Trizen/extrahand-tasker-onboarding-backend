@@ -1,0 +1,464 @@
+import { Response } from 'express';
+import { AdminRequest } from '../middleware/adminAuth';
+import { LeadService, CreateLeadData, UpdateLeadData, UpdateStatusData, SearchFilters } from '../services/LeadService';
+import { DuplicateCheckService } from '../services/DuplicateCheckService';
+import { UserRole } from '../lib/permissions';
+import logger from '../config/logger';
+
+export class LeadController {
+  /**
+   * Create a new lead
+   * POST /api/v1/admin/caos/leads
+   */
+  static async createLead(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      if (!req.admin) {
+        res.status(401).json({
+          success: false,
+          error: 'Authentication required'
+        });
+        return;
+      }
+
+      const {
+        name,
+        phone,
+        email,
+        city,
+        state,
+        address,
+        pincode,
+        primaryCategory,
+        primarySkill, // Legacy support
+        secondaryCategory,
+        secondarySkill, // Legacy support
+        experienceLevel,
+        workingDays,
+        preferredTimeSlot,
+        source,
+        sourceDetails
+      } = req.body;
+
+      // Validation - support both new and legacy field names
+      const primaryCategoryValue = primaryCategory || primarySkill;
+      const secondaryCategoryValue = secondaryCategory || secondarySkill;
+      
+      if (!name || !phone || !city || !primaryCategoryValue || !source) {
+        res.status(400).json({
+          success: false,
+          error: 'Missing required fields',
+          message: 'Name, phone, city, primary category, and source are required'
+        });
+        return;
+      }
+      
+      if (!secondaryCategoryValue) {
+        res.status(400).json({
+          success: false,
+          error: 'Missing required fields',
+          message: 'Secondary category is required'
+        });
+        return;
+      }
+      
+      if (!experienceLevel) {
+        res.status(400).json({
+          success: false,
+          error: 'Missing required fields',
+          message: 'Experience level is required'
+        });
+        return;
+      }
+
+      const leadData: CreateLeadData = {
+        name,
+        phone,
+        email,
+        city,
+        state,
+        address,
+        pincode,
+        primaryCategory: primaryCategoryValue,
+        primarySkill: primarySkill, // For backward compatibility
+        secondaryCategory: secondaryCategoryValue,
+        secondarySkill: secondarySkill, // For backward compatibility
+        experienceLevel,
+        workingDays,
+        preferredTimeSlot,
+        source,
+        sourceDetails,
+        addedBy: req.admin.uid,
+        addedByName: req.admin.name
+      };
+
+      try {
+        const lead = await LeadService.createLead(leadData);
+        res.status(201).json({
+          success: true,
+          data: lead,
+          message: 'Lead created successfully'
+        });
+      } catch (error: any) {
+        if (error.message.includes('Duplicate')) {
+          res.status(409).json({
+            success: false,
+            error: 'Duplicate lead',
+            message: error.message
+          });
+          return;
+        }
+        throw error;
+      }
+    } catch (error: any) {
+      logger.error('Error in createLead controller', {
+        error: error.message,
+        stack: error.stack
+      });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to create lead',
+        message: error.message
+      });
+    }
+  }
+
+  /**
+   * Get lead by ID
+   * GET /api/v1/admin/caos/leads/:leadId
+   */
+  static async getLead(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      const { leadId } = req.params;
+
+      const lead = await LeadService.getLeadById(leadId);
+
+      if (!lead) {
+        res.status(404).json({
+          success: false,
+          error: 'Lead not found'
+        });
+        return;
+      }
+
+      res.json({
+        success: true,
+        data: lead
+      });
+    } catch (error: any) {
+      logger.error('Error in getLead controller', {
+        error: error.message,
+        leadId: req.params.leadId
+      });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to get lead',
+        message: error.message
+      });
+    }
+  }
+
+  /**
+   * Search and filter leads
+   * GET /api/v1/admin/caos/leads
+   */
+  static async searchLeads(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      const {
+        status,
+        city,
+        primarySkill,
+        source,
+        addedBy,
+        search,
+        startDate,
+        endDate,
+        page,
+        limit
+      } = req.query;
+
+      const filters: SearchFilters = {
+        status: status as any,
+        city: city as string,
+        primarySkill: primarySkill as string,
+        source: source as any,
+        addedBy: addedBy as string,
+        search: search as string,
+        startDate: startDate ? new Date(startDate as string) : undefined,
+        endDate: endDate ? new Date(endDate as string) : undefined,
+        page: page ? parseInt(page as string) : undefined,
+        limit: limit ? parseInt(limit as string) : undefined
+      };
+
+      const result = await LeadService.searchLeads(filters);
+
+      res.json({
+        success: true,
+        data: result.leads,
+        pagination: {
+          page: result.page,
+          limit: result.limit,
+          total: result.total,
+          totalPages: result.totalPages
+        }
+      });
+    } catch (error: any) {
+      logger.error('Error in searchLeads controller', {
+        error: error.message
+      });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to search leads',
+        message: error.message
+      });
+    }
+  }
+
+  /**
+   * Update lead
+   * PUT /api/v1/admin/caos/leads/:leadId
+   */
+  static async updateLead(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      const { leadId } = req.params;
+      const updateData: UpdateLeadData = req.body;
+
+      const lead = await LeadService.updateLead(leadId, updateData);
+
+      if (!lead) {
+        res.status(404).json({
+          success: false,
+          error: 'Lead not found'
+        });
+        return;
+      }
+
+      res.json({
+        success: true,
+        data: lead,
+        message: 'Lead updated successfully'
+      });
+    } catch (error: any) {
+      logger.error('Error in updateLead controller', {
+        error: error.message,
+        leadId: req.params.leadId
+      });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to update lead',
+        message: error.message
+      });
+    }
+  }
+
+  /**
+   * Update lead status
+   * PUT /api/v1/admin/caos/leads/:leadId/status
+   */
+  static async updateStatus(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      if (!req.admin) {
+        res.status(401).json({
+          success: false,
+          error: 'Authentication required'
+        });
+        return;
+      }
+
+      const { leadId } = req.params;
+      const { status, notes } = req.body;
+
+      if (!status) {
+        res.status(400).json({
+          success: false,
+          error: 'Status is required'
+        });
+        return;
+      }
+
+      const role = (req.admin.role || 'marketing') as UserRole;
+
+      const statusData: UpdateStatusData = {
+        status,
+        notes,
+        changedBy: req.admin.uid,
+        changedByName: req.admin.name
+      };
+
+      try {
+        const lead = await LeadService.updateStatus(leadId, statusData, role);
+
+        if (!lead) {
+          res.status(404).json({
+            success: false,
+            error: 'Lead not found'
+          });
+          return;
+        }
+
+        res.json({
+          success: true,
+          data: lead,
+          message: 'Status updated successfully'
+        });
+      } catch (error: any) {
+        if (error.message.includes('cannot update status')) {
+          res.status(403).json({
+            success: false,
+            error: 'Permission denied',
+            message: error.message
+          });
+          return;
+        }
+        throw error;
+      }
+    } catch (error: any) {
+      logger.error('Error in updateStatus controller', {
+        error: error.message,
+        leadId: req.params.leadId
+      });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to update status',
+        message: error.message
+      });
+    }
+  }
+
+  /**
+   * Add internal note
+   * POST /api/v1/admin/caos/leads/:leadId/notes
+   */
+  static async addNote(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      if (!req.admin) {
+        res.status(401).json({
+          success: false,
+          error: 'Authentication required'
+        });
+        return;
+      }
+
+      const { leadId } = req.params;
+      const { note, isPrivate } = req.body;
+
+      if (!note || !note.trim()) {
+        res.status(400).json({
+          success: false,
+          error: 'Note is required'
+        });
+        return;
+      }
+
+      const lead = await LeadService.addNote(
+        leadId,
+        note,
+        req.admin.uid,
+        req.admin.name,
+        isPrivate
+      );
+
+      if (!lead) {
+        res.status(404).json({
+          success: false,
+          error: 'Lead not found'
+        });
+        return;
+      }
+
+      res.json({
+        success: true,
+        data: lead,
+        message: 'Note added successfully'
+      });
+    } catch (error: any) {
+      logger.error('Error in addNote controller', {
+        error: error.message,
+        leadId: req.params.leadId
+      });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to add note',
+        message: error.message
+      });
+    }
+  }
+
+  /**
+   * Check for duplicates
+   * POST /api/v1/admin/caos/leads/duplicate-check
+   */
+  static async checkDuplicate(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      const { phone, name, city } = req.body;
+
+      if (!phone) {
+        res.status(400).json({
+          success: false,
+          error: 'Phone number is required'
+        });
+        return;
+      }
+
+      const result = await DuplicateCheckService.checkDuplicate(phone, name, city);
+
+      res.json({
+        success: true,
+        data: result
+      });
+    } catch (error: any) {
+      logger.error('Error in checkDuplicate controller', {
+        error: error.message
+      });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to check duplicate',
+        message: error.message
+      });
+    }
+  }
+
+  /**
+   * Get status history
+   * GET /api/v1/admin/caos/leads/:leadId/history
+   */
+  static async getStatusHistory(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      const { leadId } = req.params;
+
+      const lead = await LeadService.getLeadById(leadId);
+
+      if (!lead) {
+        res.status(404).json({
+          success: false,
+          error: 'Lead not found'
+        });
+        return;
+      }
+
+      res.json({
+        success: true,
+        data: {
+          statusHistory: lead.statusHistory,
+          currentStatus: lead.status
+        }
+      });
+    } catch (error: any) {
+      logger.error('Error in getStatusHistory controller', {
+        error: error.message,
+        leadId: req.params.leadId
+      });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to get status history',
+        message: error.message
+      });
+    }
+  }
+}
+
+
+
+
+
+
+

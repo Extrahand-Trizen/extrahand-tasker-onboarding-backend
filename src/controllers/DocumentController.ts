@@ -1,0 +1,402 @@
+import { Response } from 'express';
+import { AdminRequest } from '../middleware/adminAuth';
+import { LeadService } from '../services/LeadService';
+import logger from '../config/logger';
+import { ILeadDocument } from '../models/Lead';
+import { maskAadhaar, maskPAN, validateAadhaar, validatePAN, sanitizeAadhaarInput, sanitizePANInput } from '../utils/compliance';
+
+export class DocumentController {
+  /**
+   * Upload document for a lead
+   * POST /api/v1/admin/caos/leads/:leadId/documents
+   */
+  static async uploadDocument(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      if (!req.admin) {
+        res.status(401).json({
+          success: false,
+          error: 'Authentication required',
+        });
+        return;
+      }
+
+      const { leadId } = req.params;
+      const { type, url, aadhaarNumber, panNumber, addressDetails } = req.body;
+
+      if (!type) {
+        res.status(400).json({
+          success: false,
+          error: 'Document type is required',
+        });
+        return;
+      }
+
+      const validTypes = ['aadhaar', 'pan', 'address_proof', 'skill_certificate', 'photo', 'other'];
+      if (!validTypes.includes(type)) {
+        res.status(400).json({
+          success: false,
+          error: `Invalid document type. Must be one of: ${validTypes.join(', ')}`,
+        });
+        return;
+      }
+
+      // Either URL or manual entry must be provided
+      if (!url && !aadhaarNumber && !panNumber && !addressDetails) {
+        res.status(400).json({
+          success: false,
+          error: 'Please provide either a document URL or manual entry (Aadhaar/PAN number or Address details)',
+        });
+        return;
+      }
+
+      // Validate and mask Aadhaar if provided
+      let maskedAadhaar: string | undefined;
+      if (type === 'aadhaar' && aadhaarNumber) {
+        const sanitized = sanitizeAadhaarInput(aadhaarNumber);
+        if (!validateAadhaar(sanitized)) {
+          res.status(400).json({
+            success: false,
+            error: 'Invalid Aadhaar number. Must be exactly 12 digits.',
+          });
+          return;
+        }
+        maskedAadhaar = maskAadhaar(sanitized);
+        
+        // Audit log for sensitive data entry
+        logger.info('Aadhaar number entered manually', {
+          leadId,
+          adminUid: req.admin.uid,
+          adminName: req.admin.name,
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      // Validate and mask PAN if provided
+      let maskedPAN: string | undefined;
+      if (type === 'pan' && panNumber) {
+        const sanitized = sanitizePANInput(panNumber);
+        if (!validatePAN(sanitized)) {
+          res.status(400).json({
+            success: false,
+            error: 'Invalid PAN number. Format: ABCDE1234F (5 letters, 4 digits, 1 letter)',
+          });
+          return;
+        }
+        maskedPAN = maskPAN(sanitized);
+        
+        // Audit log for sensitive data entry
+        logger.info('PAN number entered manually', {
+          leadId,
+          adminUid: req.admin.uid,
+          adminName: req.admin.name,
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      // Validate and process Address Proof if provided
+      let addressDetailsText: string | undefined;
+      if (type === 'address_proof' && addressDetails) {
+        const trimmed = addressDetails.trim();
+        if (trimmed.length < 10) {
+          res.status(400).json({
+            success: false,
+            error: 'Address details must be at least 10 characters long',
+          });
+          return;
+        }
+        addressDetailsText = trimmed;
+        
+        // Audit log for address entry
+        logger.info('Address proof entered manually', {
+          leadId,
+          adminUid: req.admin.uid,
+          adminName: req.admin.name,
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      // Validate type-specific requirements
+      if (type === 'aadhaar' && !url && !maskedAadhaar) {
+        res.status(400).json({
+          success: false,
+          error: 'Please provide either a document URL or Aadhaar number',
+        });
+        return;
+      }
+
+      if (type === 'pan' && !url && !maskedPAN) {
+        res.status(400).json({
+          success: false,
+          error: 'Please provide either a document URL or PAN number',
+        });
+        return;
+      }
+
+      if (type === 'address_proof' && !url && !addressDetailsText) {
+        res.status(400).json({
+          success: false,
+          error: 'Please provide either a document URL or address details',
+        });
+        return;
+      }
+
+      const lead = await LeadService.getLeadById(leadId);
+      if (!lead) {
+        res.status(404).json({
+          success: false,
+          error: 'Lead not found',
+        });
+        return;
+      }
+
+      // ✅ Document status based on role:
+      // - Marketing: 'pending' (needs verification by operations team)
+      // - Operations/Admin: 'verified' (trusted uploaders can auto-verify)
+      // - Default: 'pending' (safe default - requires manual verification)
+      const adminRole = req.admin?.role || 'marketing';
+      const isMarketing = adminRole === 'marketing';
+      const isOperationsOrAdmin = adminRole === 'operations' || adminRole === 'admin';
+      
+      // ✅ Only operations and admin can auto-verify documents
+      // Marketing and any other role (or missing role) will have documents set to 'pending'
+      const documentStatus = isOperationsOrAdmin ? 'verified' : 'pending';
+      
+      logger.info('Document upload - role-based status assignment', {
+        leadId,
+        adminRole,
+        isMarketing,
+        isOperationsOrAdmin,
+        documentStatus,
+        documentType: type,
+        adminUid: req.admin?.uid
+      });
+      
+      const newDocument: ILeadDocument = {
+        type: type as ILeadDocument['type'],
+        url,
+        uploadedAt: new Date(),
+        status: documentStatus, // Marketing uploads need verification, operations/admin auto-verify
+        ...(isOperationsOrAdmin ? {
+          verifiedBy: req.admin.uid,
+          verifiedAt: new Date()
+        } : {}),
+        ...(maskedAadhaar && { aadhaarNumber: maskedAadhaar }),
+        ...(maskedPAN && { panNumber: maskedPAN }),
+        ...(addressDetailsText && { addressDetails: addressDetailsText }),
+      };
+
+      // Add document to lead
+      const updatedLead = await LeadService.addDocument(leadId, newDocument);
+
+      // ✅ Auto-approval removed: Leads will not be automatically approved after document upload
+      // Approval must be done manually by the verification/operations team through the approval queue
+
+      res.json({
+        success: true,
+        data: updatedLead,
+        message: 'Document uploaded successfully',
+      });
+    } catch (error: any) {
+      logger.error('Error in uploadDocument controller', {
+        error: error.message,
+        leadId: req.params.leadId,
+      });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to upload document',
+        message: error.message,
+      });
+    }
+  }
+
+  /**
+   * Verify or reject a document
+   * PUT /api/v1/admin/caos/leads/:leadId/documents/:documentIndex
+   */
+  static async verifyDocument(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      if (!req.admin) {
+        res.status(401).json({
+          success: false,
+          error: 'Authentication required',
+        });
+        return;
+      }
+
+      const { leadId, documentIndex } = req.params;
+      const { 
+        status, 
+        rejectionReason,
+        // ✅ Exact details (unmasked) - entered by operations/admin during verification
+        exactAadhaarNumber,
+        exactPANNumber,
+        exactAddressDetails
+      } = req.body;
+
+      if (!status || !['verified', 'rejected'].includes(status)) {
+        res.status(400).json({
+          success: false,
+          error: 'Status must be "verified" or "rejected"',
+        });
+        return;
+      }
+
+      if (status === 'rejected' && !rejectionReason) {
+        res.status(400).json({
+          success: false,
+          error: 'Rejection reason is required when rejecting a document',
+        });
+        return;
+      }
+
+      const index = parseInt(documentIndex);
+      if (isNaN(index) || index < 0) {
+        res.status(400).json({
+          success: false,
+          error: 'Invalid document index',
+        });
+        return;
+      }
+
+      const lead = await LeadService.getLeadById(leadId);
+      if (!lead) {
+        res.status(404).json({
+          success: false,
+          error: 'Lead not found',
+        });
+        return;
+      }
+
+      if (!lead.documents || index >= lead.documents.length) {
+        res.status(404).json({
+          success: false,
+          error: 'Document not found',
+        });
+        return;
+      }
+
+      // ✅ Validate exact details if verifying
+      if (status === 'verified') {
+        const document = lead.documents[index];
+        // ✅ Require exact details when verifying Aadhaar, PAN, or Address Proof
+        if (document.type === 'aadhaar' && !exactAadhaarNumber) {
+          res.status(400).json({
+            success: false,
+            error: 'Exact Aadhaar number is required when verifying Aadhaar document',
+          });
+          return;
+        }
+        if (document.type === 'pan' && !exactPANNumber) {
+          res.status(400).json({
+            success: false,
+            error: 'Exact PAN number is required when verifying PAN document',
+          });
+          return;
+        }
+        if (document.type === 'address_proof' && !exactAddressDetails) {
+          res.status(400).json({
+            success: false,
+            error: 'Exact address details are required when verifying Address Proof document',
+          });
+          return;
+        }
+      }
+
+      const updatedLead = await LeadService.verifyDocument(
+        leadId,
+        index,
+        status as 'verified' | 'rejected',
+        req.admin.uid,
+        req.admin.name,
+        rejectionReason,
+        // ✅ Pass exact details for storage
+        status === 'verified' ? {
+          exactAadhaarNumber,
+          exactPANNumber,
+          exactAddressDetails
+        } : undefined
+      );
+
+      res.json({
+        success: true,
+        data: updatedLead,
+        message: `Document ${status} successfully`,
+      });
+    } catch (error: any) {
+      logger.error('Error in verifyDocument controller', {
+        error: error.message,
+        leadId: req.params.leadId,
+        documentIndex: req.params.documentIndex,
+      });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to verify document',
+        message: error.message,
+      });
+    }
+  }
+
+  /**
+   * Delete a document
+   * DELETE /api/v1/admin/caos/leads/:leadId/documents/:documentIndex
+   */
+  static async deleteDocument(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      if (!req.admin) {
+        res.status(401).json({
+          success: false,
+          error: 'Authentication required',
+        });
+        return;
+      }
+
+      const { leadId, documentIndex } = req.params;
+      const index = parseInt(documentIndex);
+
+      if (isNaN(index) || index < 0) {
+        res.status(400).json({
+          success: false,
+          error: 'Invalid document index',
+        });
+        return;
+      }
+
+      const lead = await LeadService.getLeadById(leadId);
+      if (!lead) {
+        res.status(404).json({
+          success: false,
+          error: 'Lead not found',
+        });
+        return;
+      }
+
+      if (!lead.documents || index >= lead.documents.length) {
+        res.status(404).json({
+          success: false,
+          error: 'Document not found',
+        });
+        return;
+      }
+
+      const updatedLead = await LeadService.deleteDocument(leadId, index);
+
+      res.json({
+        success: true,
+        data: updatedLead,
+        message: 'Document deleted successfully',
+      });
+    } catch (error: any) {
+      logger.error('Error in deleteDocument controller', {
+        error: error.message,
+        leadId: req.params.leadId,
+        documentIndex: req.params.documentIndex,
+      });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to delete document',
+        message: error.message,
+      });
+    }
+  }
+}
+
