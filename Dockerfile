@@ -108,9 +108,8 @@ COPY --from=dependencies --chown=nodeuser:nodejs /app/node_modules ./node_module
 COPY --from=build --chown=nodeuser:nodejs /app/dist ./dist
 COPY --from=build --chown=nodeuser:nodejs /app/package.json ./
 
-# Copy serviceAccountKey.json if it exists (for Firebase Admin SDK)
-# Note: In production, this should ideally be provided via environment variables
-COPY --chown=nodeuser:nodejs serviceAccountKey.json* ./
+# Note: Firebase credentials are provided via environment variables (FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY)
+# No serviceAccountKey.json file is needed
 
 # Create logs directory with proper permissions
 RUN mkdir -p logs && chown -R nodeuser:nodejs logs
