@@ -1,7 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import { BulkUploadController } from '../controllers/BulkUploadController';
-import { serviceAuthMiddleware } from '../middleware/serviceAuth';
+import { adminAuthMiddleware } from '../middleware/adminAuth';
 
 const router = express.Router();
 const upload = multer({
@@ -19,8 +19,8 @@ const upload = multer({
   }
 });
 
-// All routes require service authentication
-router.use(serviceAuthMiddleware);
+// All bulk upload routes require authenticated admin (Firebase Admin token)
+router.use(adminAuthMiddleware);
 
 // Bulk upload
 router.post('/upload', upload.single('file'), BulkUploadController.bulkUpload);
