@@ -389,12 +389,20 @@ export class DocumentController {
           }
           
           if (Object.keys(verificationData).length > 0) {
-            await ActivationService.storeVerificationData(firebaseUid, verificationData);
+            // Pass admin info for tracking who verified the document
+            const adminInfo = {
+              userId: req.admin.uid,
+              userName: req.admin.email || req.admin.uid,
+              role: req.admin.role || 'admin'
+            };
+            
+            await ActivationService.storeVerificationData(firebaseUid, verificationData, adminInfo);
             
             logger.info('✅ Stored verification data in verification service for existing account', {
               leadId,
               firebaseUid,
-              documentType: document.type
+              documentType: document.type,
+              verifiedBy: adminInfo.userId
             });
           }
         } catch (updateError: any) {

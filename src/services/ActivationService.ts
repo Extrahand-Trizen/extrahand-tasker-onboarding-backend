@@ -18,12 +18,14 @@ export interface ActivationResult {
 export class ActivationService {
   /**
    * Activate a single lead (create Firebase user + Profile)
+   * @param skipVerificationService If true, skips storing verification data (for quick onboarding Scenario B)
    */
   static async activateLead(
     leadId: string,
     activatedBy: string,
     activatedByName?: string,
-    role?: string
+    role?: string,
+    skipVerificationService?: boolean
   ): Promise<ActivationResult> {
     try {
       const lead = await Lead.findOne({ leadId });
@@ -281,20 +283,39 @@ export class ActivationService {
         
         // ✅ Store exact details (unmasked) in verification service
         // These will be used for user verification and profile creation
-        if (hasAadhaar || hasPAN || hasAddress) {
+        // Skip for Scenario B (quick onboarding - users verify themselves later)
+        if ((hasAadhaar || hasPAN || hasAddress) && !skipVerificationService) {
           try {
-            // ✅ Store exact details (unmasked) in verification service
-            // These will be used for user verification and profile creation
-            await this.storeVerificationData(userRecord.uid, {
-              aadhaarNumber: exactAadhaar,
-              panNumber: exactPAN,
-              addressDetails: exactAddress
-            });
-            logger.info('Verification data stored for activated lead', {
+            // Get document verifier info if available
+            const aadhaarDoc = lead.documents.find(d => d.type === 'aadhaar' && d.status === 'verified');
+            const panDoc = lead.documents.find(d => d.type === 'pan' && d.status === 'verified');
+            
+            // Use the document verifier's info if available
+            let verifierInfo = undefined;
+            if (aadhaarDoc?.verifiedBy || panDoc?.verifiedBy) {
+              const verifierId = aadhaarDoc?.verifiedBy || panDoc?.verifiedBy;
+              verifierInfo = {
+                userId: verifierId,
+                userName: 'Document Verifier', // Admin who verified during lead stage
+                role: 'operations'
+              };
+            }
+            
+            await this.storeVerificationData(
+              userRecord.uid, 
+              {
+                aadhaarNumber: exactAadhaar,
+                panNumber: exactPAN,
+                addressDetails: exactAddress
+              },
+              verifierInfo
+            );
+            logger.info('✅ Verification data stored for activated lead (Scenario A)', {
               leadId,
               firebaseUid: userRecord.uid,
               hasAadhaar,
-              hasPAN
+              hasPAN,
+              verifiedBy: verifierInfo?.userId || 'system'
             });
           } catch (verificationError: any) {
             logger.warn('Failed to store verification data for activated lead', {
@@ -304,6 +325,12 @@ export class ActivationService {
             });
             // Don't fail activation if verification storage fails
           }
+        } else if (skipVerificationService) {
+          logger.info('⏭️  Skipping verification service storage (Scenario B - quick onboarding)', {
+            leadId,
+            firebaseUid: userRecord.uid,
+            note: 'User will verify themselves via Cashfree later'
+          });
         }
       } catch (profileError: any) {
         logger.error('Failed to create profile, but Firebase user created', {
@@ -357,12 +384,14 @@ export class ActivationService {
 
   /**
    * Bulk activate leads
+   * @param skipVerificationService If true, skips storing verification data (for Scenario B)
    */
   static async bulkActivateLeads(
     leadIds: string[],
     activatedBy: string,
     activatedByName?: string,
-    role?: string
+    role?: string,
+    skipVerificationService?: boolean
   ): Promise<{
     success: Array<{ leadId: string; firebaseUid: string; profileCreated: boolean }>;
     failed: Array<{ leadId: string; error: string }>;
@@ -376,7 +405,7 @@ export class ActivationService {
       const batch = leadIds.slice(i, i + BATCH_SIZE);
       
       const results = await Promise.allSettled(
-        batch.map(leadId => this.activateLead(leadId, activatedBy, activatedByName, role))
+        batch.map(leadId => this.activateLead(leadId, activatedBy, activatedByName, role, skipVerificationService))
       );
 
       results.forEach((result, index) => {
@@ -414,10 +443,15 @@ export class ActivationService {
    * Store exact Aadhaar/PAN/Address data in verification service
    * Uses exact (unmasked) details entered during document verification
    * Made public to allow immediate updates when documents are verified for existing accounts
+   * 
+   * @param uid Firebase UID
+   * @param data Verification data (aadhaar/pan/address)
+   * @param adminInfo Optional admin information for tracking who verified
    */
   static async storeVerificationData(
     uid: string,
-    data: { aadhaarNumber?: string; panNumber?: string; addressDetails?: string }
+    data: { aadhaarNumber?: string; panNumber?: string; addressDetails?: string },
+    adminInfo?: { userId: string; userName: string; role: string }
   ): Promise<void> {
     if (!env.VERIFICATION_SERVICE_URL) {
       logger.warn('VERIFICATION_SERVICE_URL not configured, skipping verification data storage');
@@ -472,12 +506,14 @@ export class ActivationService {
             maskedValue: record.maskedValue,
             status: 'verified',
             verifiedAt: new Date().toISOString(),
-            provider: 'admin_activation',
+            provider: 'admin_manual',
+            verificationSource: 'admin_manual',
+            verifiedBy: adminInfo,
             consent: {
               given: true,
               givenAt: new Date().toISOString(),
               consentVersion: 'v1.0',
-              consentText: 'Lead activation - pre-verified documents'
+              consentText: `Document verified by admin team - ${record.type} verification`
             }
           },
           {
@@ -488,7 +524,12 @@ export class ActivationService {
             }
           }
         );
-        logger.info(`Stored ${record.type} verification for activated user ${uid}`);
+        logger.info(`✅ Stored ${record.type} verification for activated user`, {
+          uid,
+          type: record.type,
+          source: 'admin_manual',
+          verifiedBy: adminInfo?.userId || 'system'
+        });
       } catch (error: any) {
         logger.error(`Failed to store ${record.type} verification for ${uid}`, {
           error: error.message,
