@@ -102,6 +102,9 @@ class ActivationService {
                         ? `+${normalizedPhone}`
                         : `+91${normalizedPhone}`;
                     // Check if profile exists via user service API
+                    if (!env_1.env.USER_SERVICE_URL) {
+                        throw new Error('USER_SERVICE_URL is required for phone check but not configured');
+                    }
                     const checkResponse = await axios_1.default.post(`${env_1.env.USER_SERVICE_URL}/api/v1/auth/check-phone`, { phone: formattedPhone }, {
                         headers: {
                             'X-Service-Auth': env_1.env.SERVICE_AUTH_TOKEN,
@@ -130,12 +133,13 @@ class ActivationService {
                     });
                 }
             }
-            // Extract Aadhaar and PAN from lead documents
+            // Extract Aadhaar, PAN, Address, and Photo from lead documents
             // ✅ Extract verified documents for onboarding activation
             // This is ONLY for the onboarding system - doesn't affect mobile/website verification flows
             const aadhaarDoc = lead.documents?.find(doc => doc.type === 'aadhaar' && doc.status === 'verified');
             const panDoc = lead.documents?.find(doc => doc.type === 'pan' && doc.status === 'verified');
             const addressDoc = lead.documents?.find(doc => doc.type === 'address_proof' && doc.status === 'verified');
+            const photoDoc = lead.documents?.find(doc => doc.type === 'photo' && doc.status === 'verified');
             // ✅ Check if verified documents exist (for setting profile flags)
             // Set flags based on document existence and verification status, not just exact details
             const hasAadhaar = !!aadhaarDoc && aadhaarDoc.status === 'verified';
@@ -147,22 +151,47 @@ class ActivationService {
             const exactAadhaar = aadhaarDoc?.exactAadhaarNumber || aadhaarDoc?.aadhaarNumber;
             const exactPAN = panDoc?.exactPANNumber || panDoc?.panNumber;
             const exactAddress = addressDoc?.exactAddressDetails || addressDoc?.addressDetails;
+            // ✅ Extract photo URL if photo document exists and is verified
+            const photoURL = photoDoc?.url || null;
             logger_1.default.info('Extracting verification data for account creation (onboarding flow only)', {
                 leadId,
                 hasAadhaarDoc: !!aadhaarDoc,
                 hasPanDoc: !!panDoc,
                 hasAddressDoc: !!addressDoc,
+                hasPhotoDoc: !!photoDoc,
                 hasAadhaar: hasAadhaar,
                 hasPAN: hasPAN,
                 hasAddress: hasAddress,
+                hasPhoto: !!photoURL,
                 hasExactAadhaar: !!aadhaarDoc?.exactAadhaarNumber,
                 hasExactPAN: !!panDoc?.exactPANNumber,
                 hasExactAddress: !!addressDoc?.exactAddressDetails,
                 hasMaskedAadhaar: !!aadhaarDoc?.aadhaarNumber,
                 hasMaskedPAN: !!panDoc?.panNumber,
                 aadhaarDocStatus: aadhaarDoc?.status,
-                panDocStatus: panDoc?.status
+                panDocStatus: panDoc?.status,
+                photoDocStatus: photoDoc?.status
             });
+            // ✅ Extract verification timestamps from documents
+            const aadhaarVerifiedAt = aadhaarDoc?.verifiedAt ? new Date(aadhaarDoc.verifiedAt).toISOString() : null;
+            const panVerifiedAt = panDoc?.verifiedAt ? new Date(panDoc.verifiedAt).toISOString() : null;
+            // ✅ Set isVerified flag: true if any verification exists (Aadhaar or PAN)
+            const isVerified = hasAadhaar || hasPAN;
+            // ✅ Calculate verification tier and badge
+            // Tier 0: No verification
+            // Tier 1: Basic (Aadhaar only)
+            // Tier 2: Verified (Aadhaar + PAN)
+            // Tier 3: Trusted (Aadhaar + Face - not applicable here)
+            let verificationTier = 0;
+            let verificationBadge = 'none';
+            if (hasAadhaar && hasPAN) {
+                verificationTier = 2;
+                verificationBadge = 'verified';
+            }
+            else if (hasAadhaar) {
+                verificationTier = 1;
+                verificationBadge = 'basic';
+            }
             // Create Profile in MongoDB via User Service API
             const profileData = {
                 uid: userRecord.uid,
@@ -187,10 +216,19 @@ class ActivationService {
                     })),
                     primary: lead.primarySkill
                 },
+                // ✅ Verification flags - properly set based on document verification status
+                isVerified: isVerified, // True if any verification exists
                 isAadhaarVerified: hasAadhaar, // Only true if Aadhaar document exists and is verified
+                aadhaarVerifiedAt: aadhaarVerifiedAt, // Timestamp from document verification
                 isPANVerified: hasPAN, // Only true if PAN document exists and is verified
+                isBankVerified: false, // Bank verification not handled in onboarding flow
+                isFaceVerified: false, // Face verification not handled in onboarding flow
+                // ✅ Verification tier and badge
+                verificationTier: verificationTier,
+                verificationBadge: verificationBadge,
+                lastVerifiedAt: isVerified ? (aadhaarVerifiedAt || panVerifiedAt) : null,
                 availability: null,
-                photoURL: null,
+                photoURL: photoURL, // ✅ Use photo URL from verified photo document if available
                 rating: 0,
                 agreeUpdates: false,
                 agreeTerms: false

@@ -1,9 +1,8 @@
 import { Router } from 'express';
 import multer from 'multer';
-import axios from 'axios';
-import FormData from 'form-data';
-import { adminAuthMiddleware } from '../middleware/adminAuth';
-import { env } from '../config/env';
+import { adminAuthMiddleware, AdminRequest } from '../middleware/adminAuth';
+import logger from '../config/logger';
+import { UploadService } from '../services/UploadService';
 
 const router = Router();
 
@@ -22,53 +21,82 @@ const upload = multer({
 });
 
 /**
- * Proxy document upload to user-service.
- * Requires admin auth (Firebase). Sends service auth headers to user-service.
+ * Direct document upload to storage (MinIO/S3).
+ * Requires admin auth (Firebase). Uploads directly to configured storage provider.
  */
 router.post(
   '/document',
   adminAuthMiddleware,
-  upload.single('file'),
-  async (req, res) => {
+  (req, res, next) => {
+    upload.single('file')(req, res, (err) => {
+      if (err) {
+        logger.error('Multer error', { error: err.message });
+        return res.status(400).json({ 
+          success: false, 
+          error: err.message || 'File upload error' 
+        });
+      }
+      next();
+    });
+  },
+  async (req: AdminRequest, res) => {
     try {
       if (!req.file) {
+        logger.warn('No file provided in upload request', {
+          body: req.body,
+          hasFile: !!req.file
+        });
         return res.status(400).json({ success: false, error: 'No file provided' });
       }
-
-      const userServiceUrl = env.USER_SERVICE_URL;
-      if (!userServiceUrl) {
-        return res.status(500).json({ success: false, error: 'USER_SERVICE_URL not configured' });
-      }
-
-      const form = new FormData();
-      form.append('file', req.file.buffer, {
-        filename: req.file.originalname || 'document',
-        contentType: req.file.mimetype,
+      
+      // ✅ Use admin.uid from AdminRequest (set by adminAuthMiddleware)
+      const adminUid = req.admin?.uid || req.user?.uid || 'system';
+      
+      logger.info('File upload received', {
+        filename: req.file.originalname,
+        mimetype: req.file.mimetype,
+        size: req.file.size,
+        docType: req.body?.docType,
+        leadId: req.body?.leadId,
+        adminUid
       });
-      if (req.body?.docType) form.append('docType', req.body.docType);
-      if (req.body?.leadId) form.append('leadId', req.body.leadId);
 
-      const adminUser = (req as any).user;
-      const adminUid = adminUser?.uid || 'admin';
-
-      const response = await axios.post(
-        `${userServiceUrl}/api/v1/uploads/document`,
-        form,
-        {
-          headers: {
-            ...form.getHeaders(),
-            'x-service-auth': env.SERVICE_AUTH_TOKEN || '',
-            'x-user-id': adminUid,
-          },
-          maxContentLength: Infinity,
-          maxBodyLength: Infinity,
-        }
+      // Upload directly to storage (MinIO/S3)
+      const result = await UploadService.uploadDocument(
+        adminUid,
+        req.file.buffer,
+        req.file.originalname || 'document',
+        req.file.mimetype,
+        req.body?.docType || 'document',
+        req.body?.leadId
       );
 
-      return res.json(response.data);
+      logger.info('Upload successful', {
+        url: result.url,
+        key: result.key,
+        adminUid
+      });
+
+      return res.json({
+        success: true,
+        data: {
+          url: result.url,
+          key: result.key
+        }
+      });
     } catch (error: any) {
-      const message = error?.response?.data?.error || error?.message || 'Upload failed';
-      return res.status(400).json({ success: false, error: message });
+      logger.error('Document upload error', {
+        error: error.message,
+        stack: error.stack,
+        adminUid: req.admin?.uid || req.user?.uid
+      });
+      
+      const message = error?.message || 'Upload failed';
+      return res.status(500).json({ 
+        success: false, 
+        error: message,
+        details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
     }
   }
 );

@@ -85,10 +85,30 @@ export class AdminUserController {
 
     try {
       const link = await auth.generatePasswordResetLink(adminUser.email);
+      logger.info('Password reset link generated', { uid, email: adminUser.email });
       return res.json({ success: true, data: { resetLink: link } });
     } catch (error: any) {
-      logger.error('Failed to generate password reset link', { uid, error: error.message });
-      return res.status(500).json({ success: false, error: 'Failed to generate reset link' });
+      logger.error('Failed to generate password reset link', { 
+        uid, 
+        email: adminUser.email,
+        error: error.message,
+        code: error.code,
+        stack: error.stack
+      });
+      
+      // Provide more specific error messages
+      let errorMessage = 'Failed to generate reset link';
+      if (error.message?.includes('invalid_grant') || error.message?.includes('JWT Signature')) {
+        errorMessage = 'Firebase authentication failed. Please check Firebase credentials configuration.';
+      } else if (error.message?.includes('USER_NOT_FOUND')) {
+        errorMessage = 'User not found in Firebase';
+      }
+      
+      return res.status(500).json({ 
+        success: false, 
+        error: errorMessage,
+        details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
     }
   }
 }

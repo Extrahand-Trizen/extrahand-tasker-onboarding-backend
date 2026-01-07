@@ -39,17 +39,18 @@ app.use((0, morgan_1.default)('combined', {
 }));
 // Health check
 app.get('/api/v1/health', (_req, res) => {
-    res.json({ status: 'ok', service: 'admin-service' });
+    res.json({ status: 'ok', service: 'tasker-onboarding-service' });
 });
-// Routes
-app.use('/api/v1/admin/bulk-upload', bulkUpload_1.default);
-app.use('/api/v1/admin/caos/leads', leads_1.default);
-app.use('/api/v1/admin/caos/leads/bulk-import', bulkLeadImport_1.default);
-app.use('/api/v1/admin/caos/leads', approval_1.default);
-app.use('/api/v1/admin/caos/leads', activation_1.default);
-app.use('/api/v1/admin/caos/analytics', analytics_1.default);
-app.use('/api/v1/admin/uploads', uploads_1.default);
-app.use('/api/v1/admin/admin-users', adminUsers_1.default);
+// Internal routes (service-to-service only)
+app.use('/api/v1/internal/bulk-upload', bulkUpload_1.default);
+// Onboarding routes (tasker onboarding platform)
+app.use('/api/v1/onboarding/leads', leads_1.default);
+app.use('/api/v1/onboarding/leads/bulk-import', bulkLeadImport_1.default);
+app.use('/api/v1/onboarding/leads', approval_1.default);
+app.use('/api/v1/onboarding/leads', activation_1.default);
+app.use('/api/v1/onboarding/analytics', analytics_1.default);
+app.use('/api/v1/onboarding/uploads', uploads_1.default);
+app.use('/api/v1/onboarding/team', adminUsers_1.default);
 // Error handler
 app.use(errorHandler_1.errorHandler);
 exports.default = app;

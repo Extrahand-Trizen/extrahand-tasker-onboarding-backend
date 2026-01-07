@@ -7,8 +7,25 @@ export declare const env: {
     FIREBASE_PRIVATE_KEY: string;
     FIREBASE_CLIENT_EMAIL: string;
     SERVICE_AUTH_TOKEN: string;
-    USER_SERVICE_URL: string;
     LOG_LEVEL: "error" | "warn" | "info" | "debug";
+    STORAGE_PROVIDER: "minio" | "s3";
+    MINIO_BUCKET_NAME: string;
+    AWS_REGION: string;
+    AWS_S3_BUCKET_NAME: string;
+    USER_SERVICE_URL?: string | undefined;
     VERIFICATION_SERVICE_URL?: string | undefined;
+    MINIO_ENDPOINT?: string | undefined;
+    MINIO_PORT?: string | undefined;
+    MINIO_USE_SSL?: string | undefined;
+    MINIO_ACCESS_KEY?: string | undefined;
+    MINIO_SECRET_KEY?: string | undefined;
+    MINIO_ROOT_USER?: string | undefined;
+    MINIO_ROOT_PASSWORD?: string | undefined;
+    MINIO_PUBLIC_DOMAIN?: string | undefined;
+    MINIO_SERVER_URL?: string | undefined;
+    MINIO_REGION_NAME?: string | undefined;
+    AWS_ACCESS_KEY_ID?: string | undefined;
+    AWS_SECRET_ACCESS_KEY?: string | undefined;
+    AWS_CLOUDFRONT_DOMAIN?: string | undefined;
 };
 //# sourceMappingURL=env.d.ts.map
