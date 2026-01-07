@@ -154,32 +154,24 @@ export class DocumentController {
       // - Operations/Admin: 'verified' (trusted uploaders can auto-verify)
       // - Default: 'pending' (safe default - requires manual verification)
       const adminRole = req.admin?.role || 'marketing';
-      const isMarketing = adminRole === 'marketing';
-      const isOperationsOrAdmin = adminRole === 'operations' || adminRole === 'admin';
+      // ✅ ALL document uploads require manual verification by operations/admin team
+      // No auto-approval - all documents start with 'pending' status regardless of who uploads
+      const documentStatus = 'pending';
       
-      // ✅ Only operations and admin can auto-verify documents
-      // Marketing and any other role (or missing role) will have documents set to 'pending'
-      const documentStatus = isOperationsOrAdmin ? 'verified' : 'pending';
-      
-      logger.info('Document upload - role-based status assignment', {
+      logger.info('Document upload - all documents set to pending for manual verification', {
         leadId,
         adminRole,
-        isMarketing,
-        isOperationsOrAdmin,
         documentStatus,
         documentType: type,
-        adminUid: req.admin?.uid
+        adminUid: req.admin?.uid,
+        uploadedBy: req.admin?.email
       });
       
       const newDocument: ILeadDocument = {
         type: type as ILeadDocument['type'],
         url,
         uploadedAt: new Date(),
-        status: documentStatus, // Marketing uploads need verification, operations/admin auto-verify
-        ...(isOperationsOrAdmin ? {
-          verifiedBy: req.admin.uid,
-          verifiedAt: new Date()
-        } : {}),
+        status: documentStatus, // All uploads require manual verification
         ...(maskedAadhaar && { aadhaarNumber: maskedAadhaar }),
         ...(maskedPAN && { panNumber: maskedPAN }),
         ...(addressDetailsText && { addressDetails: addressDetailsText }),

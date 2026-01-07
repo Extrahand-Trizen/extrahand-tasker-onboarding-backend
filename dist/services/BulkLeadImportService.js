@@ -67,12 +67,58 @@ class BulkLeadImportService {
     }
     static parseCSV(fileBuffer, defaultPrimaryCategory, defaultSecondaryCategory) {
         try {
-            const records = (0, sync_1.parse)(fileBuffer.toString(), {
+            const recordsRaw = (0, sync_1.parse)(fileBuffer.toString(), {
                 columns: true,
                 skip_empty_lines: true,
                 trim: true,
+                relax_column_count: true, // Allow inconsistent column counts
+                relax_quotes: true, // Be more flexible with quotes
             });
-            return records.map((record) => {
+            // Normalize header keys by trimming whitespace
+            const records = recordsRaw.map((record) => {
+                const normalized = {};
+                Object.keys(record).forEach((key) => {
+                    const trimmedKey = key.trim();
+                    normalized[trimmedKey] = record[key];
+                });
+                return normalized;
+            });
+            // Filter out header rows that were accidentally treated as data rows
+            const cleanedRecords = records.filter((record) => {
+                if (!record)
+                    return false;
+                const values = Object.values(record).map((v) => v === undefined || v === null ? "" : String(v).trim());
+                // Skip if all values are empty
+                if (values.every((v) => v === ""))
+                    return false;
+                // Skip if the first cell is a comment (starts with '#')
+                if (values[0]?.startsWith("#"))
+                    return false;
+                // Skip header rows (column name indicators)
+                const headerIndicators = new Set([
+                    "full name",
+                    "phone number",
+                    "mobile number",
+                    "email",
+                    "city / area",
+                    "city",
+                    "state",
+                    "address",
+                    "pincode",
+                    "primary category",
+                    "secondary category",
+                    "experience level",
+                    "years of experience",
+                    "working days",
+                    "preferred time slot",
+                    "source",
+                ].map((s) => s.toLowerCase()));
+                const looksLikeHeaderRow = values.some((v) => headerIndicators.has(v.toLowerCase()));
+                if (looksLikeHeaderRow)
+                    return false;
+                return true;
+            });
+            return cleanedRecords.map((record) => {
                 // Get primary category/skill from CSV or use default provided
                 const rawPrimaryCategory = record.primaryCategory
                     || record['Primary Category']
@@ -201,6 +247,81 @@ class BulkLeadImportService {
         return { valid: true };
     }
     /**
+     * Preview bulk import (validation + duplicate check, no records created)
+     */
+    static async previewBulkImport(fileBuffer, fileName, defaultPrimaryCategory, defaultSecondaryCategory) {
+        // 1. Parse CSV
+        const rows = this.parseCSV(fileBuffer, defaultPrimaryCategory, defaultSecondaryCategory);
+        // 2. Bulk duplicate check against database
+        const allPhones = rows.map((r) => r.phone).filter(Boolean);
+        const existingLeadsByPhoneMap = await DuplicateCheckService_1.DuplicateCheckService.checkPhonesBulk(allPhones);
+        // 3. Track in-file duplicates
+        const seenPhonesInFile = new Set();
+        // 4. Build preview rows
+        const previewRows = rows.map((row, index) => {
+            const rowNumber = index + 2; // +2 for header row and 0-index
+            const normalizedPhone = row.phone
+                ? DuplicateCheckService_1.DuplicateCheckService.normalizePhone(row.phone)
+                : "";
+            // Check in-file duplicate
+            const isDuplicateInFile = normalizedPhone !== "" && seenPhonesInFile.has(normalizedPhone);
+            if (!isDuplicateInFile && normalizedPhone) {
+                seenPhonesInFile.add(normalizedPhone);
+            }
+            // Check database duplicate
+            const existingLead = normalizedPhone
+                ? existingLeadsByPhoneMap.get(normalizedPhone)
+                : undefined;
+            const isDuplicateInDb = !!existingLead;
+            // Validate row
+            const validation = this.validateRow(row, rowNumber);
+            const rowErrors = [];
+            if (!validation.valid && validation.error) {
+                rowErrors.push(validation.error);
+            }
+            // Add duplicate errors
+            if (isDuplicateInFile) {
+                rowErrors.push("Duplicate phone number within uploaded file");
+            }
+            if (isDuplicateInDb && existingLead) {
+                rowErrors.push(`Duplicate in system: ${existingLead.leadId}`);
+            }
+            return {
+                rowNumber,
+                name: row.name || "Unknown",
+                phone: row.phone || "",
+                email: row.email,
+                city: row.city || "Unknown",
+                state: row.state || "",
+                primaryCategory: row.primaryCategory || row.primarySkill || "other",
+                secondaryCategory: row.secondaryCategory || "",
+                experienceLevel: row.experienceLevel,
+                status: (rowErrors.length === 0 ? "valid" : "invalid"),
+                errors: rowErrors,
+                isDuplicateInFile,
+                isDuplicateInDb,
+                duplicateLeadId: existingLead?.leadId,
+            };
+        });
+        // 5. Build summary
+        const summary = {
+            total: previewRows.length,
+            valid: previewRows.filter((r) => r.status === "valid").length,
+            invalid: previewRows.filter((r) => r.status === "invalid").length,
+            duplicatesInFile: previewRows.filter((r) => r.isDuplicateInFile).length,
+            duplicatesInDb: previewRows.filter((r) => r.isDuplicateInDb).length,
+        };
+        logger_1.default.info("Bulk lead import preview completed", {
+            fileName,
+            total: summary.total,
+            valid: summary.valid,
+            invalid: summary.invalid,
+            duplicatesInFile: summary.duplicatesInFile,
+            duplicatesInDb: summary.duplicatesInDb,
+        });
+        return { rows: previewRows, summary };
+    }
+    /**
      * Bulk import leads from CSV
      */
     static async bulkImportLeads(fileBuffer, fileName, adminUid, adminName, source, defaultPrimaryCategory, defaultSecondaryCategory) {
@@ -224,6 +345,12 @@ class BulkLeadImportService {
             importRecord.totalRows = rows.length;
             const importedLeadIds = [];
             const errors = [];
+            // STEP 1: Bulk duplicate check - Check ALL phones at once (single MongoDB query)
+            const allPhones = rows.map((r) => r.phone).filter(Boolean);
+            const existingLeadsByPhoneMap = await DuplicateCheckService_1.DuplicateCheckService.checkPhonesBulk(allPhones);
+            logger_1.default.info(`Performing bulk duplicate check for ${allPhones.length} phone numbers`);
+            // STEP 2: Track in-file duplicates
+            const seenPhonesInFile = new Set();
             // Process each row
             for (let i = 0; i < rows.length; i++) {
                 const row = rows[i];
@@ -241,13 +368,32 @@ class BulkLeadImportService {
                     }
                     // Normalize phone
                     const normalizedPhone = DuplicateCheckService_1.DuplicateCheckService.normalizePhone(row.phone);
-                    // Check for duplicates
-                    const duplicateCheck = await DuplicateCheckService_1.DuplicateCheckService.checkDuplicate(normalizedPhone, row.name, row.city);
-                    if (duplicateCheck.isDuplicate) {
+                    // Check for duplicate within this file first
+                    if (seenPhonesInFile.has(normalizedPhone)) {
+                        errors.push({
+                            row: rowNumber,
+                            phone: row.phone,
+                            error: `Duplicate phone number within uploaded file (first occurrence will be processed)`,
+                        });
+                        logger_1.default.debug(`Skipping in-file duplicate`, {
+                            row: rowNumber,
+                            phone: normalizedPhone,
+                        });
+                        continue;
+                    }
+                    seenPhonesInFile.add(normalizedPhone);
+                    // Check for duplicate in database (using bulk result)
+                    const existingLead = existingLeadsByPhoneMap.get(normalizedPhone);
+                    if (existingLead) {
                         errors.push({
                             row: rowNumber,
                             phone: normalizedPhone,
-                            error: `Duplicate lead found: ${duplicateCheck.existingLead?.leadId || 'existing'}`,
+                            error: `Duplicate lead found: ${existingLead.leadId}`,
+                        });
+                        logger_1.default.debug(`Skipping duplicate lead`, {
+                            row: rowNumber,
+                            phone: normalizedPhone,
+                            existingLeadId: existingLead.leadId,
                         });
                         continue;
                     }
@@ -390,11 +536,11 @@ class BulkLeadImportService {
         }).join(',');
         // Add note at the top if categories are pre-selected
         let csvContent = '';
-        if (primaryCategory && secondaryCategory) {
-            csvContent += `# Template for ${primaryCategory} - ${secondaryCategory}\n`;
-            csvContent += `# Categories are pre-selected and will be applied to all rows automatically\n`;
-            csvContent += `# You don't need to include category columns in your CSV\n`;
-        }
+        // if (primaryCategory && secondaryCategory) {
+        //   csvContent += `# Template for ${primaryCategory} - ${secondaryCategory}\n`;
+        //   csvContent += `# Categories are pre-selected and will be applied to all rows automatically\n`;
+        //   csvContent += `# You don't need to include category columns in your CSV\n`;
+        // }
         csvContent += `${escapedHeaders}\n${escapedRow}`;
         return csvContent;
     }

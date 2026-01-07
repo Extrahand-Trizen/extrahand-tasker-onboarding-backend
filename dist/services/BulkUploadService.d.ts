@@ -55,6 +55,34 @@ export declare class BulkUploadService {
         errors: string[];
     };
     /**
+     * Preview bulk upload without creating any records
+     * Returns parsed data with validation and duplicate checks
+     */
+    static previewBulkUpload(fileBuffer: Buffer, fileName: string, defaultPrimaryCategory?: string, defaultSecondaryCategory?: string): Promise<{
+        rows: Array<{
+            rowNumber: number;
+            name: string;
+            phone?: string;
+            email?: string;
+            city: string;
+            primaryCategory: string;
+            secondaryCategory: string;
+            experienceLevel?: string;
+            status: "valid" | "invalid";
+            errors: string[];
+            isDuplicateInFile: boolean;
+            isDuplicateInDb: boolean;
+            duplicateLeadId?: string;
+        }>;
+        summary: {
+            total: number;
+            valid: number;
+            invalid: number;
+            duplicatesInFile: number;
+            duplicatesInDb: number;
+        };
+    }>;
+    /**
      * Process bulk operations (create, update, delete) - Optimized with Firebase and MongoDB bulk operations
      */
     static processBulkUpload(fileBuffer: Buffer, fileName: string, adminUid: string, defaultPrimaryCategory?: string, defaultSecondaryCategory?: string): Promise<BulkUploadResult>;

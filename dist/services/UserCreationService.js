@@ -434,8 +434,22 @@ class UserCreationService {
      * Format phone to E.164 format
      */
     static formatPhone(phone) {
-        const cleaned = phone.replace(/\s+/g, '').replace(/-/g, '');
-        return cleaned.startsWith('+') ? cleaned : `+${cleaned}`;
+        // Remove all non-digits
+        let digits = phone.replace(/\D/g, '');
+        // If starts with India country code and has 12 digits, strip the 91
+        if (digits.startsWith('91') && digits.length === 12) {
+            digits = digits.slice(2);
+        }
+        // If exactly 10 digits, assume India and prepend +91
+        if (digits.length === 10) {
+            return `+91${digits}`;
+        }
+        // If already includes country code (11-15 digits), prepend +
+        if (digits.length >= 11 && digits.length <= 15) {
+            return `+${digits}`;
+        }
+        // Fallback: return with plus, even if length unexpected
+        return `+${digits}`;
     }
     static generateTempPassword() {
         const length = 12;

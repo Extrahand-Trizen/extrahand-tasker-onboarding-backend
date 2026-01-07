@@ -58,11 +58,21 @@ export class BulkUploadService {
     const ext = fileName.split(".").pop()?.toLowerCase();
 
     if (ext === "csv") {
-      const records = parse(buffer.toString(), {
+      const recordsRaw = parse(buffer.toString(), {
         columns: true,
         skip_empty_lines: true,
         trim: true,
         relax_column_count: true,
+      }) as any[];
+
+      // Normalize header keys by trimming whitespace (e.g., 'Phone Number ' -> 'Phone Number')
+      const records = recordsRaw.map((record) => {
+        const normalized: any = {};
+        Object.keys(record).forEach((key) => {
+          const trimmedKey = key.trim();
+          normalized[trimmedKey] = record[key];
+        });
+        return normalized;
       });
       return this.normalizeRecords(
         records,
@@ -72,7 +82,18 @@ export class BulkUploadService {
     } else if (["xlsx", "xls"].includes(ext || "")) {
       const workbook = XLSX.read(buffer, { type: "buffer" });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const records = XLSX.utils.sheet_to_json(sheet);
+      const recordsRaw = XLSX.utils.sheet_to_json(sheet);
+
+      // Normalize header keys by trimming whitespace for Excel as well
+      const records = recordsRaw.map((record: any) => {
+        const normalized: any = {};
+        Object.keys(record).forEach((key) => {
+          const trimmedKey = key.trim();
+          normalized[trimmedKey] = record[key];
+        });
+        return normalized;
+      });
+
       return this.normalizeRecords(
         records,
         defaultPrimaryCategory,
@@ -91,7 +112,69 @@ export class BulkUploadService {
     defaultPrimaryCategory?: string,
     defaultSecondaryCategory?: string
   ): ParsedUser[] {
-    return records.map((record) => {
+    // Filter out comment rows (lines starting with '#'), header rows and empty rows
+    const cleanedRecords = records.filter((record) => {
+      if (!record) return false;
+      const values = Object.values(record).map((v) =>
+        v === undefined || v === null ? "" : String(v).trim()
+      );
+      // Skip if all values are empty
+      if (values.every((v) => v === "")) return false;
+      // Skip if the first cell is a comment (starts with '#')
+      if (values[0]?.startsWith("#")) return false;
+
+      // Skip header rows that were accidentally treated as data rows.
+      // Example: a sheet where the real header row is not the very first row,
+      // so it shows up in `records` as data with values like "Full Name", "Phone Number", etc.
+      const headerIndicators = new Set(
+        [
+          "full name",
+          "phone number",
+          "mobile number",
+          "email (optional)",
+          "city / area",
+          "state (optional)",
+          "address",
+          "pincode",
+          "primary category",
+          "secondary category",
+          "experience level (beginner/intermediate/experienced)",
+          "years of experience (optional)",
+          "working days (optional)",
+          "preferred time slot (optional)",
+          "source (referral/campaign/walk-in/agent/other)",
+        ].map((s) => s.toLowerCase())
+      );
+
+      const looksLikeHeaderRow = values.some((v) =>
+        headerIndicators.has(v.toLowerCase())
+      );
+      if (looksLikeHeaderRow) return false;
+
+      return true;
+    });
+
+    return cleanedRecords.map((record, index) => {
+      // Extra-safe detection for phone field: if standard keys are missing,
+      // look for any header that contains "phone" or "mobile".
+      const detectPhoneFromAnyKey = (): string | undefined => {
+        for (const [key, value] of Object.entries(record)) {
+          if (value === undefined || value === null || value === "") continue;
+          const normalizedKey = key.toLowerCase().replace(/\s+/g, "");
+          if (
+            normalizedKey.includes("phonenumber") ||
+            normalizedKey.includes("mobilenumber") ||
+            normalizedKey === "phone" ||
+            normalizedKey === "mobile" ||
+            normalizedKey.includes("phone") ||
+            normalizedKey.includes("mobile")
+          ) {
+            return value.toString().trim();
+          }
+        }
+        return undefined;
+      };
+
       // Detect operation type (default to 'create' if not specified)
       const operation = (
         record.operation ||
@@ -122,17 +205,39 @@ export class BulkUploadService {
         defaultSecondaryCategory ||
         undefined;
 
+      const directPhone =
+        record.phone ||
+        record.Phone ||
+        record["Phone Number"] ||
+        record["Mobile Number"] ||
+        "";
+
+      const phoneValue =
+        directPhone && directPhone.toString().trim() !== ""
+          ? directPhone.toString().trim()
+          : detectPhoneFromAnyKey();
+
+      // Debug logging for the first few rows to help diagnose header/phone issues
+      if (index < 5) {
+        try {
+          logger.debug("BulkUpload normalizeRecords row", {
+            index,
+            keys: Object.keys(record),
+            rawRecord: record,
+            resolvedPhone: phoneValue,
+          });
+        } catch {
+          // avoid breaking flow if logging fails
+        }
+      }
+
       return {
         operation: operation as "create" | "update" | "delete",
         uid: record.uid || record.UID || undefined,
         name:
-          record.name || record.Name || record["Full Name"] || "Unknown Tasker",
-        phone:
-          record.phone ||
-          record.Phone ||
-          record["Phone Number"] ||
-          record["Mobile Number"] ||
-          `9${Math.floor(100000000 + Math.random() * 900000000)}`,
+          (record.name || record.Name || record["Full Name"] || "").toString().trim() ||
+          "Unknown Tasker",
+        phone: phoneValue || undefined,
         email: record.email || record.Email || undefined,
         address:
           record.address ||
@@ -246,17 +351,17 @@ export class BulkUploadService {
           errors.push(`Row ${row}: Full Name is required for create operation`);
         }
 
-        // if (!user.phone) {
-        //   errors.push(
-        //     `Row ${row}: Mobile Number is required for create operation`
-        //   );
-        // }
-
-        // if (user.phone && !this.isValidPhone(user.phone)) {
-        //   errors.push(
-        //     `Row ${row}: Invalid phone format: ${user.phone}. Expected E.164 format (e.g., +919876543210)`
-        //   );
-        // }
+        if (!user.phone) {
+          errors.push(
+            `Row ${row}: Mobile Number is required for create operation (debug user=${JSON.stringify(
+              user
+            )})`
+          );
+        } else if (!this.isValidPhone(user.phone)) {
+          errors.push(
+            `Row ${row}: Invalid phone format: ${user.phone}. Expected a 10-digit Indian number (e.g., 9876543210)`
+          );
+        }
 
         // if (!user.city || user.city.trim() === "") {
         //   errors.push(`Row ${row}: City is required for create operation`);
@@ -312,6 +417,144 @@ export class BulkUploadService {
       isValid: errors.length === 0,
       errors,
     };
+  }
+
+  /**
+   * Preview bulk upload without creating any records
+   * Returns parsed data with validation and duplicate checks
+   */
+  static async previewBulkUpload(
+    fileBuffer: Buffer,
+    fileName: string,
+    defaultPrimaryCategory?: string,
+    defaultSecondaryCategory?: string
+  ): Promise<{
+    rows: Array<{
+      rowNumber: number;
+      name: string;
+      phone?: string;
+      email?: string;
+      city: string;
+      primaryCategory: string;
+      secondaryCategory: string;
+      experienceLevel?: string;
+      status: "valid" | "invalid";
+      errors: string[];
+      isDuplicateInFile: boolean;
+      isDuplicateInDb: boolean;
+      duplicateLeadId?: string;
+    }>;
+    summary: {
+      total: number;
+      valid: number;
+      invalid: number;
+      duplicatesInFile: number;
+      duplicatesInDb: number;
+    };
+  }> {
+    // 1. Parse file
+    const users = this.parseFile(
+      fileBuffer,
+      fileName,
+      defaultPrimaryCategory,
+      defaultSecondaryCategory
+    );
+
+    // 2. Validate
+    const validation = this.validateUsers(users);
+
+    // 3. Only preview create operations
+    const createUsers = users.filter(
+      (u) => (u.operation || "create") === "create"
+    );
+
+    // 4. Bulk duplicate check against database
+    const allPhones = createUsers
+      .map((u) => u.phone)
+      .filter((p): p is string => !!p);
+
+    const existingLeadsByPhoneMap = await DuplicateCheckService.checkPhonesBulk(
+      allPhones
+    );
+
+    // 5. Track in-file duplicates
+    const seenPhonesInFile = new Set<string>();
+
+    // 6. Build preview rows
+    const previewRows = createUsers.map((user, index) => {
+      const rowNumber = index + 2; // +2 for header row and 0-index
+      const normalizedPhone = user.phone
+        ? DuplicateCheckService.normalizePhone(user.phone)
+        : "";
+
+      // Check in-file duplicate
+      const isDuplicateInFile =
+        normalizedPhone !== "" && seenPhonesInFile.has(normalizedPhone);
+      if (!isDuplicateInFile && normalizedPhone) {
+        seenPhonesInFile.add(normalizedPhone);
+      }
+
+      // Check database duplicate
+      const existingLead = normalizedPhone
+        ? existingLeadsByPhoneMap.get(normalizedPhone)
+        : undefined;
+      const isDuplicateInDb = !!existingLead;
+
+      // Collect row-specific validation errors
+      const rowErrors: string[] = [];
+      validation.errors
+        .filter((msg) => msg.startsWith(`Row ${rowNumber}:`))
+        .forEach((msg) => {
+          rowErrors.push(msg.replace(`Row ${rowNumber}: `, ""));
+        });
+
+      // Add duplicate errors
+      if (isDuplicateInFile) {
+        rowErrors.push("Duplicate phone number within uploaded file");
+      }
+      if (isDuplicateInDb && existingLead) {
+        rowErrors.push(`Duplicate in system: ${existingLead.leadId}`);
+      }
+
+      return {
+        rowNumber,
+        name: user.name || "Unknown",
+        phone: user.phone,
+        email: user.email,
+        city: user.city || "Unknown",
+        primaryCategory: user.primaryCategory || user.primarySkill || "other",
+        secondaryCategory:
+          user.secondaryCategory || user.secondarySkill || "",
+        experienceLevel: user.experienceLevel,
+        status: (rowErrors.length === 0 ? "valid" : "invalid") as
+          | "valid"
+          | "invalid",
+        errors: rowErrors,
+        isDuplicateInFile,
+        isDuplicateInDb,
+        duplicateLeadId: existingLead?.leadId,
+      };
+    });
+
+    // 7. Build summary
+    const summary = {
+      total: previewRows.length,
+      valid: previewRows.filter((r) => r.status === "valid").length,
+      invalid: previewRows.filter((r) => r.status === "invalid").length,
+      duplicatesInFile: previewRows.filter((r) => r.isDuplicateInFile).length,
+      duplicatesInDb: previewRows.filter((r) => r.isDuplicateInDb).length,
+    };
+
+    logger.info("Bulk upload preview completed", {
+      fileName,
+      total: summary.total,
+      valid: summary.valid,
+      invalid: summary.invalid,
+      duplicatesInFile: summary.duplicatesInFile,
+      duplicatesInDb: summary.duplicatesInDb,
+    });
+
+    return { rows: previewRows, summary };
   }
 
   /**
@@ -551,12 +794,30 @@ export class BulkUploadService {
       error: string;
     }> = [];
 
+    // Track phones seen within this file to detect in-file duplicates
+    const seenPhonesInFile = new Set<string>();
+
     users.forEach((user, index) => {
       const csvRowNumber = index + 2; // +2 for header row and 0-index
       const normalizedPhone = DuplicateCheckService.normalizePhone(user.phone!);
       const formattedPhoneForApi = UserCreationService.formatPhone(user.phone!);
 
-      // Check if lead already exists
+      // Check for duplicate within this file first
+      if (seenPhonesInFile.has(normalizedPhone)) {
+        duplicateErrors.push({
+          row: csvRowNumber,
+          phone: user.phone,
+          error: `Duplicate phone number within uploaded file (first occurrence will be processed)`,
+        });
+        logger.debug(`Skipping in-file duplicate`, {
+          row: csvRowNumber,
+          phone: normalizedPhone,
+        });
+        return;
+      }
+      seenPhonesInFile.add(normalizedPhone);
+
+      // Check if lead already exists in database
       if (existingLeadsByPhoneMap.has(normalizedPhone)) {
         const existingLead = existingLeadsByPhoneMap.get(normalizedPhone);
         duplicateErrors.push({
@@ -644,43 +905,50 @@ export class BulkUploadService {
         const leadCreationPromises = currentBatch.map(
           async (userToProcess): Promise<LeadCreationResult> => {
             try {
-              const createdLead = await LeadService.createLead({
-                name: userToProcess.user.name!,
-                phone: userToProcess.user.phone!,
-                email: userToProcess.user.email,
-                city: userToProcess.user.city || "Unknown",
-                state: userToProcess.user.state,
-                address: userToProcess.user.address,
-                pincode: userToProcess.user.pincode,
-                primaryCategory:
-                  userToProcess.user.primaryCategory ||
-                  userToProcess.user.primarySkill ||
-                  "other",
-                primarySkill:
-                  userToProcess.user.primaryCategory ||
-                  userToProcess.user.primarySkill ||
-                  "other", // For backward compatibility
-                secondaryCategory:
-                  userToProcess.user.secondaryCategory ||
-                  userToProcess.user.secondarySkill ||
-                  "",
-                secondarySkill:
-                  userToProcess.user.secondaryCategory ||
-                  userToProcess.user.secondarySkill ||
-                  "", // For backward compatibility
-                experienceLevel: (userToProcess.user.experienceLevel ||
-                  "intermediate") as
-                  | "beginner"
-                  | "intermediate"
-                  | "experienced",
-                workingDays: userToProcess.user.workingDays,
-                preferredTimeSlot: userToProcess.user.preferredTimeSlot,
-                source: (userToProcess.user.source as any) || "campaign",
-                sourceDetails: `Bulk upload: ${importId}`,
-                agentCampaignId: userToProcess.user.agentCampaignId,
-                addedBy: adminUid,
-                addedByName: undefined,
-              });
+              const createdLead = await LeadService.createLead(
+                {
+                  name: userToProcess.user.name!,
+                  phone: userToProcess.user.phone!,
+                  email: userToProcess.user.email,
+                  city: userToProcess.user.city || "Unknown",
+                  state: userToProcess.user.state,
+                  address: userToProcess.user.address,
+                  pincode: userToProcess.user.pincode,
+                  primaryCategory:
+                    userToProcess.user.primaryCategory ||
+                    userToProcess.user.primarySkill ||
+                    "other",
+                  primarySkill:
+                    userToProcess.user.primaryCategory ||
+                    userToProcess.user.primarySkill ||
+                    "other", // For backward compatibility
+                  secondaryCategory:
+                    userToProcess.user.secondaryCategory ||
+                    userToProcess.user.secondarySkill ||
+                    "",
+                  secondarySkill:
+                    userToProcess.user.secondaryCategory ||
+                    userToProcess.user.secondarySkill ||
+                    "", // For backward compatibility
+                  experienceLevel: (userToProcess.user.experienceLevel ||
+                    "intermediate") as
+                    | "beginner"
+                    | "intermediate"
+                    | "experienced",
+                  workingDays: userToProcess.user.workingDays,
+                  preferredTimeSlot: userToProcess.user.preferredTimeSlot,
+                  source: (userToProcess.user.source as any) || "campaign",
+                  sourceDetails: `Bulk upload: ${importId}`,
+                  agentCampaignId: userToProcess.user.agentCampaignId,
+                  addedBy: adminUid,
+                  addedByName: undefined,
+                },
+                {
+                  // For bulk uploads, rely on phone duplicate check only
+                  // to avoid false positives on name+city fuzzy matching.
+                  skipNameCityDuplicate: true,
+                }
+              );
 
               // Update lead status and creationMethod
               createdLead.status = "account_created";

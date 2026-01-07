@@ -82,17 +82,22 @@ export class LeadService {
   /**
    * Create a new lead
    */
-  static async createLead(data: CreateLeadData): Promise<ILead> {
+  static async createLead(
+    data: CreateLeadData,
+    options?: { skipNameCityDuplicate?: boolean }
+  ): Promise<ILead> {
     try {
       // Normalize phone
       const normalizedPhone = DuplicateCheckService.normalizePhone(data.phone);
 
       // Check for duplicates
-      const duplicateCheck = await DuplicateCheckService.checkDuplicate(
-        normalizedPhone,
-        data.name,
-        data.city
-      );
+      const duplicateCheck = options?.skipNameCityDuplicate
+        ? await DuplicateCheckService.checkPhoneDuplicate(normalizedPhone)
+        : await DuplicateCheckService.checkDuplicate(
+            normalizedPhone,
+            data.name,
+            data.city
+          );
 
       if (duplicateCheck.isDuplicate && duplicateCheck.existingLead) {
         throw new Error(
@@ -285,12 +290,13 @@ export class LeadService {
         }
       }
 
-      // Text search (name or phone)
+      // Text search (name, phone, city, or leadId)
       if (filters.search) {
         const searchRegex = new RegExp(filters.search, 'i');
         query.$or = [
           { name: searchRegex },
           { phone: searchRegex },
+          { city: searchRegex },
           { leadId: searchRegex }
         ];
       }

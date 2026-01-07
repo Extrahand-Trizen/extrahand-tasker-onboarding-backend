@@ -47,6 +47,34 @@ export declare class BulkLeadImportService {
         error?: string;
     };
     /**
+     * Preview bulk import (validation + duplicate check, no records created)
+     */
+    static previewBulkImport(fileBuffer: Buffer, fileName: string, defaultPrimaryCategory?: string, defaultSecondaryCategory?: string): Promise<{
+        rows: Array<{
+            rowNumber: number;
+            name: string;
+            phone: string;
+            email?: string;
+            city: string;
+            state: string;
+            primaryCategory: string;
+            secondaryCategory: string;
+            experienceLevel?: string;
+            status: "valid" | "invalid";
+            errors: string[];
+            isDuplicateInFile: boolean;
+            isDuplicateInDb: boolean;
+            duplicateLeadId?: string;
+        }>;
+        summary: {
+            total: number;
+            valid: number;
+            invalid: number;
+            duplicatesInFile: number;
+            duplicatesInDb: number;
+        };
+    }>;
+    /**
      * Bulk import leads from CSV
      */
     static bulkImportLeads(fileBuffer: Buffer, fileName: string, adminUid: string, adminName?: string, source?: LeadSource, defaultPrimaryCategory?: string, defaultSecondaryCategory?: string): Promise<BulkLeadImportResult>;

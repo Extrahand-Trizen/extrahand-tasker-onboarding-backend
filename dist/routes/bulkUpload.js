@@ -6,7 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const multer_1 = __importDefault(require("multer"));
 const BulkUploadController_1 = require("../controllers/BulkUploadController");
-const serviceAuth_1 = require("../middleware/serviceAuth");
+const adminAuth_1 = require("../middleware/adminAuth");
 const router = express_1.default.Router();
 const upload = (0, multer_1.default)({
     storage: multer_1.default.memoryStorage(),
@@ -23,8 +23,10 @@ const upload = (0, multer_1.default)({
         }
     }
 });
-// All routes require service authentication
-router.use(serviceAuth_1.serviceAuthMiddleware);
+// All bulk upload routes require authenticated admin (Firebase Admin token)
+router.use(adminAuth_1.adminAuthMiddleware);
+// Preview bulk upload (dry run - no records created)
+router.post('/preview', upload.single('file'), BulkUploadController_1.BulkUploadController.previewBulkUpload);
 // Bulk upload
 router.post('/upload', upload.single('file'), BulkUploadController_1.BulkUploadController.bulkUpload);
 // Download template

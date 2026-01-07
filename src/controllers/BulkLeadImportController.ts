@@ -7,6 +7,55 @@ import Lead from '../models/Lead';
 
 export class BulkLeadImportController {
   /**
+   * Preview bulk import (validation + duplicate check, no records created)
+   * POST /api/v1/onboarding/leads/bulk-import/preview
+   */
+  static async previewBulkImport(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      if (!req.admin) {
+        res.status(401).json({
+          success: false,
+          error: 'Authentication required',
+        });
+        return;
+      }
+
+      const file = (req as any).file;
+      if (!file) {
+        res.status(400).json({
+          success: false,
+          error: 'CSV file is required',
+        });
+        return;
+      }
+
+      const { primaryCategory, secondaryCategory } = req.body;
+
+      const preview = await BulkLeadImportService.previewBulkImport(
+        file.buffer,
+        file.originalname,
+        primaryCategory,
+        secondaryCategory
+      );
+
+      res.json({
+        success: true,
+        data: preview,
+      });
+    } catch (error: any) {
+      logger.error('Error in previewBulkImport controller', {
+        error: error.message,
+        stack: error.stack,
+      });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to preview import',
+        message: error.message,
+      });
+    }
+  }
+
+  /**
    * Bulk import leads from CSV
    * POST /api/v1/admin/caos/leads/bulk-import
    */

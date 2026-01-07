@@ -2,6 +2,11 @@ import { Response } from 'express';
 import { AdminRequest } from '../middleware/adminAuth';
 export declare class BulkLeadImportController {
     /**
+     * Preview bulk import (validation + duplicate check, no records created)
+     * POST /api/v1/onboarding/leads/bulk-import/preview
+     */
+    static previewBulkImport(req: AdminRequest, res: Response): Promise<void>;
+    /**
      * Bulk import leads from CSV
      * POST /api/v1/admin/caos/leads/bulk-import
      */

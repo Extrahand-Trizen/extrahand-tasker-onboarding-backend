@@ -23,6 +23,14 @@ const upload = multer({
 // All routes require admin authentication
 router.use(adminAuthMiddleware);
 
+// Preview bulk import (dry run - no records created)
+router.post(
+  '/preview',
+  requirePermission('canBulkImport'),
+  upload.single('file'),
+  BulkLeadImportController.previewBulkImport
+);
+
 // Bulk import leads
 router.post(
   '/',

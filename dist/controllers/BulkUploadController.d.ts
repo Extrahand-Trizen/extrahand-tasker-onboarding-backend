@@ -1,9 +1,14 @@
 import { Request, Response, NextFunction } from "express";
+import { AdminRequest } from "../middleware/adminAuth";
 export declare class BulkUploadController {
+    /**
+     * Preview bulk upload without creating records
+     */
+    static previewBulkUpload(req: AdminRequest, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
     /**
      * Upload and process CSV/Excel file
      */
-    static bulkUpload(req: Request, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
+    static bulkUpload(req: AdminRequest, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
     /**
      * Download CSV template based on operation type
      */
@@ -11,7 +16,7 @@ export declare class BulkUploadController {
     /**
      * Get import history
      */
-    static getImportHistory(req: Request, res: Response, next: NextFunction): Promise<void>;
+    static getImportHistory(req: AdminRequest, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
     /**
      * Get import details
      */

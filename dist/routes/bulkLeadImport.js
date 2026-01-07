@@ -26,6 +26,8 @@ const upload = (0, multer_1.default)({
 });
 // All routes require admin authentication
 router.use(adminAuth_1.adminAuthMiddleware);
+// Preview bulk import (dry run - no records created)
+router.post('/preview', (0, roleAuth_1.requirePermission)('canBulkImport'), upload.single('file'), BulkLeadImportController_1.BulkLeadImportController.previewBulkImport);
 // Bulk import leads
 router.post('/', (0, roleAuth_1.requirePermission)('canBulkImport'), upload.single('file'), BulkLeadImportController_1.BulkLeadImportController.bulkImport);
 // Download template

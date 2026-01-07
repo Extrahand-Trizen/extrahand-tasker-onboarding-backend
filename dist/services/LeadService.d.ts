@@ -68,7 +68,9 @@ export declare class LeadService {
     /**
      * Create a new lead
      */
-    static createLead(data: CreateLeadData): Promise<ILead>;
+    static createLead(data: CreateLeadData, options?: {
+        skipNameCityDuplicate?: boolean;
+    }): Promise<ILead>;
     /**
      * Get lead by ID
      */

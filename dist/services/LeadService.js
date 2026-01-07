@@ -21,12 +21,14 @@ class LeadService {
     /**
      * Create a new lead
      */
-    static async createLead(data) {
+    static async createLead(data, options) {
         try {
             // Normalize phone
             const normalizedPhone = DuplicateCheckService_1.DuplicateCheckService.normalizePhone(data.phone);
             // Check for duplicates
-            const duplicateCheck = await DuplicateCheckService_1.DuplicateCheckService.checkDuplicate(normalizedPhone, data.name, data.city);
+            const duplicateCheck = options?.skipNameCityDuplicate
+                ? await DuplicateCheckService_1.DuplicateCheckService.checkPhoneDuplicate(normalizedPhone)
+                : await DuplicateCheckService_1.DuplicateCheckService.checkDuplicate(normalizedPhone, data.name, data.city);
             if (duplicateCheck.isDuplicate && duplicateCheck.existingLead) {
                 throw new Error(`Duplicate lead found: ${duplicateCheck.existingLead.leadId} (${duplicateCheck.matchType})`);
             }
@@ -177,12 +179,13 @@ class LeadService {
                     query.createdAt.$lte = filters.endDate;
                 }
             }
-            // Text search (name or phone)
+            // Text search (name, phone, city, or leadId)
             if (filters.search) {
                 const searchRegex = new RegExp(filters.search, 'i');
                 query.$or = [
                     { name: searchRegex },
                     { phone: searchRegex },
+                    { city: searchRegex },
                     { leadId: searchRegex }
                 ];
             }

@@ -22,6 +22,9 @@ const upload = multer({
 // All bulk upload routes require authenticated admin (Firebase Admin token)
 router.use(adminAuthMiddleware);
 
+// Preview bulk upload (dry run - no records created)
+router.post('/preview', upload.single('file'), BulkUploadController.previewBulkUpload);
+
 // Bulk upload
 router.post('/upload', upload.single('file'), BulkUploadController.bulkUpload);
 

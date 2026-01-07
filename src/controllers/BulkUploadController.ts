@@ -5,12 +5,17 @@ import Lead from "../models/Lead";
 import logger from "../config/logger";
 import axios from "axios";
 import { env } from "../config/env";
+import { AdminRequest } from "../middleware/adminAuth";
 
 export class BulkUploadController {
   /**
-   * Upload and process CSV/Excel file
+   * Preview bulk upload without creating records
    */
-  static async bulkUpload(req: Request, res: Response, next: NextFunction) {
+  static async previewBulkUpload(
+    req: AdminRequest,
+    res: Response,
+    next: NextFunction
+  ) {
     try {
       if (!req.file) {
         return res.status(400).json({
@@ -19,7 +24,52 @@ export class BulkUploadController {
         });
       }
 
-      const adminUid = req.headers["x-user-id"] as string;
+      const primaryCategory = req.body.primaryCategory as string | undefined;
+      const secondaryCategory = req.body.secondaryCategory as
+        | string
+        | undefined;
+
+      const preview = await BulkUploadService.previewBulkUpload(
+        req.file.buffer,
+        req.file.originalname,
+        primaryCategory,
+        secondaryCategory
+      );
+
+      res.json({
+        success: true,
+        data: preview,
+      });
+    } catch (error: any) {
+      logger.error("Bulk upload preview error", { error: error.message });
+      next(error);
+    }
+  }
+
+  /**
+   * Upload and process CSV/Excel file
+   */
+  static async bulkUpload(
+    req: AdminRequest,
+    res: Response,
+    next: NextFunction
+  ) {
+    try {
+      if (!req.file) {
+        return res.status(400).json({
+          success: false,
+          error: "File is required",
+        });
+      }
+
+      // Admin UID from authenticated admin (set by adminAuthMiddleware)
+      // Fallbacks:
+      // - req.user.uid (backward compatibility)
+      // - X-User-Id header (service-to-service calls)
+      const adminUid =
+        req.admin?.uid ||
+        (req.user as any)?.uid ||
+        (req.headers["x-user-id"] as string | undefined);
       if (!adminUid) {
         return res.status(401).json({
           success: false,
@@ -118,11 +168,11 @@ export class BulkUploadController {
       ];
 
       // Add note at the top if categories are pre-selected
-      if (primaryCategory && secondaryCategory) {
-        csv += `# Template for ${primaryCategory} - ${secondaryCategory}\n`;
-        csv += `# Categories are pre-selected and will be applied to all rows automatically\n`;
-        csv += `# You don't need to include category columns in your CSV\n`;
-      }
+      // if (primaryCategory && secondaryCategory) {
+      //   csv += `# Template for ${primaryCategory} - ${secondaryCategory}\n`;
+      //   csv += `# Categories are pre-selected and will be applied to all rows automatically\n`;
+      //   csv += `# You don't need to include category columns in your CSV\n`;
+      // }
 
       csv += headers.join(",") + "\n";
       csv +=
@@ -158,12 +208,18 @@ Raj Kumar,9876543211,raj@example.com,Mumbai,Maharashtra,456 Worker Lane Andheri 
    * Get import history
    */
   static async getImportHistory(
-    req: Request,
+    req: AdminRequest,
     res: Response,
     next: NextFunction
   ) {
     try {
-      const adminUid = req.headers["x-user-id"] as string;
+      const adminUid = req.admin?.uid;
+      if (!adminUid) {
+        return res.status(401).json({
+          success: false,
+          error: "Admin UID required",
+        });
+      }
       const page = parseInt(req.query.page as string) || 1;
       const limit = parseInt(req.query.limit as string) || 20;
       const skip = (page - 1) * limit;

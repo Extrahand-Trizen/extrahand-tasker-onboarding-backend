@@ -12,6 +12,30 @@ const axios_1 = __importDefault(require("axios"));
 const env_1 = require("../config/env");
 class BulkUploadController {
     /**
+     * Preview bulk upload without creating records
+     */
+    static async previewBulkUpload(req, res, next) {
+        try {
+            if (!req.file) {
+                return res.status(400).json({
+                    success: false,
+                    error: "File is required",
+                });
+            }
+            const primaryCategory = req.body.primaryCategory;
+            const secondaryCategory = req.body.secondaryCategory;
+            const preview = await BulkUploadService_1.BulkUploadService.previewBulkUpload(req.file.buffer, req.file.originalname, primaryCategory, secondaryCategory);
+            res.json({
+                success: true,
+                data: preview,
+            });
+        }
+        catch (error) {
+            logger_1.default.error("Bulk upload preview error", { error: error.message });
+            next(error);
+        }
+    }
+    /**
      * Upload and process CSV/Excel file
      */
     static async bulkUpload(req, res, next) {
@@ -22,7 +46,13 @@ class BulkUploadController {
                     error: "File is required",
                 });
             }
-            const adminUid = req.headers["x-user-id"];
+            // Admin UID from authenticated admin (set by adminAuthMiddleware)
+            // Fallbacks:
+            // - req.user.uid (backward compatibility)
+            // - X-User-Id header (service-to-service calls)
+            const adminUid = req.admin?.uid ||
+                req.user?.uid ||
+                req.headers["x-user-id"];
             if (!adminUid) {
                 return res.status(401).json({
                     success: false,
@@ -105,11 +135,11 @@ class BulkUploadController {
                 "campaign",
             ];
             // Add note at the top if categories are pre-selected
-            if (primaryCategory && secondaryCategory) {
-                csv += `# Template for ${primaryCategory} - ${secondaryCategory}\n`;
-                csv += `# Categories are pre-selected and will be applied to all rows automatically\n`;
-                csv += `# You don't need to include category columns in your CSV\n`;
-            }
+            // if (primaryCategory && secondaryCategory) {
+            //   csv += `# Template for ${primaryCategory} - ${secondaryCategory}\n`;
+            //   csv += `# Categories are pre-selected and will be applied to all rows automatically\n`;
+            //   csv += `# You don't need to include category columns in your CSV\n`;
+            // }
             csv += headers.join(",") + "\n";
             csv +=
                 exampleRow1
@@ -143,7 +173,13 @@ Raj Kumar,9876543211,raj@example.com,Mumbai,Maharashtra,456 Worker Lane Andheri 
      */
     static async getImportHistory(req, res, next) {
         try {
-            const adminUid = req.headers["x-user-id"];
+            const adminUid = req.admin?.uid;
+            if (!adminUid) {
+                return res.status(401).json({
+                    success: false,
+                    error: "Admin UID required",
+                });
+            }
             const page = parseInt(req.query.page) || 1;
             const limit = parseInt(req.query.limit) || 20;
             const skip = (page - 1) * limit;
