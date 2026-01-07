@@ -26,8 +26,13 @@ export declare class ActivationService {
     /**
      * Store exact Aadhaar/PAN/Address data in verification service
      * Uses exact (unmasked) details entered during document verification
+     * Made public to allow immediate updates when documents are verified for existing accounts
      */
-    private static storeVerificationData;
+    static storeVerificationData(uid: string, data: {
+        aadhaarNumber?: string;
+        panNumber?: string;
+        addressDetails?: string;
+    }): Promise<void>;
     /**
      * Generate temporary password for new user
      */

@@ -360,6 +360,7 @@ class ActivationService {
     /**
      * Store exact Aadhaar/PAN/Address data in verification service
      * Uses exact (unmasked) details entered during document verification
+     * Made public to allow immediate updates when documents are verified for existing accounts
      */
     static async storeVerificationData(uid, data) {
         if (!env_1.env.VERIFICATION_SERVICE_URL) {

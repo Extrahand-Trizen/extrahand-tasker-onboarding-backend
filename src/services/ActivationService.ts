@@ -413,8 +413,9 @@ export class ActivationService {
   /**
    * Store exact Aadhaar/PAN/Address data in verification service
    * Uses exact (unmasked) details entered during document verification
+   * Made public to allow immediate updates when documents are verified for existing accounts
    */
-  private static async storeVerificationData(
+  static async storeVerificationData(
     uid: string,
     data: { aadhaarNumber?: string; panNumber?: string; addressDetails?: string }
   ): Promise<void> {

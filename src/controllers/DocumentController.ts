@@ -1,9 +1,12 @@
 import { Response } from 'express';
 import { AdminRequest } from '../middleware/adminAuth';
 import { LeadService } from '../services/LeadService';
+import { ActivationService } from '../services/ActivationService';
 import logger from '../config/logger';
 import { ILeadDocument } from '../models/Lead';
 import { maskAadhaar, maskPAN, validateAadhaar, validatePAN, sanitizeAadhaarInput, sanitizePANInput } from '../utils/compliance';
+import axios from 'axios';
+import { env } from '../config/env';
 
 export class DocumentController {
   /**
@@ -308,6 +311,108 @@ export class DocumentController {
           exactAddressDetails
         } : undefined
       );
+
+      if (!updatedLead) {
+        res.status(500).json({
+          success: false,
+          error: 'Failed to verify document',
+        });
+        return;
+      }
+
+      // ✅ For existing accounts: Update verification flags and store data immediately
+      if (status === 'verified' && updatedLead.activationData?.firebaseUid) {
+        const firebaseUid = updatedLead.activationData.firebaseUid;
+        const document = updatedLead.documents[index];
+        
+        logger.info('Document verified for existing account, updating immediately', {
+          leadId,
+          firebaseUid,
+          documentType: document.type
+        });
+
+        try {
+          // 1. Update Profile verification flags
+          const profileUpdate: any = {};
+          
+          if (document.type === 'aadhaar' && exactAadhaarNumber) {
+            profileUpdate.isAadhaarVerified = true;
+            profileUpdate.aadhaarVerifiedAt = document.verifiedAt;
+            profileUpdate.isVerified = true; // Set general verification flag
+            logger.info('Setting Aadhaar verification flags for existing account', {
+              leadId,
+              firebaseUid
+            });
+          }
+          
+          if (document.type === 'pan' && exactPANNumber) {
+            profileUpdate.isPANVerified = true;
+            profileUpdate.panVerifiedAt = document.verifiedAt;
+            profileUpdate.isVerified = true; // Set general verification flag
+            logger.info('Setting PAN verification flags for existing account', {
+              leadId,
+              firebaseUid
+            });
+          }
+          
+          // Update the profile if we have updates
+          if (Object.keys(profileUpdate).length > 0) {
+            await axios.patch(
+              `${env.USER_SERVICE_URL}/api/v1/profiles/${firebaseUid}`,
+              profileUpdate,
+              {
+                headers: {
+                  'Content-Type': 'application/json',
+                  'X-Service-Auth': env.SERVICE_AUTH_TOKEN
+                }
+              }
+            );
+            
+            logger.info('✅ Updated profile verification flags for existing account', {
+              leadId,
+              firebaseUid,
+              documentType: document.type,
+              updates: profileUpdate
+            });
+          }
+          
+          // 2. Store exact details in verification service
+          const verificationData: any = {};
+          if (document.type === 'aadhaar' && exactAadhaarNumber) {
+            verificationData.aadhaarNumber = exactAadhaarNumber;
+          }
+          if (document.type === 'pan' && exactPANNumber) {
+            verificationData.panNumber = exactPANNumber;
+          }
+          if (document.type === 'address_proof' && exactAddressDetails) {
+            verificationData.addressDetails = exactAddressDetails;
+          }
+          
+          if (Object.keys(verificationData).length > 0) {
+            await ActivationService.storeVerificationData(firebaseUid, verificationData);
+            
+            logger.info('✅ Stored verification data in verification service for existing account', {
+              leadId,
+              firebaseUid,
+              documentType: document.type
+            });
+          }
+        } catch (updateError: any) {
+          logger.warn('Failed to update existing account verification immediately', {
+            leadId,
+            firebaseUid,
+            error: updateError.message,
+            stack: updateError.stack
+          });
+          // Don't fail the document verification if immediate update fails
+          // The data is still stored in the lead document and can be synced later
+        }
+      } else if (status === 'verified') {
+        logger.info('Document verified for new lead, data will be used during activation', {
+          leadId,
+          documentType: updatedLead.documents[index].type
+        });
+      }
 
       res.json({
         success: true,

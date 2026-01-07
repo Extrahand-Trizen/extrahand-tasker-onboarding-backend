@@ -5,8 +5,11 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.DocumentController = void 0;
 const LeadService_1 = require("../services/LeadService");
+const ActivationService_1 = require("../services/ActivationService");
 const logger_1 = __importDefault(require("../config/logger"));
 const compliance_1 = require("../utils/compliance");
+const axios_1 = __importDefault(require("axios"));
+const env_1 = require("../config/env");
 class DocumentController {
     /**
      * Upload document for a lead
@@ -270,6 +273,95 @@ class DocumentController {
                 exactPANNumber,
                 exactAddressDetails
             } : undefined);
+            if (!updatedLead) {
+                res.status(500).json({
+                    success: false,
+                    error: 'Failed to verify document',
+                });
+                return;
+            }
+            // ✅ For existing accounts: Update verification flags and store data immediately
+            if (status === 'verified' && updatedLead.activationData?.firebaseUid) {
+                const firebaseUid = updatedLead.activationData.firebaseUid;
+                const document = updatedLead.documents[index];
+                logger_1.default.info('Document verified for existing account, updating immediately', {
+                    leadId,
+                    firebaseUid,
+                    documentType: document.type
+                });
+                try {
+                    // 1. Update Profile verification flags
+                    const profileUpdate = {};
+                    if (document.type === 'aadhaar' && exactAadhaarNumber) {
+                        profileUpdate.isAadhaarVerified = true;
+                        profileUpdate.aadhaarVerifiedAt = document.verifiedAt;
+                        profileUpdate.isVerified = true; // Set general verification flag
+                        logger_1.default.info('Setting Aadhaar verification flags for existing account', {
+                            leadId,
+                            firebaseUid
+                        });
+                    }
+                    if (document.type === 'pan' && exactPANNumber) {
+                        profileUpdate.isPANVerified = true;
+                        profileUpdate.panVerifiedAt = document.verifiedAt;
+                        profileUpdate.isVerified = true; // Set general verification flag
+                        logger_1.default.info('Setting PAN verification flags for existing account', {
+                            leadId,
+                            firebaseUid
+                        });
+                    }
+                    // Update the profile if we have updates
+                    if (Object.keys(profileUpdate).length > 0) {
+                        await axios_1.default.patch(`${env_1.env.USER_SERVICE_URL}/api/v1/profiles/${firebaseUid}`, profileUpdate, {
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-Service-Auth': env_1.env.SERVICE_AUTH_TOKEN
+                            }
+                        });
+                        logger_1.default.info('✅ Updated profile verification flags for existing account', {
+                            leadId,
+                            firebaseUid,
+                            documentType: document.type,
+                            updates: profileUpdate
+                        });
+                    }
+                    // 2. Store exact details in verification service
+                    const verificationData = {};
+                    if (document.type === 'aadhaar' && exactAadhaarNumber) {
+                        verificationData.aadhaarNumber = exactAadhaarNumber;
+                    }
+                    if (document.type === 'pan' && exactPANNumber) {
+                        verificationData.panNumber = exactPANNumber;
+                    }
+                    if (document.type === 'address_proof' && exactAddressDetails) {
+                        verificationData.addressDetails = exactAddressDetails;
+                    }
+                    if (Object.keys(verificationData).length > 0) {
+                        await ActivationService_1.ActivationService.storeVerificationData(firebaseUid, verificationData);
+                        logger_1.default.info('✅ Stored verification data in verification service for existing account', {
+                            leadId,
+                            firebaseUid,
+                            documentType: document.type
+                        });
+                    }
+                }
+                catch (updateError) {
+                    logger_1.default.warn('Failed to update existing account verification immediately', {
+                        leadId,
+                        firebaseUid,
+                        error: updateError.message,
+                        stack: updateError.stack
+                    });
+                    // Don't fail the document verification if immediate update fails
+                    // The data is still stored in the lead document and can be synced later
+                }
+            }
+            else if (status === 'verified') {
+                logger_1.default.info('Document verified for new lead, data will be used during activation', {
+                    leadId,
+                    documentType: updatedLead.documents[index].type
+                });
+            }
             res.json({
                 success: true,
                 data: updatedLead,
