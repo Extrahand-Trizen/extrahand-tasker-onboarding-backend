@@ -516,9 +516,18 @@ export class DocumentController {
       const result = await VerificationServiceClient.initiateAadhaarVerification(userId, cleaned);
 
       if (!result.success) {
+        // ✅ Log detailed error information
+        logger.error('Aadhaar verification initiation failed', {
+          leadId,
+          userId,
+          error: result.error,
+          documentIndex: index
+        });
+        
         res.status(400).json({
           success: false,
           error: result.error || 'Failed to initiate Aadhaar verification',
+          details: result.error // ✅ Include error details for debugging
         });
         return;
       }
@@ -540,15 +549,22 @@ export class DocumentController {
         },
       });
     } catch (error: any) {
+      // ✅ Enhanced error logging
       logger.error('Error initiating Aadhaar verification', {
         error: error.message,
+        errorStack: error.stack,
         leadId: req.params.leadId,
         documentIndex: req.params.documentIndex,
+        userId: lead?.activationData?.firebaseUid || leadId,
+        aadhaarNumber: req.body.aadhaarNumber ? `${req.body.aadhaarNumber.slice(0, 4)}****` : 'missing'
       });
+      
       res.status(500).json({
         success: false,
         error: 'Failed to initiate Aadhaar verification',
-        message: error.message,
+        message: error.message || 'An unexpected error occurred',
+        // ✅ Include error details in development
+        ...(process.env.NODE_ENV === 'development' && { details: error.stack })
       });
     }
   }
@@ -628,9 +644,19 @@ export class DocumentController {
       const result = await VerificationServiceClient.verifyAadhaarOTP(userId, refId, otp);
 
       if (!result.success || !result.verified) {
+        // ✅ Log detailed error information
+        logger.error('Aadhaar OTP verification failed', {
+          leadId,
+          userId,
+          refId,
+          error: result.error,
+          documentIndex: index
+        });
+        
         res.status(400).json({
           success: false,
           error: result.error || 'Aadhaar verification failed',
+          details: result.error, // ✅ Include error details for debugging
           data: {
             attemptsRemaining: 3 // This should come from verification service
           }
@@ -776,15 +802,22 @@ export class DocumentController {
         message: 'Aadhaar verified successfully' + (result.verifiedData?.address ? '. Address extracted and verified.' : ''),
       });
     } catch (error: any) {
+      // ✅ Enhanced error logging
       logger.error('Error verifying Aadhaar OTP', {
         error: error.message,
+        errorStack: error.stack,
         leadId: req.params.leadId,
         documentIndex: req.params.documentIndex,
+        userId: req.body.userId || 'unknown',
+        refId: req.body.refId || 'unknown'
       });
+      
       res.status(500).json({
         success: false,
         error: 'Failed to verify Aadhaar OTP',
-        message: error.message,
+        message: error.message || 'An unexpected error occurred',
+        // ✅ Include error details in development
+        ...(process.env.NODE_ENV === 'development' && { details: error.stack })
       });
     }
   }
@@ -866,9 +899,18 @@ export class DocumentController {
       const result = await VerificationServiceClient.verifyPAN(userId, cleaned);
 
       if (!result.success || !result.verified) {
+        // ✅ Log detailed error information
+        logger.error('PAN verification failed', {
+          leadId,
+          userId,
+          error: result.error,
+          documentIndex: index
+        });
+        
         res.status(400).json({
           success: false,
           error: result.error || 'PAN verification failed',
+          details: result.error // ✅ Include error details for debugging
         });
         return;
       }
@@ -968,15 +1010,22 @@ export class DocumentController {
         message: 'PAN verified successfully',
       });
     } catch (error: any) {
+      // ✅ Enhanced error logging
       logger.error('Error verifying PAN', {
         error: error.message,
+        errorStack: error.stack,
         leadId: req.params.leadId,
         documentIndex: req.params.documentIndex,
+        userId: lead?.activationData?.firebaseUid || leadId,
+        panNumber: req.body.panNumber ? `${req.body.panNumber.slice(0, 2)}****${req.body.panNumber.slice(6)}` : 'missing'
       });
+      
       res.status(500).json({
         success: false,
         error: 'Failed to verify PAN',
-        message: error.message,
+        message: error.message || 'An unexpected error occurred',
+        // ✅ Include error details in development
+        ...(process.env.NODE_ENV === 'development' && { details: error.stack })
       });
     }
   }

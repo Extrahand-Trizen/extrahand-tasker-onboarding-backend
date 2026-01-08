@@ -70,6 +70,29 @@ export class VerificationServiceClient {
     aadhaarNumber: string
   ): Promise<AadhaarVerificationResult> {
     try {
+      // ✅ Check if verification service URL is configured
+      if (!this.baseUrl || this.baseUrl === 'http://localhost:4004') {
+        logger.error('VERIFICATION_SERVICE_URL not configured', {
+          userId,
+          baseUrl: this.baseUrl
+        });
+        return {
+          success: false,
+          error: 'Verification service is not configured. Please set VERIFICATION_SERVICE_URL environment variable.'
+        };
+      }
+
+      // ✅ Check if service auth token is configured
+      if (!this.serviceAuthToken) {
+        logger.error('SERVICE_AUTH_TOKEN not configured', {
+          userId
+        });
+        return {
+          success: false,
+          error: 'Service authentication token is not configured.'
+        };
+      }
+
       const response = await axios.post(
         `${this.baseUrl}/api/v1/verification/aadhaar/initiate`,
         {
@@ -101,14 +124,38 @@ export class VerificationServiceClient {
         testOtp: response.data.data?.testOtp // Sandbox only
       };
     } catch (error: any) {
+      // ✅ Enhanced error logging
       logger.error('Failed to initiate Aadhaar verification', {
         userId,
+        aadhaarNumber: aadhaarNumber ? `${aadhaarNumber.slice(0, 4)}****` : 'missing',
+        baseUrl: this.baseUrl,
         error: error.message,
-        response: error.response?.data
+        errorCode: error.code,
+        responseStatus: error.response?.status,
+        responseData: error.response?.data,
+        stack: error.stack
       });
+
+      // ✅ Better error message extraction
+      let errorMessage = 'Failed to initiate Aadhaar verification';
+      
+      if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
+        errorMessage = `Cannot connect to verification service at ${this.baseUrl}. Please check VERIFICATION_SERVICE_URL configuration.`;
+      } else if (error.code === 'ETIMEDOUT') {
+        errorMessage = 'Verification service request timed out. Please try again.';
+      } else if (error.response?.status === 401 || error.response?.status === 403) {
+        errorMessage = 'Authentication failed with verification service. Please check SERVICE_AUTH_TOKEN.';
+      } else if (error.response?.data?.error) {
+        errorMessage = error.response.data.error;
+      } else if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+
       return {
         success: false,
-        error: error.response?.data?.message || error.message || 'Failed to initiate Aadhaar verification'
+        error: errorMessage
       };
     }
   }
@@ -122,6 +169,18 @@ export class VerificationServiceClient {
     otp: string
   ): Promise<AadhaarOTPVerificationResult> {
     try {
+      // ✅ Check if verification service URL is configured
+      if (!this.baseUrl || this.baseUrl === 'http://localhost:4004') {
+        logger.error('VERIFICATION_SERVICE_URL not configured', {
+          userId,
+          baseUrl: this.baseUrl
+        });
+        return {
+          success: false,
+          error: 'Verification service is not configured. Please set VERIFICATION_SERVICE_URL environment variable.'
+        };
+      }
+
       const response = await axios.post(
         `${this.baseUrl}/api/v1/verification/aadhaar/verify`,
         {
@@ -147,15 +206,38 @@ export class VerificationServiceClient {
         verifiedData: response.data.data?.verifiedData
       };
     } catch (error: any) {
+      // ✅ Enhanced error logging
       logger.error('Failed to verify Aadhaar OTP', {
         userId,
         refId,
+        baseUrl: this.baseUrl,
         error: error.message,
-        response: error.response?.data
+        errorCode: error.code,
+        responseStatus: error.response?.status,
+        responseData: error.response?.data,
+        stack: error.stack
       });
+
+      // ✅ Better error message extraction
+      let errorMessage = 'Failed to verify Aadhaar OTP';
+      
+      if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
+        errorMessage = `Cannot connect to verification service at ${this.baseUrl}. Please check VERIFICATION_SERVICE_URL configuration.`;
+      } else if (error.code === 'ETIMEDOUT') {
+        errorMessage = 'Verification service request timed out. Please try again.';
+      } else if (error.response?.status === 401 || error.response?.status === 403) {
+        errorMessage = 'Authentication failed with verification service. Please check SERVICE_AUTH_TOKEN.';
+      } else if (error.response?.data?.error) {
+        errorMessage = error.response.data.error;
+      } else if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+
       return {
         success: false,
-        error: error.response?.data?.message || error.message || 'Failed to verify Aadhaar OTP'
+        error: errorMessage
       };
     }
   }
@@ -168,6 +250,18 @@ export class VerificationServiceClient {
     panNumber: string
   ): Promise<PANVerificationResult> {
     try {
+      // ✅ Check if verification service URL is configured
+      if (!this.baseUrl || this.baseUrl === 'http://localhost:4004') {
+        logger.error('VERIFICATION_SERVICE_URL not configured', {
+          userId,
+          baseUrl: this.baseUrl
+        });
+        return {
+          success: false,
+          error: 'Verification service is not configured. Please set VERIFICATION_SERVICE_URL environment variable.'
+        };
+      }
+
       const response = await axios.post(
         `${this.baseUrl}/api/v1/verification/pan/verify`,
         {
@@ -197,14 +291,38 @@ export class VerificationServiceClient {
         verifiedData: response.data.data?.verifiedData
       };
     } catch (error: any) {
+      // ✅ Enhanced error logging
       logger.error('Failed to verify PAN', {
         userId,
+        panNumber: panNumber ? `${panNumber.slice(0, 2)}****${panNumber.slice(6)}` : 'missing',
+        baseUrl: this.baseUrl,
         error: error.message,
-        response: error.response?.data
+        errorCode: error.code,
+        responseStatus: error.response?.status,
+        responseData: error.response?.data,
+        stack: error.stack
       });
+
+      // ✅ Better error message extraction
+      let errorMessage = 'Failed to verify PAN';
+      
+      if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
+        errorMessage = `Cannot connect to verification service at ${this.baseUrl}. Please check VERIFICATION_SERVICE_URL configuration.`;
+      } else if (error.code === 'ETIMEDOUT') {
+        errorMessage = 'Verification service request timed out. Please try again.';
+      } else if (error.response?.status === 401 || error.response?.status === 403) {
+        errorMessage = 'Authentication failed with verification service. Please check SERVICE_AUTH_TOKEN.';
+      } else if (error.response?.data?.error) {
+        errorMessage = error.response.data.error;
+      } else if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+
       return {
         success: false,
-        error: error.response?.data?.message || error.message || 'Failed to verify PAN'
+        error: errorMessage
       };
     }
   }
