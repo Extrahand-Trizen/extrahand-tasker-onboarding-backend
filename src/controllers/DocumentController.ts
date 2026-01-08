@@ -555,7 +555,7 @@ export class DocumentController {
         errorStack: error.stack,
         leadId: req.params.leadId,
         documentIndex: req.params.documentIndex,
-        userId: lead?.activationData?.firebaseUid || leadId,
+        userId: req.body.userId || req.params.leadId || 'unknown',
         aadhaarNumber: req.body.aadhaarNumber ? `${req.body.aadhaarNumber.slice(0, 4)}****` : 'missing'
       });
       
@@ -1016,7 +1016,7 @@ export class DocumentController {
         errorStack: error.stack,
         leadId: req.params.leadId,
         documentIndex: req.params.documentIndex,
-        userId: lead?.activationData?.firebaseUid || leadId,
+        userId: req.body.userId || req.params.leadId || 'unknown',
         panNumber: req.body.panNumber ? `${req.body.panNumber.slice(0, 2)}****${req.body.panNumber.slice(6)}` : 'missing'
       });
       
