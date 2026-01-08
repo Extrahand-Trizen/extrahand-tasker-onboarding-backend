@@ -847,6 +847,129 @@ export class LeadService {
   }
 
   /**
+   * Update address from Aadhaar verification
+   */
+  static async updateAddressFromAadhaar(
+    leadId: string,
+    address: {
+      line1: string;
+      line2?: string;
+      city: string;
+      state: string;
+      pincode: string;
+    }
+  ): Promise<ILead | null> {
+    try {
+      const lead = await Lead.findOne({ leadId });
+      if (!lead) {
+        throw new Error('Lead not found');
+      }
+
+      // Update address fields
+      const fullAddress = `${address.line1}${address.line2 ? ', ' + address.line2 : ''}`;
+      lead.address = fullAddress;
+      lead.city = address.city;
+      lead.state = address.state;
+      lead.pincode = address.pincode;
+
+      const updatedLead = await lead.save();
+
+      // Log activity
+      await this.logActivity(
+        leadId,
+        'address_update',
+        `Address updated from Aadhaar verification: ${address.city}, ${address.state} - ${address.pincode}`,
+        'system',
+        'Aadhaar Verification',
+        { source: 'aadhaar_verification', address }
+      );
+
+      logger.info('Address updated from Aadhaar verification', {
+        leadId,
+        city: address.city,
+        state: address.state,
+        pincode: address.pincode
+      });
+
+      return updatedLead;
+    } catch (error: any) {
+      logger.error('Error updating address from Aadhaar', {
+        error: error.message,
+        leadId
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Mark address as verified
+   */
+  static async markAddressAsVerified(
+    leadId: string,
+    data: {
+      verifiedBy: string;
+      verifiedAt: Date;
+      source: string;
+    }
+  ): Promise<ILead | null> {
+    try {
+      const lead = await Lead.findOne({ leadId });
+      if (!lead) {
+        throw new Error('Lead not found');
+      }
+
+      // Find or create address_proof document
+      let addressDoc = lead.documents.find(doc => doc.type === 'address_proof');
+      
+      if (!addressDoc) {
+        // Create address_proof document if it doesn't exist
+        addressDoc = {
+          type: 'address_proof',
+          status: 'verified',
+          verifiedBy: data.verifiedBy,
+          verifiedAt: data.verifiedAt,
+          addressDetails: lead.address || `${lead.city}, ${lead.state} - ${lead.pincode}`
+        };
+        lead.documents.push(addressDoc);
+      } else {
+        // Update existing address_proof document
+        addressDoc.status = 'verified';
+        addressDoc.verifiedBy = data.verifiedBy;
+        addressDoc.verifiedAt = data.verifiedAt;
+        if (!addressDoc.addressDetails) {
+          addressDoc.addressDetails = lead.address || `${lead.city}, ${lead.state} - ${lead.pincode}`;
+        }
+      }
+
+      const updatedLead = await lead.save();
+
+      // Log activity
+      await this.logActivity(
+        leadId,
+        'address_verification',
+        `Address verified via ${data.source}`,
+        data.verifiedBy,
+        undefined,
+        { source: data.source }
+      );
+
+      logger.info('Address marked as verified', {
+        leadId,
+        source: data.source,
+        verifiedBy: data.verifiedBy
+      });
+
+      return updatedLead;
+    } catch (error: any) {
+      logger.error('Error marking address as verified', {
+        error: error.message,
+        leadId
+      });
+      throw error;
+    }
+  }
+
+  /**
    * Log activity
    */
   static async logActivity(

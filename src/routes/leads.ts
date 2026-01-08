@@ -103,6 +103,27 @@ router.post(
   DocumentController.uploadDocument
 );
 
+// Aadhaar verification (API-based)
+router.post(
+  '/:leadId/documents/:documentIndex/verify-aadhaar/initiate',
+  requirePermission('canVerifyDocuments'),
+  DocumentController.initiateAadhaarVerification
+);
+
+router.post(
+  '/:leadId/documents/:documentIndex/verify-aadhaar/verify',
+  requirePermission('canVerifyDocuments'),
+  DocumentController.verifyAadhaarOTP
+);
+
+// PAN verification (API-based)
+router.post(
+  '/:leadId/documents/:documentIndex/verify-pan',
+  requirePermission('canVerifyDocuments'),
+  DocumentController.verifyPAN
+);
+
+// Manual document verification (for address_proof and other documents)
 router.put(
   '/:leadId/documents/:documentIndex',
   requirePermission('canVerifyDocuments'),

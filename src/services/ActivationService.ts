@@ -168,6 +168,7 @@ export class ActivationService {
       // Set flags based on document existence and verification status, not just exact details
       const hasAadhaar = !!aadhaarDoc && aadhaarDoc.status === 'verified';
       const hasPAN = !!panDoc && panDoc.status === 'verified';
+      // ✅ Address is now optional - can come from Aadhaar verification or address_proof document
       const hasAddress = !!addressDoc && addressDoc.status === 'verified';
       
       // ✅ Extract exact details (unmasked) for storage in verification service
@@ -175,7 +176,13 @@ export class ActivationService {
       // Exact details are entered by operations/admin during document verification
       const exactAadhaar = aadhaarDoc?.exactAadhaarNumber || aadhaarDoc?.aadhaarNumber;
       const exactPAN = panDoc?.exactPANNumber || panDoc?.panNumber;
+      // ✅ Address can come from address_proof document OR from Aadhaar verification
+      // Priority: Aadhaar verification address > address_proof document > lead address
       const exactAddress = addressDoc?.exactAddressDetails || addressDoc?.addressDetails;
+      
+      // ✅ Check if address was extracted from Aadhaar verification
+      // This would be stored in lead's address fields if Aadhaar verification was done via API
+      // For now, we'll use the lead's address/city/state/pincode which should be updated by LeadService.updateAddressFromAadhaar
       
       // ✅ Extract photo URL if photo document exists and is verified
       const photoURL = photoDoc?.url || null;
@@ -232,12 +239,20 @@ export class ActivationService {
         emailVerified: false,
         roles: ['both'],
         userType: 'individual',
-        location: {
-          city: lead.city,
-          state: lead.state || null,
-          // ✅ Use exact address from verified document if available, otherwise use lead address
-          address: exactAddress || lead.address || null
-        },
+        // ✅ Location format matches Profile model structure
+        // Priority: Address from Aadhaar verification > address_proof document > lead address
+        location: (lead.address || lead.city || exactAddress) ? {
+          type: 'Point',
+          coordinates: [0, 0] as [number, number], // Default coordinates (can be updated via geocoding)
+          address: exactAddress || lead.address || `${lead.city}, ${lead.state || ''} - ${lead.pincode || ''}`,
+          addressDetails: {
+            city: lead.city || null,
+            state: lead.state || null,
+            pinCode: lead.pincode || null,
+            country: 'India'
+          },
+          isPublic: false
+        } : null,
         skills: {
           list: lead.skills.map(skill => ({
             name: skill.name,
@@ -291,14 +306,16 @@ export class ActivationService {
             const panDoc = lead.documents.find(d => d.type === 'pan' && d.status === 'verified');
             
             // Use the document verifier's info if available
-            let verifierInfo = undefined;
+            let verifierInfo: { userId: string; userName: string; role: string } | undefined = undefined;
             if (aadhaarDoc?.verifiedBy || panDoc?.verifiedBy) {
               const verifierId = aadhaarDoc?.verifiedBy || panDoc?.verifiedBy;
-              verifierInfo = {
-                userId: verifierId,
-                userName: 'Document Verifier', // Admin who verified during lead stage
-                role: 'operations'
-              };
+              if (verifierId) {
+                verifierInfo = {
+                  userId: verifierId,
+                  userName: 'Document Verifier', // Admin who verified during lead stage
+                  role: 'operations'
+                };
+              }
             }
             
             await this.storeVerificationData(
@@ -447,11 +464,13 @@ export class ActivationService {
    * @param uid Firebase UID
    * @param data Verification data (aadhaar/pan/address)
    * @param adminInfo Optional admin information for tracking who verified
+   * @param options Optional provider and verificationSource (defaults to admin_manual)
    */
   static async storeVerificationData(
     uid: string,
     data: { aadhaarNumber?: string; panNumber?: string; addressDetails?: string },
-    adminInfo?: { userId: string; userName: string; role: string }
+    adminInfo?: { userId: string; userName: string; role: string },
+    options?: { provider?: string; verificationSource?: string }
   ): Promise<void> {
     if (!env.VERIFICATION_SERVICE_URL) {
       logger.warn('VERIFICATION_SERVICE_URL not configured, skipping verification data storage');
@@ -506,9 +525,9 @@ export class ActivationService {
             maskedValue: record.maskedValue,
             status: 'verified',
             verifiedAt: new Date().toISOString(),
-            provider: 'admin_manual',
-            verificationSource: 'admin_manual',
-            verifiedBy: adminInfo,
+            provider: options?.provider || 'admin_manual', // ✅ Use provided provider
+            verificationSource: options?.verificationSource || 'admin_manual', // ✅ Use provided source
+            verifiedBy: adminInfo, // ✅ This will now have correct role from database
             consent: {
               given: true,
               givenAt: new Date().toISOString(),
@@ -527,8 +546,9 @@ export class ActivationService {
         logger.info(`✅ Stored ${record.type} verification for activated user`, {
           uid,
           type: record.type,
-          source: 'admin_manual',
-          verifiedBy: adminInfo?.userId || 'system'
+          source: options?.verificationSource || 'admin_manual',
+          verifiedBy: adminInfo?.userId || 'system',
+          role: adminInfo?.role || 'unknown'
         });
       } catch (error: any) {
         logger.error(`Failed to store ${record.type} verification for ${uid}`, {
