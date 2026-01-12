@@ -87,7 +87,7 @@ export class LeadController {
         preferredTimeSlot,
         source,
         sourceDetails,
-        addedBy: req.admin.uid,
+        addedBy: req.admin.uid || req.admin?.userId || "",
         addedByName: req.admin.name
       };
 
@@ -280,7 +280,7 @@ export class LeadController {
       const statusData: UpdateStatusData = {
         status,
         notes,
-        changedBy: req.admin.uid,
+        changedBy: req.admin.uid || req.admin?.userId || "" ,
         changedByName: req.admin.name
       };
 
@@ -352,7 +352,7 @@ export class LeadController {
       const lead = await LeadService.addNote(
         leadId,
         note,
-        req.admin.uid,
+        req.admin.uid || req.admin?.userId || "",
         req.admin.name,
         isPrivate
       );

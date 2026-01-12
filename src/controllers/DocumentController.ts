@@ -67,10 +67,11 @@ export class DocumentController {
         maskedAadhaar = maskAadhaar(sanitized);
         
         // Audit log for sensitive data entry
+        const adminUid = req.admin?.uid || req.admin?.userId || 'unknown';
         logger.info('Aadhaar number entered manually', {
           leadId,
-          adminUid: req.admin.uid,
-          adminName: req.admin.name,
+          adminUid,
+          adminName: req.admin?.name,
           timestamp: new Date().toISOString(),
         });
       }
@@ -89,10 +90,11 @@ export class DocumentController {
         maskedPAN = maskPAN(sanitized);
         
         // Audit log for sensitive data entry
+        const adminUid = req.admin?.uid || req.admin?.userId || 'unknown';
         logger.info('PAN number entered manually', {
           leadId,
-          adminUid: req.admin.uid,
-          adminName: req.admin.name,
+          adminUid,
+          adminName: req.admin?.name,
           timestamp: new Date().toISOString(),
         });
       }
@@ -111,10 +113,11 @@ export class DocumentController {
         addressDetailsText = trimmed;
         
         // Audit log for address entry
+        const adminUid = req.admin?.uid || req.admin?.userId || 'unknown';
         logger.info('Address proof entered manually', {
           leadId,
-          adminUid: req.admin.uid,
-          adminName: req.admin.name,
+          adminUid,
+          adminName: req.admin?.name,
           timestamp: new Date().toISOString(),
         });
       }
@@ -295,12 +298,22 @@ export class DocumentController {
         }
       }
 
+      // Get admin UID (support both Firebase uid and JWT userId)
+      const adminUid = req.admin?.uid || req.admin?.userId;
+      if (!adminUid) {
+        res.status(401).json({
+          success: false,
+          error: 'Admin UID not found',
+        });
+        return;
+      }
+
       const updatedLead = await LeadService.verifyDocument(
         leadId,
         index,
         status as 'verified' | 'rejected',
-        req.admin.uid,
-        req.admin.name,
+        adminUid, // TypeScript now knows this is string (not undefined)
+        req.admin?.name, // Optional parameter, can be undefined
         rejectionReason,
         // ✅ Pass exact details for storage
         status === 'verified' ? {
@@ -388,10 +401,11 @@ export class DocumentController {
           
           if (Object.keys(verificationData).length > 0) {
             // Pass admin info for tracking who verified the document
+            // adminUid is already extracted and validated earlier in this function
             const adminInfo = {
-              userId: req.admin.uid,
-              userName: req.admin.email || req.admin.uid,
-              role: req.admin.role || 'admin'
+              userId: adminUid, // Use the validated adminUid from earlier
+              userName: req.admin?.email || req.admin?.name || adminUid,
+              role: req.admin?.role || 'admin'
             };
             
             await ActivationService.storeVerificationData(firebaseUid, verificationData, adminInfo);
@@ -674,13 +688,23 @@ export class DocumentController {
         return;
       }
 
+      // Get admin UID (support both Firebase uid and JWT userId)
+      const adminUid = req.admin?.uid || req.admin?.userId;
+      if (!adminUid) {
+        res.status(401).json({
+          success: false,
+          error: 'Admin UID not found',
+        });
+        return;
+      }
+
       // Mark document as verified
       const updatedLead = await LeadService.verifyDocument(
         leadId,
         index,
         'verified',
-        req.admin.uid,
-        req.admin.name || req.admin.email,
+        adminUid, // TypeScript now knows this is string (not undefined)
+        req.admin?.name || req.admin?.email, // Optional parameter, can be undefined
         undefined,
         {
           exactAadhaarNumber: cleaned
@@ -707,8 +731,9 @@ export class DocumentController {
           });
 
           // Mark address as verified (since it came from verified Aadhaar)
+          // adminUid is already extracted and validated earlier in this function
           await LeadService.markAddressAsVerified(leadId, {
-            verifiedBy: req.admin.uid,
+            verifiedBy: adminUid, // Use the validated adminUid from earlier
             verifiedAt: new Date(),
             source: 'aadhaar_verification'
           });
@@ -729,10 +754,11 @@ export class DocumentController {
       // ✅ Store verification data in verification service
       if (lead.activationData?.firebaseUid) {
         try {
+          // adminUid is already extracted and validated earlier in this function
           const adminInfo = {
-            userId: req.admin.uid,
-            userName: req.admin.name || req.admin.email || req.admin.uid,
-            role: req.admin.role || 'admin'
+            userId: adminUid, // Use the validated adminUid from earlier
+            userName: req.admin?.name || req.admin?.email || adminUid,
+            role: req.admin?.role || 'admin'
           };
 
           await ActivationService.storeVerificationData(
@@ -915,13 +941,23 @@ export class DocumentController {
         return;
       }
 
+      // Get admin UID (support both Firebase uid and JWT userId)
+      const adminUid = req.admin?.uid || req.admin?.userId;
+      if (!adminUid) {
+        res.status(401).json({
+          success: false,
+          error: 'Admin UID not found',
+        });
+        return;
+      }
+
       // Mark document as verified
       const updatedLead = await LeadService.verifyDocument(
         leadId,
         index,
         'verified',
-        req.admin.uid,
-        req.admin.name || req.admin.email,
+        adminUid, // TypeScript now knows this is string (not undefined)
+        req.admin?.name || req.admin?.email, // Optional parameter, can be undefined
         undefined,
         {
           exactPANNumber: cleaned
@@ -939,10 +975,11 @@ export class DocumentController {
       // ✅ Store verification data in verification service
       if (lead.activationData?.firebaseUid) {
         try {
+          // adminUid is already extracted and validated earlier in this function
           const adminInfo = {
-            userId: req.admin.uid,
-            userName: req.admin.name || req.admin.email || req.admin.uid,
-            role: req.admin.role || 'admin'
+            userId: adminUid, // Use the validated adminUid from earlier
+            userName: req.admin?.name || req.admin?.email || adminUid,
+            role: req.admin?.role || 'admin'
           };
 
           await ActivationService.storeVerificationData(

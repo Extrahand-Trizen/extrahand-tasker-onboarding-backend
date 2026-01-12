@@ -28,7 +28,7 @@ export class MicrosoftAuthController {
         state = `return_${returnTo}`;
       }
 
-      const authUrl = getAuthorizationUrl(env.MICROSOFT_REDIRECT_URI, state);
+      const authUrl = getAuthorizationUrl((env.MICROSOFT_REDIRECT_URI as string), state);
 
       res.json({
         success: true,
@@ -63,7 +63,7 @@ export class MicrosoftAuthController {
       // Exchange code for tokens
       const tokens = await exchangeCodeForTokens(
         code as string,
-        env.MICROSOFT_REDIRECT_URI
+        env.MICROSOFT_REDIRECT_URI as string
       );
 
       // Decode ID token to get user info
