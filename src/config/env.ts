@@ -30,6 +30,20 @@ const envSchema = z.object({
   SERVICE_AUTH_TOKEN: z.string().min(32),
   USER_SERVICE_URL: z.string().url().optional(),
   VERIFICATION_SERVICE_URL: z.string().url().optional(),
+  EMAIL_SERVICE_URL: z.string().url('EMAIL_SERVICE_URL must be a valid URL').optional(),
+  
+  // JWT Authentication
+  JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
+  JWT_REFRESH_SECRET: z.string().min(32, 'JWT_REFRESH_SECRET must be at least 32 characters'),
+  
+  // Microsoft OAuth (optional - kept for future use)
+  MICROSOFT_CLIENT_ID: z.string().optional(),
+  MICROSOFT_CLIENT_SECRET: z.string().optional(),
+  MICROSOFT_REDIRECT_URI: z.string().url('MICROSOFT_REDIRECT_URI must be a valid URL').optional(),
+  
+  // Frontend URL
+  FRONTEND_URL: z.string().url().default('http://localhost:3000'),
+  
   LOG_LEVEL: z.enum(['error', 'warn', 'info', 'debug']).default('info'),
   // Storage Configuration
   STORAGE_PROVIDER: z.enum(['minio', 's3']).default('minio'),

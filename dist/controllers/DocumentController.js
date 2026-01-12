@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.DocumentController = void 0;
 const LeadService_1 = require("../services/LeadService");
 const ActivationService_1 = require("../services/ActivationService");
+const VerificationServiceClient_1 = require("../services/VerificationServiceClient");
 const logger_1 = __importDefault(require("../config/logger"));
 const compliance_1 = require("../utils/compliance");
 const axios_1 = __importDefault(require("axios"));
@@ -240,24 +241,19 @@ class DocumentController {
                 });
                 return;
             }
-            // ✅ Validate exact details if verifying
+            // ✅ For Aadhaar and PAN, use API verification instead of manual verification
+            // This endpoint is now mainly for manual verification of other documents
+            // or as a fallback if API verification fails
+            const document = lead.documents[index];
+            if (status === 'verified' && (document.type === 'aadhaar' || document.type === 'pan')) {
+                res.status(400).json({
+                    success: false,
+                    error: `Please use the API verification endpoint for ${document.type.toUpperCase()}. Use /verify-${document.type} endpoint instead.`,
+                });
+                return;
+            }
+            // ✅ Validate exact details if verifying (for address_proof and other documents)
             if (status === 'verified') {
-                const document = lead.documents[index];
-                // ✅ Require exact details when verifying Aadhaar, PAN, or Address Proof
-                if (document.type === 'aadhaar' && !exactAadhaarNumber) {
-                    res.status(400).json({
-                        success: false,
-                        error: 'Exact Aadhaar number is required when verifying Aadhaar document',
-                    });
-                    return;
-                }
-                if (document.type === 'pan' && !exactPANNumber) {
-                    res.status(400).json({
-                        success: false,
-                        error: 'Exact PAN number is required when verifying PAN document',
-                    });
-                    return;
-                }
                 if (document.type === 'address_proof' && !exactAddressDetails) {
                     res.status(400).json({
                         success: false,
@@ -337,11 +333,18 @@ class DocumentController {
                         verificationData.addressDetails = exactAddressDetails;
                     }
                     if (Object.keys(verificationData).length > 0) {
-                        await ActivationService_1.ActivationService.storeVerificationData(firebaseUid, verificationData);
+                        // Pass admin info for tracking who verified the document
+                        const adminInfo = {
+                            userId: req.admin.uid,
+                            userName: req.admin.email || req.admin.uid,
+                            role: req.admin.role || 'admin'
+                        };
+                        await ActivationService_1.ActivationService.storeVerificationData(firebaseUid, verificationData, adminInfo);
                         logger_1.default.info('✅ Stored verification data in verification service for existing account', {
                             leadId,
                             firebaseUid,
-                            documentType: document.type
+                            documentType: document.type,
+                            verifiedBy: adminInfo.userId
                         });
                     }
                 }
@@ -378,6 +381,514 @@ class DocumentController {
                 success: false,
                 error: 'Failed to verify document',
                 message: error.message,
+            });
+        }
+    }
+    /**
+     * Initiate Aadhaar verification (sends OTP to user's mobile)
+     * POST /api/v1/admin/caos/leads/:leadId/documents/:documentIndex/verify-aadhaar/initiate
+     */
+    static async initiateAadhaarVerification(req, res) {
+        try {
+            if (!req.admin) {
+                res.status(401).json({
+                    success: false,
+                    error: 'Authentication required',
+                });
+                return;
+            }
+            const { leadId, documentIndex } = req.params;
+            const { aadhaarNumber } = req.body;
+            if (!aadhaarNumber) {
+                res.status(400).json({
+                    success: false,
+                    error: 'Aadhaar number is required',
+                });
+                return;
+            }
+            // Validate Aadhaar format
+            const cleaned = (0, compliance_1.sanitizeAadhaarInput)(aadhaarNumber);
+            if (!(0, compliance_1.validateAadhaar)(cleaned)) {
+                res.status(400).json({
+                    success: false,
+                    error: 'Invalid Aadhaar number format. Must be exactly 12 digits.',
+                });
+                return;
+            }
+            const index = parseInt(documentIndex);
+            if (isNaN(index) || index < 0) {
+                res.status(400).json({
+                    success: false,
+                    error: 'Invalid document index',
+                });
+                return;
+            }
+            const lead = await LeadService_1.LeadService.getLeadById(leadId);
+            if (!lead) {
+                res.status(404).json({
+                    success: false,
+                    error: 'Lead not found',
+                });
+                return;
+            }
+            if (!lead.documents || index >= lead.documents.length) {
+                res.status(404).json({
+                    success: false,
+                    error: 'Document not found',
+                });
+                return;
+            }
+            const document = lead.documents[index];
+            if (document.type !== 'aadhaar') {
+                res.status(400).json({
+                    success: false,
+                    error: 'Document is not an Aadhaar document',
+                });
+                return;
+            }
+            // Get userId (use leadId temporarily if not activated, or firebaseUid if activated)
+            const userId = lead.activationData?.firebaseUid || leadId;
+            // Initiate Aadhaar verification via Cashfree
+            const result = await VerificationServiceClient_1.VerificationServiceClient.initiateAadhaarVerification(userId, cleaned);
+            if (!result.success) {
+                // ✅ Log detailed error information
+                logger_1.default.error('Aadhaar verification initiation failed', {
+                    leadId,
+                    userId,
+                    error: result.error,
+                    documentIndex: index
+                });
+                res.status(400).json({
+                    success: false,
+                    error: result.error || 'Failed to initiate Aadhaar verification',
+                    details: result.error // ✅ Include error details for debugging
+                });
+                return;
+            }
+            // Store refId in document for later OTP verification
+            // We'll store it temporarily in the document metadata or in a separate field
+            // For now, we'll return it and frontend will send it back with OTP
+            res.json({
+                success: true,
+                data: {
+                    refId: result.refId,
+                    transactionId: result.transactionId,
+                    maskedAadhaar: result.maskedAadhaar,
+                    testOtp: result.testOtp, // Only in sandbox mode
+                    message: result.testOtp
+                        ? 'OTP sent successfully (Sandbox mode - use test OTP for testing)'
+                        : 'OTP sent to user\'s mobile number. Please ask user for OTP or enter if you have it.'
+                },
+            });
+        }
+        catch (error) {
+            // ✅ Enhanced error logging
+            logger_1.default.error('Error initiating Aadhaar verification', {
+                error: error.message,
+                errorStack: error.stack,
+                leadId: req.params.leadId,
+                documentIndex: req.params.documentIndex,
+                userId: req.body.userId || req.params.leadId || 'unknown',
+                aadhaarNumber: req.body.aadhaarNumber ? `${req.body.aadhaarNumber.slice(0, 4)}****` : 'missing'
+            });
+            res.status(500).json({
+                success: false,
+                error: 'Failed to initiate Aadhaar verification',
+                message: error.message || 'An unexpected error occurred',
+                // ✅ Include error details in development
+                ...(process.env.NODE_ENV === 'development' && { details: error.stack })
+            });
+        }
+    }
+    /**
+     * Verify Aadhaar OTP
+     * POST /api/v1/admin/caos/leads/:leadId/documents/:documentIndex/verify-aadhaar/verify
+     */
+    static async verifyAadhaarOTP(req, res) {
+        try {
+            if (!req.admin) {
+                res.status(401).json({
+                    success: false,
+                    error: 'Authentication required',
+                });
+                return;
+            }
+            const { leadId, documentIndex } = req.params;
+            const { refId, otp, aadhaarNumber } = req.body;
+            if (!refId || !otp) {
+                res.status(400).json({
+                    success: false,
+                    error: 'refId and OTP are required',
+                });
+                return;
+            }
+            if (!aadhaarNumber) {
+                res.status(400).json({
+                    success: false,
+                    error: 'Aadhaar number is required',
+                });
+                return;
+            }
+            const index = parseInt(documentIndex);
+            if (isNaN(index) || index < 0) {
+                res.status(400).json({
+                    success: false,
+                    error: 'Invalid document index',
+                });
+                return;
+            }
+            const lead = await LeadService_1.LeadService.getLeadById(leadId);
+            if (!lead) {
+                res.status(404).json({
+                    success: false,
+                    error: 'Lead not found',
+                });
+                return;
+            }
+            if (!lead.documents || index >= lead.documents.length) {
+                res.status(404).json({
+                    success: false,
+                    error: 'Document not found',
+                });
+                return;
+            }
+            const document = lead.documents[index];
+            if (document.type !== 'aadhaar') {
+                res.status(400).json({
+                    success: false,
+                    error: 'Document is not an Aadhaar document',
+                });
+                return;
+            }
+            // Get userId (use leadId temporarily if not activated, or firebaseUid if activated)
+            const userId = lead.activationData?.firebaseUid || leadId;
+            // Verify Aadhaar OTP via Cashfree
+            const result = await VerificationServiceClient_1.VerificationServiceClient.verifyAadhaarOTP(userId, refId, otp);
+            if (!result.success || !result.verified) {
+                // ✅ Log detailed error information
+                logger_1.default.error('Aadhaar OTP verification failed', {
+                    leadId,
+                    userId,
+                    refId,
+                    error: result.error,
+                    documentIndex: index
+                });
+                res.status(400).json({
+                    success: false,
+                    error: result.error || 'Aadhaar verification failed',
+                    details: result.error, // ✅ Include error details for debugging
+                    data: {
+                        attemptsRemaining: 3 // This should come from verification service
+                    }
+                });
+                return;
+            }
+            // Clean and validate Aadhaar number
+            const cleaned = (0, compliance_1.sanitizeAadhaarInput)(aadhaarNumber);
+            if (!(0, compliance_1.validateAadhaar)(cleaned)) {
+                res.status(400).json({
+                    success: false,
+                    error: 'Invalid Aadhaar number format',
+                });
+                return;
+            }
+            // Mark document as verified
+            const updatedLead = await LeadService_1.LeadService.verifyDocument(leadId, index, 'verified', req.admin.uid, req.admin.name || req.admin.email, undefined, {
+                exactAadhaarNumber: cleaned
+            });
+            if (!updatedLead) {
+                res.status(500).json({
+                    success: false,
+                    error: 'Failed to update document status',
+                });
+                return;
+            }
+            // ✅ Auto-extract and store address from Aadhaar verification
+            if (result.verifiedData?.address) {
+                try {
+                    await LeadService_1.LeadService.updateAddressFromAadhaar(leadId, {
+                        line1: result.verifiedData.address.line1 || '',
+                        line2: result.verifiedData.address.line2,
+                        city: result.verifiedData.address.city || '',
+                        state: result.verifiedData.address.state || '',
+                        pincode: result.verifiedData.address.pincode || ''
+                    });
+                    // Mark address as verified (since it came from verified Aadhaar)
+                    await LeadService_1.LeadService.markAddressAsVerified(leadId, {
+                        verifiedBy: req.admin.uid,
+                        verifiedAt: new Date(),
+                        source: 'aadhaar_verification'
+                    });
+                    logger_1.default.info('✅ Address extracted and verified from Aadhaar verification', {
+                        leadId,
+                        address: result.verifiedData.address
+                    });
+                }
+                catch (addressError) {
+                    logger_1.default.warn('Failed to update address from Aadhaar verification', {
+                        leadId,
+                        error: addressError.message
+                    });
+                    // Don't fail the verification if address update fails
+                }
+            }
+            // ✅ Store verification data in verification service
+            if (lead.activationData?.firebaseUid) {
+                try {
+                    const adminInfo = {
+                        userId: req.admin.uid,
+                        userName: req.admin.name || req.admin.email || req.admin.uid,
+                        role: req.admin.role || 'admin'
+                    };
+                    await ActivationService_1.ActivationService.storeVerificationData(lead.activationData.firebaseUid, { aadhaarNumber: cleaned }, adminInfo, { provider: 'cashfree', verificationSource: 'admin_api' } // ✅ Pass correct provider and source
+                    );
+                    // ✅ ALSO directly update profile to ensure isAadhaarVerified is set
+                    try {
+                        if (env_1.env.USER_SERVICE_URL) {
+                            await axios_1.default.patch(`${env_1.env.USER_SERVICE_URL}/api/v1/profiles/${lead.activationData.firebaseUid}/verification/aadhaar`, {
+                                isAadhaarVerified: true,
+                                aadhaarVerifiedAt: new Date().toISOString(),
+                                maskedAadhaar: result.maskedAadhaar
+                            }, {
+                                headers: {
+                                    'X-Service-Auth': env_1.env.SERVICE_AUTH_TOKEN,
+                                    'X-Service-Name': 'admin-service',
+                                    'X-User-Id': lead.activationData.firebaseUid,
+                                    'Content-Type': 'application/json'
+                                }
+                            });
+                            logger_1.default.info('✅ Directly updated profile Aadhaar verification flag', {
+                                leadId,
+                                firebaseUid: lead.activationData.firebaseUid
+                            });
+                        }
+                    }
+                    catch (profileUpdateError) {
+                        logger_1.default.warn('Failed to directly update profile Aadhaar verification', {
+                            leadId,
+                            firebaseUid: lead.activationData.firebaseUid,
+                            error: profileUpdateError.message
+                        });
+                        // Don't fail - verification service update might have worked
+                    }
+                    logger_1.default.info('✅ Stored Aadhaar verification in verification service', {
+                        leadId,
+                        firebaseUid: lead.activationData.firebaseUid
+                    });
+                }
+                catch (verificationError) {
+                    logger_1.default.warn('Failed to store verification in verification service', {
+                        leadId,
+                        error: verificationError.message
+                    });
+                    // Don't fail the verification if storage fails
+                }
+            }
+            res.json({
+                success: true,
+                data: {
+                    lead: updatedLead,
+                    verification: {
+                        verified: true,
+                        maskedAadhaar: result.maskedAadhaar,
+                        verifiedData: result.verifiedData
+                    },
+                    addressExtracted: !!result.verifiedData?.address
+                },
+                message: 'Aadhaar verified successfully' + (result.verifiedData?.address ? '. Address extracted and verified.' : ''),
+            });
+        }
+        catch (error) {
+            // ✅ Enhanced error logging
+            logger_1.default.error('Error verifying Aadhaar OTP', {
+                error: error.message,
+                errorStack: error.stack,
+                leadId: req.params.leadId,
+                documentIndex: req.params.documentIndex,
+                userId: req.body.userId || 'unknown',
+                refId: req.body.refId || 'unknown'
+            });
+            res.status(500).json({
+                success: false,
+                error: 'Failed to verify Aadhaar OTP',
+                message: error.message || 'An unexpected error occurred',
+                // ✅ Include error details in development
+                ...(process.env.NODE_ENV === 'development' && { details: error.stack })
+            });
+        }
+    }
+    /**
+     * Verify PAN via Cashfree API
+     * POST /api/v1/admin/caos/leads/:leadId/documents/:documentIndex/verify-pan
+     */
+    static async verifyPAN(req, res) {
+        try {
+            if (!req.admin) {
+                res.status(401).json({
+                    success: false,
+                    error: 'Authentication required',
+                });
+                return;
+            }
+            const { leadId, documentIndex } = req.params;
+            const { panNumber } = req.body;
+            if (!panNumber) {
+                res.status(400).json({
+                    success: false,
+                    error: 'PAN number is required',
+                });
+                return;
+            }
+            // Validate PAN format
+            const cleaned = (0, compliance_1.sanitizePANInput)(panNumber);
+            if (!(0, compliance_1.validatePAN)(cleaned)) {
+                res.status(400).json({
+                    success: false,
+                    error: 'Invalid PAN number format. Must be in format ABCDE1234F',
+                });
+                return;
+            }
+            const index = parseInt(documentIndex);
+            if (isNaN(index) || index < 0) {
+                res.status(400).json({
+                    success: false,
+                    error: 'Invalid document index',
+                });
+                return;
+            }
+            const lead = await LeadService_1.LeadService.getLeadById(leadId);
+            if (!lead) {
+                res.status(404).json({
+                    success: false,
+                    error: 'Lead not found',
+                });
+                return;
+            }
+            if (!lead.documents || index >= lead.documents.length) {
+                res.status(404).json({
+                    success: false,
+                    error: 'Document not found',
+                });
+                return;
+            }
+            const document = lead.documents[index];
+            if (document.type !== 'pan') {
+                res.status(400).json({
+                    success: false,
+                    error: 'Document is not a PAN document',
+                });
+                return;
+            }
+            // Get userId (use leadId temporarily if not activated, or firebaseUid if activated)
+            const userId = lead.activationData?.firebaseUid || leadId;
+            // Verify PAN via Cashfree
+            const result = await VerificationServiceClient_1.VerificationServiceClient.verifyPAN(userId, cleaned);
+            if (!result.success || !result.verified) {
+                // ✅ Log detailed error information
+                logger_1.default.error('PAN verification failed', {
+                    leadId,
+                    userId,
+                    error: result.error,
+                    documentIndex: index
+                });
+                res.status(400).json({
+                    success: false,
+                    error: result.error || 'PAN verification failed',
+                    details: result.error // ✅ Include error details for debugging
+                });
+                return;
+            }
+            // Mark document as verified
+            const updatedLead = await LeadService_1.LeadService.verifyDocument(leadId, index, 'verified', req.admin.uid, req.admin.name || req.admin.email, undefined, {
+                exactPANNumber: cleaned
+            });
+            if (!updatedLead) {
+                res.status(500).json({
+                    success: false,
+                    error: 'Failed to update document status',
+                });
+                return;
+            }
+            // ✅ Store verification data in verification service
+            if (lead.activationData?.firebaseUid) {
+                try {
+                    const adminInfo = {
+                        userId: req.admin.uid,
+                        userName: req.admin.name || req.admin.email || req.admin.uid,
+                        role: req.admin.role || 'admin'
+                    };
+                    await ActivationService_1.ActivationService.storeVerificationData(lead.activationData.firebaseUid, { panNumber: cleaned }, adminInfo, { provider: 'cashfree', verificationSource: 'admin_api' } // ✅ Pass correct provider and source
+                    );
+                    // ✅ ALSO directly update profile to ensure isPANVerified is set
+                    try {
+                        if (env_1.env.USER_SERVICE_URL) {
+                            await axios_1.default.patch(`${env_1.env.USER_SERVICE_URL}/api/v1/profiles/${lead.activationData.firebaseUid}/verification/pan`, {
+                                isPANVerified: true,
+                                panVerifiedAt: new Date().toISOString()
+                            }, {
+                                headers: {
+                                    'X-Service-Auth': env_1.env.SERVICE_AUTH_TOKEN,
+                                    'X-Service-Name': 'admin-service',
+                                    'X-User-Id': lead.activationData.firebaseUid,
+                                    'Content-Type': 'application/json'
+                                }
+                            });
+                            logger_1.default.info('✅ Directly updated profile PAN verification flag', {
+                                leadId,
+                                firebaseUid: lead.activationData.firebaseUid
+                            });
+                        }
+                    }
+                    catch (profileUpdateError) {
+                        logger_1.default.warn('Failed to directly update profile PAN verification', {
+                            leadId,
+                            firebaseUid: lead.activationData.firebaseUid,
+                            error: profileUpdateError.message
+                        });
+                        // Don't fail - verification service update might have worked
+                    }
+                    logger_1.default.info('✅ Stored PAN verification in verification service', {
+                        leadId,
+                        firebaseUid: lead.activationData.firebaseUid
+                    });
+                }
+                catch (verificationError) {
+                    logger_1.default.warn('Failed to store verification in verification service', {
+                        leadId,
+                        error: verificationError.message
+                    });
+                    // Don't fail the verification if storage fails
+                }
+            }
+            res.json({
+                success: true,
+                data: {
+                    lead: updatedLead,
+                    verification: {
+                        verified: true,
+                        maskedPAN: result.maskedPAN,
+                        verifiedData: result.verifiedData
+                    }
+                },
+                message: 'PAN verified successfully',
+            });
+        }
+        catch (error) {
+            // ✅ Enhanced error logging
+            logger_1.default.error('Error verifying PAN', {
+                error: error.message,
+                errorStack: error.stack,
+                leadId: req.params.leadId,
+                documentIndex: req.params.documentIndex,
+                userId: req.body.userId || req.params.leadId || 'unknown',
+                panNumber: req.body.panNumber ? `${req.body.panNumber.slice(0, 2)}****${req.body.panNumber.slice(6)}` : 'missing'
+            });
+            res.status(500).json({
+                success: false,
+                error: 'Failed to verify PAN',
+                message: error.message || 'An unexpected error occurred',
+                // ✅ Include error details in development
+                ...(process.env.NODE_ENV === 'development' && { details: error.stack })
             });
         }
     }

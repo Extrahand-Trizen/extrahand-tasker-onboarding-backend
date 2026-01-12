@@ -10,11 +10,13 @@ const LeadService_1 = require("./LeadService");
 const logger_1 = __importDefault(require("../config/logger"));
 const axios_1 = __importDefault(require("axios"));
 const env_1 = require("../config/env");
+const EmailServiceClient_1 = require("./EmailServiceClient");
 class ActivationService {
     /**
      * Activate a single lead (create Firebase user + Profile)
+     * @param skipVerificationService If true, skips storing verification data (for quick onboarding Scenario B)
      */
-    static async activateLead(leadId, activatedBy, activatedByName, role) {
+    static async activateLead(leadId, activatedBy, activatedByName, role, skipVerificationService) {
         try {
             const lead = await Lead_1.default.findOne({ leadId });
             if (!lead) {
@@ -144,13 +146,19 @@ class ActivationService {
             // Set flags based on document existence and verification status, not just exact details
             const hasAadhaar = !!aadhaarDoc && aadhaarDoc.status === 'verified';
             const hasPAN = !!panDoc && panDoc.status === 'verified';
+            // ✅ Address is now optional - can come from Aadhaar verification or address_proof document
             const hasAddress = !!addressDoc && addressDoc.status === 'verified';
             // ✅ Extract exact details (unmasked) for storage in verification service
             // Prefer exact details (entered during verification) over masked values
             // Exact details are entered by operations/admin during document verification
             const exactAadhaar = aadhaarDoc?.exactAadhaarNumber || aadhaarDoc?.aadhaarNumber;
             const exactPAN = panDoc?.exactPANNumber || panDoc?.panNumber;
+            // ✅ Address can come from address_proof document OR from Aadhaar verification
+            // Priority: Aadhaar verification address > address_proof document > lead address
             const exactAddress = addressDoc?.exactAddressDetails || addressDoc?.addressDetails;
+            // ✅ Check if address was extracted from Aadhaar verification
+            // This would be stored in lead's address fields if Aadhaar verification was done via API
+            // For now, we'll use the lead's address/city/state/pincode which should be updated by LeadService.updateAddressFromAadhaar
             // ✅ Extract photo URL if photo document exists and is verified
             const photoURL = photoDoc?.url || null;
             logger_1.default.info('Extracting verification data for account creation (onboarding flow only)', {
@@ -201,12 +209,20 @@ class ActivationService {
                 emailVerified: false,
                 roles: ['both'],
                 userType: 'individual',
-                location: {
-                    city: lead.city,
-                    state: lead.state || null,
-                    // ✅ Use exact address from verified document if available, otherwise use lead address
-                    address: exactAddress || lead.address || null
-                },
+                // ✅ Location format matches Profile model structure
+                // Priority: Address from Aadhaar verification > address_proof document > lead address
+                location: (lead.address || lead.city || exactAddress) ? {
+                    type: 'Point',
+                    coordinates: [0, 0], // Default coordinates (can be updated via geocoding)
+                    address: exactAddress || lead.address || `${lead.city}, ${lead.state || ''} - ${lead.pincode || ''}`,
+                    addressDetails: {
+                        city: lead.city || null,
+                        state: lead.state || null,
+                        pinCode: lead.pincode || null,
+                        country: 'India'
+                    },
+                    isPublic: false
+                } : null,
                 skills: {
                     list: lead.skills.map(skill => ({
                         name: skill.name,
@@ -244,22 +260,49 @@ class ActivationService {
                 });
                 profileCreated = true;
                 logger_1.default.info('Profile created for lead', { leadId, firebaseUid: userRecord.uid });
+                // Send welcome email (fire and forget - don't block on email)
+                if (lead.email) {
+                    EmailServiceClient_1.EmailServiceClient.sendAccountCreatedEmail(lead.email, lead.name, lead.phone).catch((emailError) => {
+                        // Log but don't fail the account creation
+                        logger_1.default.warn('Failed to send welcome email', {
+                            leadId,
+                            firebaseUid: userRecord.uid,
+                            email: lead.email,
+                            error: emailError,
+                        });
+                    });
+                }
                 // ✅ Store exact details (unmasked) in verification service
                 // These will be used for user verification and profile creation
-                if (hasAadhaar || hasPAN || hasAddress) {
+                // Skip for Scenario B (quick onboarding - users verify themselves later)
+                if ((hasAadhaar || hasPAN || hasAddress) && !skipVerificationService) {
                     try {
-                        // ✅ Store exact details (unmasked) in verification service
-                        // These will be used for user verification and profile creation
+                        // Get document verifier info if available
+                        const aadhaarDoc = lead.documents.find(d => d.type === 'aadhaar' && d.status === 'verified');
+                        const panDoc = lead.documents.find(d => d.type === 'pan' && d.status === 'verified');
+                        // Use the document verifier's info if available
+                        let verifierInfo = undefined;
+                        if (aadhaarDoc?.verifiedBy || panDoc?.verifiedBy) {
+                            const verifierId = aadhaarDoc?.verifiedBy || panDoc?.verifiedBy;
+                            if (verifierId) {
+                                verifierInfo = {
+                                    userId: verifierId,
+                                    userName: 'Document Verifier', // Admin who verified during lead stage
+                                    role: 'operations'
+                                };
+                            }
+                        }
                         await this.storeVerificationData(userRecord.uid, {
                             aadhaarNumber: exactAadhaar,
                             panNumber: exactPAN,
                             addressDetails: exactAddress
-                        });
-                        logger_1.default.info('Verification data stored for activated lead', {
+                        }, verifierInfo);
+                        logger_1.default.info('✅ Verification data stored for activated lead (Scenario A)', {
                             leadId,
                             firebaseUid: userRecord.uid,
                             hasAadhaar,
-                            hasPAN
+                            hasPAN,
+                            verifiedBy: verifierInfo?.userId || 'system'
                         });
                     }
                     catch (verificationError) {
@@ -270,6 +313,13 @@ class ActivationService {
                         });
                         // Don't fail activation if verification storage fails
                     }
+                }
+                else if (skipVerificationService) {
+                    logger_1.default.info('⏭️  Skipping verification service storage (Scenario B - quick onboarding)', {
+                        leadId,
+                        firebaseUid: userRecord.uid,
+                        note: 'User will verify themselves via Cashfree later'
+                    });
                 }
             }
             catch (profileError) {
@@ -320,15 +370,16 @@ class ActivationService {
     }
     /**
      * Bulk activate leads
+     * @param skipVerificationService If true, skips storing verification data (for Scenario B)
      */
-    static async bulkActivateLeads(leadIds, activatedBy, activatedByName, role) {
+    static async bulkActivateLeads(leadIds, activatedBy, activatedByName, role, skipVerificationService) {
         const success = [];
         const failed = [];
         // Process in batches to avoid overwhelming Firebase
         const BATCH_SIZE = 10;
         for (let i = 0; i < leadIds.length; i += BATCH_SIZE) {
             const batch = leadIds.slice(i, i + BATCH_SIZE);
-            const results = await Promise.allSettled(batch.map(leadId => this.activateLead(leadId, activatedBy, activatedByName, role)));
+            const results = await Promise.allSettled(batch.map(leadId => this.activateLead(leadId, activatedBy, activatedByName, role, skipVerificationService)));
             results.forEach((result, index) => {
                 const leadId = batch[index];
                 if (result.status === 'fulfilled' && result.value.success) {
@@ -361,8 +412,13 @@ class ActivationService {
      * Store exact Aadhaar/PAN/Address data in verification service
      * Uses exact (unmasked) details entered during document verification
      * Made public to allow immediate updates when documents are verified for existing accounts
+     *
+     * @param uid Firebase UID
+     * @param data Verification data (aadhaar/pan/address)
+     * @param adminInfo Optional admin information for tracking who verified
+     * @param options Optional provider and verificationSource (defaults to admin_manual)
      */
-    static async storeVerificationData(uid, data) {
+    static async storeVerificationData(uid, data, adminInfo, options) {
         if (!env_1.env.VERIFICATION_SERVICE_URL) {
             logger_1.default.warn('VERIFICATION_SERVICE_URL not configured, skipping verification data storage');
             return;
@@ -409,12 +465,14 @@ class ActivationService {
                     maskedValue: record.maskedValue,
                     status: 'verified',
                     verifiedAt: new Date().toISOString(),
-                    provider: 'admin_activation',
+                    provider: options?.provider || 'admin_manual', // ✅ Use provided provider
+                    verificationSource: options?.verificationSource || 'admin_manual', // ✅ Use provided source
+                    verifiedBy: adminInfo, // ✅ This will now have correct role from database
                     consent: {
                         given: true,
                         givenAt: new Date().toISOString(),
                         consentVersion: 'v1.0',
-                        consentText: 'Lead activation - pre-verified documents'
+                        consentText: `Document verified by admin team - ${record.type} verification`
                     }
                 }, {
                     headers: {
@@ -423,7 +481,13 @@ class ActivationService {
                         'Content-Type': 'application/json'
                     }
                 });
-                logger_1.default.info(`Stored ${record.type} verification for activated user ${uid}`);
+                logger_1.default.info(`✅ Stored ${record.type} verification for activated user`, {
+                    uid,
+                    type: record.type,
+                    source: options?.verificationSource || 'admin_manual',
+                    verifiedBy: adminInfo?.userId || 'system',
+                    role: adminInfo?.role || 'unknown'
+                });
             }
             catch (error) {
                 logger_1.default.error(`Failed to store ${record.type} verification for ${uid}`, {

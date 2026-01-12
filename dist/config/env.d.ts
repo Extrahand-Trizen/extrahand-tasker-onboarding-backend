@@ -7,6 +7,9 @@ export declare const env: {
     FIREBASE_PRIVATE_KEY: string;
     FIREBASE_CLIENT_EMAIL: string;
     SERVICE_AUTH_TOKEN: string;
+    JWT_SECRET: string;
+    JWT_REFRESH_SECRET: string;
+    FRONTEND_URL: string;
     LOG_LEVEL: "error" | "warn" | "info" | "debug";
     STORAGE_PROVIDER: "minio" | "s3";
     MINIO_BUCKET_NAME: string;
@@ -14,6 +17,10 @@ export declare const env: {
     AWS_S3_BUCKET_NAME: string;
     USER_SERVICE_URL?: string | undefined;
     VERIFICATION_SERVICE_URL?: string | undefined;
+    EMAIL_SERVICE_URL?: string | undefined;
+    MICROSOFT_CLIENT_ID?: string | undefined;
+    MICROSOFT_CLIENT_SECRET?: string | undefined;
+    MICROSOFT_REDIRECT_URI?: string | undefined;
     MINIO_ENDPOINT?: string | undefined;
     MINIO_PORT?: string | undefined;
     MINIO_USE_SSL?: string | undefined;

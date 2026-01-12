@@ -11,6 +11,10 @@ import activationRoutes from './routes/activation';
 import analyticsRoutes from './routes/analytics';
 import uploadsRoutes from './routes/uploads';
 import adminUsersRoutes from './routes/adminUsers';
+import invitesRoutes from './routes/invites';
+import microsoftAuthRoutes from './routes/microsoftAuth';
+import passwordAuthRoutes from './routes/passwordAuth';
+import userManagementRoutes from './routes/userManagement';
 import { errorHandler } from './middleware/errorHandler';
 import logger from './config/logger';
 
@@ -43,6 +47,12 @@ app.use(morgan('combined', {
 app.get('/api/v1/health', (_req, res) => {
   res.json({ status: 'ok', service: 'tasker-onboarding-service' });
 });
+
+// Authentication routes (Microsoft OAuth + JWT + Password)
+app.use('/api/v1/auth', microsoftAuthRoutes);
+app.use('/api/v1/auth', passwordAuthRoutes);
+app.use('/api/v1/admin/invites', invitesRoutes);
+app.use('/api/v1/admin/users', userManagementRoutes);
 
 // Internal routes (service-to-service only)
 app.use('/api/v1/internal/bulk-upload', bulkUploadRoutes);

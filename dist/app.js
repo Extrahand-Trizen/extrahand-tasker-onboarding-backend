@@ -16,6 +16,10 @@ const activation_1 = __importDefault(require("./routes/activation"));
 const analytics_1 = __importDefault(require("./routes/analytics"));
 const uploads_1 = __importDefault(require("./routes/uploads"));
 const adminUsers_1 = __importDefault(require("./routes/adminUsers"));
+const invites_1 = __importDefault(require("./routes/invites"));
+const microsoftAuth_1 = __importDefault(require("./routes/microsoftAuth"));
+const passwordAuth_1 = __importDefault(require("./routes/passwordAuth"));
+const userManagement_1 = __importDefault(require("./routes/userManagement"));
 const errorHandler_1 = require("./middleware/errorHandler");
 const logger_1 = __importDefault(require("./config/logger"));
 const app = (0, express_1.default)();
@@ -41,6 +45,11 @@ app.use((0, morgan_1.default)('combined', {
 app.get('/api/v1/health', (_req, res) => {
     res.json({ status: 'ok', service: 'tasker-onboarding-service' });
 });
+// Authentication routes (Microsoft OAuth + JWT + Password)
+app.use('/api/v1/auth', microsoftAuth_1.default);
+app.use('/api/v1/auth', passwordAuth_1.default);
+app.use('/api/v1/admin/invites', invites_1.default);
+app.use('/api/v1/admin/users', userManagement_1.default);
 // Internal routes (service-to-service only)
 app.use('/api/v1/internal/bulk-upload', bulkUpload_1.default);
 // Onboarding routes (tasker onboarding platform)

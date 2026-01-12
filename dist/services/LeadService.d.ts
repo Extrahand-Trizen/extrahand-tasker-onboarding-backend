@@ -128,6 +128,24 @@ export declare class LeadService {
      */
     static removeSkill(leadId: string, skillIndex: number): Promise<ILead | null>;
     /**
+     * Update address from Aadhaar verification
+     */
+    static updateAddressFromAadhaar(leadId: string, address: {
+        line1: string;
+        line2?: string;
+        city: string;
+        state: string;
+        pincode: string;
+    }): Promise<ILead | null>;
+    /**
+     * Mark address as verified
+     */
+    static markAddressAsVerified(leadId: string, data: {
+        verifiedBy: string;
+        verifiedAt: Date;
+        source: string;
+    }): Promise<ILead | null>;
+    /**
      * Log activity
      */
     static logActivity(leadId: string, type: string, action: string, performedBy: string, performedByName?: string, metadata?: Record<string, any>): Promise<void>;

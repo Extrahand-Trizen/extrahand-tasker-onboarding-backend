@@ -44,6 +44,7 @@ const BulkImport_1 = __importDefault(require("../models/BulkImport"));
 const LeadService_1 = require("./LeadService");
 const UserCreationService_1 = require("./UserCreationService");
 const DuplicateCheckService_1 = require("./DuplicateCheckService");
+const EmailServiceClient_1 = require("./EmailServiceClient");
 class BulkUploadService {
     /**
      * Parse CSV/Excel file
@@ -794,6 +795,15 @@ class BulkUploadService {
                                     leadId: leadFirebasePair.lead.leadId,
                                     firebaseUid: leadFirebasePair.firebaseUid,
                                     name: leadFirebasePair.userData.name,
+                                });
+                                // Send welcome email (fire and forget - don't block on email)
+                                EmailServiceClient_1.EmailServiceClient.sendAccountCreatedEmail(leadFirebasePair.userData.email || `helper_${leadFirebasePair.userData.phone?.replace(/\D/g, '')}@extrahand.temp`, leadFirebasePair.userData.name, leadFirebasePair.userData.phone).catch((emailError) => {
+                                    // Log but don't fail the account creation
+                                    logger_1.default.warn('Failed to send welcome email', {
+                                        userId: leadFirebasePair.firebaseUid,
+                                        email: leadFirebasePair.userData.email,
+                                        error: emailError,
+                                    });
                                 });
                             }
                             else {

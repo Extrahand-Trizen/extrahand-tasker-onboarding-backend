@@ -38,6 +38,12 @@ router.post('/bulk-status', (0, roleAuth_1.requirePermission)('canUpdateLead'), 
 router.post('/bulk-assign-skills', (0, roleAuth_1.requirePermission)('canAssignSkills'), BulkOperationsController_1.BulkOperationsController.bulkAssignSkills);
 // Document management
 router.post('/:leadId/documents', (0, roleAuth_1.requirePermission)('canUpdateLead'), DocumentController_1.DocumentController.uploadDocument);
+// Aadhaar verification (API-based)
+router.post('/:leadId/documents/:documentIndex/verify-aadhaar/initiate', (0, roleAuth_1.requirePermission)('canVerifyDocuments'), DocumentController_1.DocumentController.initiateAadhaarVerification);
+router.post('/:leadId/documents/:documentIndex/verify-aadhaar/verify', (0, roleAuth_1.requirePermission)('canVerifyDocuments'), DocumentController_1.DocumentController.verifyAadhaarOTP);
+// PAN verification (API-based)
+router.post('/:leadId/documents/:documentIndex/verify-pan', (0, roleAuth_1.requirePermission)('canVerifyDocuments'), DocumentController_1.DocumentController.verifyPAN);
+// Manual document verification (for address_proof and other documents)
 router.put('/:leadId/documents/:documentIndex', (0, roleAuth_1.requirePermission)('canVerifyDocuments'), DocumentController_1.DocumentController.verifyDocument);
 router.delete('/:leadId/documents/:documentIndex', (0, roleAuth_1.requirePermission)('canUpdateLead'), DocumentController_1.DocumentController.deleteDocument);
 // Skill management

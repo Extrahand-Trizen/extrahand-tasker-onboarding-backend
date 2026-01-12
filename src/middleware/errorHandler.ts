@@ -20,3 +20,14 @@ export const errorHandler = (
   });
 };
 
+/**
+ * Wrapper for async route handlers to catch errors
+ * Usage: router.get('/path', asyncHandler(controller.method))
+ */
+export const asyncHandler = (
+  fn: (req: Request, res: Response, next: NextFunction) => Promise<any>
+) => {
+  return (req: Request, res: Response, next: NextFunction) => {
+    Promise.resolve(fn(req, res, next)).catch(next);
+  };
+};

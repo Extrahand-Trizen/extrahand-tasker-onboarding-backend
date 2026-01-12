@@ -6,6 +6,7 @@ import BulkImport from "../models/BulkImport";
 import { LeadService } from "./LeadService";
 import { UserCreationService } from "./UserCreationService";
 import { DuplicateCheckService } from "./DuplicateCheckService";
+import { EmailServiceClient } from "./EmailServiceClient";
 import { env } from "../config/env";
 
 export interface ParsedUser {
@@ -565,7 +566,8 @@ export class BulkUploadService {
     fileName: string,
     adminUid: string,
     defaultPrimaryCategory?: string,
-    defaultSecondaryCategory?: string
+    defaultSecondaryCategory?: string,
+    sendEmails: boolean = true
   ): Promise<BulkUploadResult> {
     // 1. Parse file with default categories
     const users = this.parseFile(
@@ -682,7 +684,8 @@ export class BulkUploadService {
       const createResult = await this.processCreates(
         createUsers,
         importId,
-        adminUid
+        adminUid,
+        sendEmails
       );
       result.success += createResult.success;
       result.failed += createResult.failed;
@@ -740,7 +743,8 @@ export class BulkUploadService {
   private static async processCreates(
     users: ParsedUser[],
     importId: string,
-    adminUid: string
+    adminUid: string,
+    sendEmails: boolean = true
   ): Promise<{
     success: number;
     failed: number;
@@ -1162,6 +1166,32 @@ export class BulkUploadService {
                   firebaseUid: leadFirebasePair.firebaseUid,
                   name: leadFirebasePair.userData.name,
                 });
+
+                // Send welcome email only if sendEmails is true (fire and forget - don't block on email)
+                if (sendEmails && leadFirebasePair.userData.email) {
+                  EmailServiceClient.sendAccountCreatedEmail(
+                    leadFirebasePair.userData.email,
+                    leadFirebasePair.userData.name!,
+                    leadFirebasePair.userData.phone
+                  ).catch((emailError) => {
+                    // Log but don't fail the account creation
+                    logger.warn('Failed to send welcome email', {
+                      userId: leadFirebasePair.firebaseUid,
+                      email: leadFirebasePair.userData.email,
+                      error: emailError,
+                    });
+                  });
+                } else if (sendEmails && !leadFirebasePair.userData.email) {
+                  logger.debug('Skipping email - no email address provided', {
+                    userId: leadFirebasePair.firebaseUid,
+                    phone: leadFirebasePair.userData.phone,
+                  });
+                } else {
+                  logger.debug('Skipping email - sendEmails is disabled', {
+                    userId: leadFirebasePair.firebaseUid,
+                    email: leadFirebasePair.userData.email,
+                  });
+                }
               } else {
                 // Profile creation failed, but Firebase user exists
                 const profileCreationError = profileCreationResult.failed.find(

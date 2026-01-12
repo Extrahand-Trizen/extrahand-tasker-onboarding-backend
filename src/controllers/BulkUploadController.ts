@@ -81,13 +81,15 @@ export class BulkUploadController {
       const secondaryCategory = req.body.secondaryCategory as
         | string
         | undefined;
+      const sendEmails = req.body.sendEmails !== 'false' && req.body.sendEmails !== false; // Default to true
 
       const result = await BulkUploadService.processBulkUpload(
         req.file.buffer,
         req.file.originalname,
         adminUid,
         primaryCategory,
-        secondaryCategory
+        secondaryCategory,
+        sendEmails
       );
 
       res.json({
