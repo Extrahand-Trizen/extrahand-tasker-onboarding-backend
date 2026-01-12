@@ -80,11 +80,21 @@ export class BulkLeadImportController {
 
       const { source, primaryCategory, secondaryCategory } = req.body; // Optional: override for all leads
 
+      // Get admin UID (support both Firebase uid and JWT userId)
+      const adminUid = req.admin?.uid || req.admin?.userId;
+      if (!adminUid) {
+        res.status(401).json({
+          success: false,
+          error: 'Admin UID not found',
+        });
+        return;
+      }
+
       const result = await BulkLeadImportService.bulkImportLeads(
         file.buffer,
         file.originalname,
-        req.admin.uid,
-        req.admin.name,
+        adminUid, // TypeScript now knows this is string (not undefined) after the check above
+        req.admin?.name, // Optional parameter, can be undefined
         source,
         primaryCategory,
         secondaryCategory
