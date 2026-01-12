@@ -26,12 +26,17 @@ export async function exchangeCodeForTokens(
   code: string,
   redirectUri: string
 ): Promise<MicrosoftTokenResponse> {
+  // Validate Microsoft OAuth configuration
+  if (!env.MICROSOFT_CLIENT_ID || !env.MICROSOFT_CLIENT_SECRET) {
+    throw new Error('Microsoft OAuth is not configured. MICROSOFT_CLIENT_ID and MICROSOFT_CLIENT_SECRET are required.');
+  }
+
   try {
     const response = await axios.post(
       'https://login.microsoftonline.com/common/oauth2/v2.0/token',
       new URLSearchParams({
-        client_id: env.MICROSOFT_CLIENT_ID,
-        client_secret: env.MICROSOFT_CLIENT_SECRET,
+        client_id: env.MICROSOFT_CLIENT_ID, // TypeScript now knows this is string (not undefined)
+        client_secret: env.MICROSOFT_CLIENT_SECRET, // TypeScript now knows this is string (not undefined)
         code,
         redirect_uri: redirectUri,
         grant_type: 'authorization_code',
@@ -90,8 +95,13 @@ export function getAuthorizationUrl(
   redirectUri: string,
   state?: string
 ): string {
+  // Validate Microsoft OAuth configuration
+  if (!env.MICROSOFT_CLIENT_ID) {
+    throw new Error('Microsoft OAuth is not configured. MICROSOFT_CLIENT_ID is required.');
+  }
+
   const params = new URLSearchParams({
-    client_id: env.MICROSOFT_CLIENT_ID,
+    client_id: env.MICROSOFT_CLIENT_ID, // TypeScript now knows this is string (not undefined)
     response_type: 'code',
     redirect_uri: redirectUri,
     scope: 'openid profile email',
