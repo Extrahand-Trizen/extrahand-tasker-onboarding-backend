@@ -310,43 +310,96 @@ export class UserManagementController {
         });
       }
 
+      // Validate user has an email
+      if (!user.email) {
+        logger.error('Password reset failed: User has no email address', {
+          userId: user.userId,
+          initiatedBy: actorId,
+        });
+        return res.status(400).json({
+          success: false,
+          error: 'User does not have an email address configured',
+        });
+      }
+
       // Create password reset token
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
       const resetToken = await PasswordResetToken.create({
         userId: user.userId,
         email: user.email,
-        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
+        expiresAt,
         createdBy: actorId,
       });
 
       const resetLink = `${env.FRONTEND_URL}/reset-password?token=${resetToken.token}`;
 
+      logger.info('Password reset token created', {
+        userId: user.userId,
+        email: user.email,
+        initiatedBy: actorId,
+        tokenId: resetToken.token.substring(0, 8) + '...',
+        expiresAt: expiresAt.toISOString(),
+      });
+
       // Send password reset email
       const emailResult = await EmailServiceClient.sendPasswordResetEmail(
         user.email,
         resetLink,
-        user.name || user.email.split('@')[0]
+        user.name || user.email.split('@')[0],
+        expiresAt // Pass expiresAt to email template
       );
 
-      logger.info('Password reset initiated by admin', {
+      if (!emailResult.success) {
+        logger.error('Password reset email failed to send', {
+          userId: user.userId,
+          email: user.email,
+          initiatedBy: actorId,
+          error: emailResult.error,
+          resetLink: resetLink, // Log link for manual sending if needed
+        });
+
+        // Return error but include reset link for manual sending
+        return res.status(500).json({
+          success: false,
+          error: 'Failed to send password reset email',
+          message: emailResult.error || 'Email service unavailable',
+          data: {
+            emailSent: false,
+            resetLink: resetLink, // Provide link so admin can manually send
+            email: user.email,
+            expiresAt: expiresAt.toISOString(),
+          },
+        });
+      }
+
+      logger.info('Password reset email sent successfully', {
         userId: user.userId,
         email: user.email,
         initiatedBy: actorId,
-        emailSent: emailResult.success,
+        messageId: emailResult.messageId,
+        expiresAt: expiresAt.toISOString(),
       });
 
       return res.json({
         success: true,
-        message: 'Password reset email sent',
+        message: `Password reset email sent to ${user.email}`,
         data: {
-          emailSent: emailResult.success,
-          resetLink: emailResult.success ? undefined : resetLink, // Only return link if email failed
+          emailSent: true,
+          email: user.email,
+          expiresAt: expiresAt.toISOString(),
         },
       });
     } catch (error: any) {
-      logger.error('Password reset error', { error: error.message });
+      logger.error('Password reset error', {
+        error: error.message,
+        stack: error.stack,
+        userId: req.params.userId,
+        initiatedBy: req.admin?.userId || 'system',
+      });
       return res.status(500).json({
         success: false,
         error: 'Failed to initiate password reset',
+        message: error.message || 'An unexpected error occurred',
       });
     }
   }
