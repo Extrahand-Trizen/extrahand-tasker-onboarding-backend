@@ -236,17 +236,17 @@ export class BulkLeadImportService {
       return { valid: false, error: 'Invalid phone number (10 digits, starting with 6-9). Can be +91-XXXXXXXXXX or just XXXXXXXXXX' };
     }
 
-    if (!row.city || row.city.trim().length < 2) {
-      return { valid: false, error: 'City is required' };
-    }
+    // if (!row.city || row.city.trim().length < 2) {
+    //   return { valid: false, error: 'City is required' };
+    // }
 
-    if (!row.state || row.state.trim().length < 2) {
-      return { valid: false, error: 'State is required' };
-    }
+    // if (!row.state || row.state.trim().length < 2) {
+    //   return { valid: false, error: 'State is required' };
+    // }
 
-    if (!row.address || row.address.trim().length < 5) {
-      return { valid: false, error: 'Address is required (minimum 5 characters)' };
-    }
+    // if (!row.address || row.address.trim().length < 5) {
+    //   return { valid: false, error: 'Address is required (minimum 5 characters)' };
+    // }
 
     const primaryCategory = (row.primaryCategory || row.primarySkill || '').trim();
     if (!primaryCategory || primaryCategory.length < 2) {

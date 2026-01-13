@@ -41,7 +41,9 @@ const envSchema = z.object({
   MICROSOFT_CLIENT_SECRET: z.string().optional(),
   MICROSOFT_REDIRECT_URI: z.string().url('MICROSOFT_REDIRECT_URI must be a valid URL').optional(),
   
-  // Frontend URL
+  // Frontend URL - Used for invite links and password reset links
+  // Production: https://partner.extrahand.in
+  // Development: http://localhost:3000
   FRONTEND_URL: z.string().url().default('http://localhost:3000'),
   
   LOG_LEVEL: z.enum(['error', 'warn', 'info', 'debug']).default('info'),

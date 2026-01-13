@@ -5,6 +5,18 @@ import logger from '../config/logger';
 import { env } from '../config/env';
 import { EmailServiceClient } from '../services/EmailServiceClient';
 
+/**
+ * Construct invite link URL
+ * Uses FRONTEND_URL environment variable which should be set to:
+ * - Production: https://partner.extrahand.in
+ * - Development: http://localhost:3000
+ */
+function getInviteLink(token: string): string {
+  // Ensure FRONTEND_URL doesn't have trailing slash
+  const baseUrl = env.FRONTEND_URL.replace(/\/$/, '');
+  return `${baseUrl}/invite/${token}`;
+}
+
 export class InviteController {
   /**
    * Create a new invite
@@ -68,7 +80,7 @@ export class InviteController {
         expiresAt: new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000),
       });
 
-      const inviteLink = `${env.FRONTEND_URL}/invite/${invite.token}`;
+      const inviteLink = getInviteLink(invite.token);
 
       // Send invite email (fire and forget - don't block on email)
       EmailServiceClient.sendAdminInviteEmail(
@@ -340,7 +352,7 @@ export class InviteController {
       invite.status = 'pending';
       await invite.save();
 
-      const inviteLink = `${env.FRONTEND_URL}/invite/${invite.token}`;
+      const inviteLink = getInviteLink(invite.token);
 
       logger.info('Invite resent', {
         inviteId,

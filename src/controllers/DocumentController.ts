@@ -1,5 +1,6 @@
 import { Response } from 'express';
 import { AdminRequest } from '../middleware/adminAuth';
+import { getPermissions, UserRole } from '../lib/permissions';
 import { LeadService } from '../services/LeadService';
 import { ActivationService } from '../services/ActivationService';
 import { VerificationServiceClient } from '../services/VerificationServiceClient';
@@ -20,6 +21,18 @@ export class DocumentController {
         res.status(401).json({
           success: false,
           error: 'Authentication required',
+        });
+        return;
+      }
+
+      // ✅ Check canUploadDocuments permission
+      const adminRole = (req.admin?.role || 'marketing') as UserRole;
+      const permissions = getPermissions(adminRole);
+      if (!permissions.canUploadDocuments) {
+        res.status(403).json({
+          success: false,
+          error: 'Permission denied',
+          message: 'You do not have permission to upload documents. Only Operations and Admin can upload documents.',
         });
         return;
       }

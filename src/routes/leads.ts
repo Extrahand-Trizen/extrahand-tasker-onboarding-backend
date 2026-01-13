@@ -99,7 +99,7 @@ router.post(
 // Document management
 router.post(
   '/:leadId/documents',
-  requirePermission('canUpdateLead'),
+  requirePermission('canUploadDocuments'),
   DocumentController.uploadDocument
 );
 

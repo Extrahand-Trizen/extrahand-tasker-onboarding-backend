@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { adminAuthMiddleware, AdminRequest } from '../middleware/adminAuth';
+import { requirePermission } from '../middleware/roleAuth';
 import logger from '../config/logger';
 import { UploadService } from '../services/UploadService';
 
@@ -27,6 +28,7 @@ const upload = multer({
 router.post(
   '/document',
   adminAuthMiddleware,
+  requirePermission('canUploadDocuments'),
   (req, res, next) => {
     upload.single('file')(req, res, (err) => {
       if (err) {
