@@ -45,14 +45,14 @@ export class ActivationController {
   /**
    * Activate a single lead (create account)
    * POST /api/v1/admin/caos/leads/:leadId/activate
-   * ✅ ENFORCES: Only Operations and Admin can activate
+   * ✅ ENFORCES: Only Onboarder and Admin can activate
    */
   static async activateLead(req: AdminRequest, res: Response) {
     try {
       const { leadId } = req.params;
       const userId = req.admin?.uid || req.user?.uid || 'system';
       const userName = req.admin?.name || req.user?.name || req.user?.email || 'Admin';
-      const adminRole = (req.admin?.role || 'marketing') as UserRole;
+      const adminRole = (req.admin?.role || 'qualifier') as UserRole;
 
       // ✅ BACKEND ENFORCEMENT: Marketing cannot activate
       const permissions = getPermissions(adminRole);
@@ -60,7 +60,7 @@ export class ActivationController {
         return res.status(403).json({
           success: false,
           error: 'Permission denied',
-          message: 'Only Operations and Admin can activate accounts. Marketing can only send invites.'
+          message: 'Only Onboarder and Admin can activate accounts. Marketing can only send invites.'
         });
       }
 
@@ -97,14 +97,14 @@ export class ActivationController {
   /**
    * Bulk activate leads
    * POST /api/v1/admin/caos/leads/bulk-activate
-   * ✅ ENFORCES: Only Operations and Admin can bulk activate
+   * ✅ ENFORCES: Only Onboarder and Admin can bulk activate
    */
   static async bulkActivateLeads(req: AdminRequest, res: Response) {
     try {
       const { leadIds } = req.body;
       const userId = req.admin?.uid || req.user?.uid || 'system';
       const userName = req.admin?.name || req.user?.name || req.user?.email || 'Admin';
-      const adminRole = (req.admin?.role || 'marketing') as UserRole;
+      const adminRole = (req.admin?.role || 'qualifier') as UserRole;
 
       // ✅ BACKEND ENFORCEMENT: Marketing cannot bulk activate
       const permissions = getPermissions(adminRole);
@@ -112,7 +112,7 @@ export class ActivationController {
         return res.status(403).json({
           success: false,
           error: 'Permission denied',
-          message: 'Only Operations and Admin can bulk activate accounts. Marketing can only send invites.'
+          message: 'Only Onboarder and Admin can bulk activate accounts. Marketing can only send invites.'
         });
       }
 

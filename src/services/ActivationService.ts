@@ -173,7 +173,7 @@ export class ActivationService {
       
       // ✅ Extract exact details (unmasked) for storage in verification service
       // Prefer exact details (entered during verification) over masked values
-      // Exact details are entered by operations/admin during document verification
+      // Exact details are entered by onboarder/admin during document verification
       const exactAadhaar = aadhaarDoc?.exactAadhaarNumber || aadhaarDoc?.aadhaarNumber;
       const exactPAN = panDoc?.exactPANNumber || panDoc?.panNumber;
       // ✅ Address can come from address_proof document OR from Aadhaar verification
@@ -316,7 +316,7 @@ export class ActivationService {
                 verifierInfo = {
                   userId: verifierId,
                   userName: 'Document Verifier', // Admin who verified during lead stage
-                  role: 'operations'
+                  role: 'onboarder'
                 };
               }
             }

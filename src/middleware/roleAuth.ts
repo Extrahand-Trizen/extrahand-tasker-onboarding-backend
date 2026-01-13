@@ -13,7 +13,7 @@ export function requirePermission(permission: keyof ReturnType<typeof getPermiss
       return;
     }
 
-    const role = (req.admin.role || 'marketing') as UserRole;
+    const role = (req.admin.role || 'qualifier') as UserRole;
     
     if (!hasPermission(role, permission)) {
       logger.warn('Permission denied', {
@@ -43,7 +43,7 @@ export function requireRole(...allowedRoles: UserRole[]) {
       return;
     }
 
-    const role = (req.admin.role || 'marketing') as UserRole;
+    const role = (req.admin.role || 'qualifier') as UserRole;
     
     if (!allowedRoles.includes(role)) {
       logger.warn('Role access denied', {

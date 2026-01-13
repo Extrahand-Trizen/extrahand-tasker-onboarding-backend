@@ -1,4 +1,4 @@
-export type UserRole = 'marketing' | 'operations' | 'admin' | 'support';
+export type UserRole = 'qualifier' | 'onboarder' | 'admin' | 'support' | 'lead_access_manager';
 
 // ✅ LEAD STATUS - CRM/Onboarding concern (ends at approved)
 export type LeadStatus = 
@@ -43,12 +43,12 @@ export interface Permissions {
 }
 
 export const PERMISSIONS: Record<UserRole, Permissions> = {
-  marketing: {
+  qualifier: {
     canViewLeads: true,
     canCreateLead: true,
     canUpdateLead: true,
     canDeleteLead: false,
-    canUpdateStatus: ['lead_added', 'contacted', 'interested', 'documents_submitted'], // ✅ Marketing can move up to documents_submitted
+    canUpdateStatus: ['lead_added', 'contacted', 'interested'], // ✅ Qualifier can only move up to 'interested' - Onboarder handles documents
     canViewDocuments: true,
     canUploadDocuments: false,
     canVerifyDocuments: false,
@@ -56,17 +56,17 @@ export const PERMISSIONS: Record<UserRole, Permissions> = {
     canAssignSkills: false,
     canApprove: false,
     canReject: false,
-    canActivate: false, // ❌ REMOVED - Marketing cannot activate accounts (login access)
+    canActivate: false, // ❌ REMOVED - Qualifier cannot activate accounts (login access)
     canViewAnalytics: false,
     canViewSettings: false,
     canBulkImport: true,
     canBulkApprove: false,
-    canBulkActivate: false, // ❌ REMOVED - Marketing cannot bulk activate
+    canBulkActivate: false, // ❌ REMOVED - Qualifier cannot bulk activate
     canAddNotes: true,
     canViewAllNotes: true,
     canCommunicate: true
   },
-  operations: {
+  onboarder: {
     canViewLeads: true,
     canCreateLead: true,
     canUpdateLead: true,
@@ -134,11 +134,34 @@ export const PERMISSIONS: Record<UserRole, Permissions> = {
     canAddNotes: true,
     canViewAllNotes: true,
     canCommunicate: true
+  },
+  lead_access_manager: {
+    canViewLeads: true, // Read-only access to view leads
+    canCreateLead: false,
+    canUpdateLead: false,
+    canDeleteLead: false,
+    canUpdateStatus: [], // Cannot update lead status
+    canViewDocuments: true, // Read-only access to view documents
+    canUploadDocuments: false,
+    canVerifyDocuments: false,
+    canViewSkills: true, // Read-only access to view skills
+    canAssignSkills: false,
+    canApprove: false,
+    canReject: false,
+    canActivate: false,
+    canViewAnalytics: false,
+    canViewSettings: true, // Can access admin management to assign roles
+    canBulkImport: false,
+    canBulkApprove: false,
+    canBulkActivate: false,
+    canAddNotes: false,
+    canViewAllNotes: true,
+    canCommunicate: false
   }
 };
 
 export function getPermissions(role: UserRole): Permissions {
-  return PERMISSIONS[role] || PERMISSIONS.marketing;
+  return PERMISSIONS[role] || PERMISSIONS.qualifier;
 }
 
 export function hasPermission(role: UserRole, permission: keyof Permissions): boolean {
@@ -157,9 +180,9 @@ export function canUpdateStatus(role: UserRole, currentStatus: LeadStatus, newSt
   // Activation is handled via canActivate permission and accountStatus field, not via status update
   
   if (Array.isArray(permissions.canUpdateStatus)) {
-    // Marketing can only move forward in pipeline (up to documents_submitted)
-    if (role === 'marketing') {
-      const statusOrder: LeadStatus[] = ['lead_added', 'contacted', 'interested', 'documents_submitted'];
+    // Qualifier can only move forward in pipeline (up to 'interested')
+    if (role === 'qualifier') {
+      const statusOrder: LeadStatus[] = ['lead_added', 'contacted', 'interested'];
       const currentIndex = statusOrder.indexOf(currentStatus);
       const newIndex = statusOrder.indexOf(newStatus);
       // ✅ Allow moving forward in pipeline, or staying at same status

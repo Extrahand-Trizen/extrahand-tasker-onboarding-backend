@@ -120,7 +120,7 @@ export const adminAuthMiddleware = async (
         uid: decodedToken.uid,
         email: decodedToken.email,
         name: decodedToken.name || adminName,
-        role: adminRole || 'marketing' // ✅ Use database role, fallback to Firebase, then 'marketing'
+        role: adminRole || 'qualifier' // ✅ Use database role, fallback to Firebase, then 'qualifier'
       };
       
       // Set user alias for backward compatibility

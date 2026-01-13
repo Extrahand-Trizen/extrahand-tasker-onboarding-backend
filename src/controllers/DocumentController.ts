@@ -26,13 +26,13 @@ export class DocumentController {
       }
 
       // ✅ Check canUploadDocuments permission
-      const adminRole = (req.admin?.role || 'marketing') as UserRole;
+      const adminRole = (req.admin?.role || 'qualifier') as UserRole;
       const permissions = getPermissions(adminRole);
       if (!permissions.canUploadDocuments) {
         res.status(403).json({
           success: false,
           error: 'Permission denied',
-          message: 'You do not have permission to upload documents. Only Operations and Admin can upload documents.',
+          message: 'You do not have permission to upload documents. Only Onboarder and Admin can upload documents.',
         });
         return;
       }
@@ -169,7 +169,7 @@ export class DocumentController {
         return;
       }
 
-      // ✅ ALL document uploads require manual verification by operations/admin team
+      // ✅ ALL document uploads require manual verification by onboarder/admin team
       // No auto-approval - all documents start with 'pending' status regardless of who uploads
       // Note: adminRole is already defined above (line 29) for permission checking
       const documentStatus = 'pending';
@@ -197,7 +197,7 @@ export class DocumentController {
       const updatedLead = await LeadService.addDocument(leadId, newDocument);
 
       // ✅ Auto-approval removed: Leads will not be automatically approved after document upload
-      // Approval must be done manually by the verification/operations team through the approval queue
+      // Approval must be done manually by the verification/onboarder team through the approval queue
 
       res.json({
         success: true,
@@ -235,7 +235,7 @@ export class DocumentController {
       const { 
         status, 
         rejectionReason,
-        // ✅ Exact details (unmasked) - entered by operations/admin during verification
+        // ✅ Exact details (unmasked) - entered by onboarder/admin during verification
         exactAadhaarNumber,
         exactPANNumber,
         exactAddressDetails

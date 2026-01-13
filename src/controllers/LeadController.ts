@@ -275,7 +275,7 @@ export class LeadController {
         return;
       }
 
-      const role = (req.admin.role || 'marketing') as UserRole;
+      const role = (req.admin.role || 'qualifier') as UserRole;
 
       const statusData: UpdateStatusData = {
         status,

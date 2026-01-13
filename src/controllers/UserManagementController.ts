@@ -148,7 +148,9 @@ export class UserManagementController {
       const { role } = req.body;
       const actorId = req.admin?.userId || 'system';
 
-      if (!role || !['admin', 'operations', 'marketing', 'support', 'trust'].includes(role)) {
+      const currentUserRole = req.admin?.role;
+      
+      if (!role || !['admin', 'onboarder', 'qualifier', 'support', 'trust', 'lead_access_manager'].includes(role)) {
         return res.status(400).json({
           success: false,
           error: 'Invalid role',
@@ -161,6 +163,26 @@ export class UserManagementController {
           success: false,
           error: 'User not found',
         });
+      }
+
+      // ✅ Lead Access Manager can only update roles for Qualifier and Onboarder
+      if (currentUserRole === 'lead_access_manager') {
+        const allowedRoles = ['qualifier', 'onboarder'];
+        if (!allowedRoles.includes(role)) {
+          return res.status(403).json({
+            success: false,
+            error: 'Permission denied',
+            message: 'Lead Access Manager can only assign Qualifier and Onboarder roles',
+          });
+        }
+        // Also check that the user being updated is currently a Qualifier or Onboarder
+        if (!allowedRoles.includes(user.role)) {
+          return res.status(403).json({
+            success: false,
+            error: 'Permission denied',
+            message: 'Lead Access Manager can only update roles for Qualifier and Onboarder users',
+          });
+        }
       }
 
       // Prevent self-role change to non-admin

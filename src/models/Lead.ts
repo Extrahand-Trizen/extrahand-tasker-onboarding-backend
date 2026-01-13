@@ -42,7 +42,7 @@ export interface ILeadDocument {
   aadhaarNumber?: string; // Masked format: XXXX XXXX 1234 (never store full number)
   panNumber?: string; // Masked format: ABXXXX1234 (first 2 + last 4 visible)
   addressDetails?: string; // Manual address entry (full address text)
-  // ✅ Exact details (unmasked) - entered by operations/admin during verification
+  // ✅ Exact details (unmasked) - entered by onboarder/admin during verification
   // These are used during account creation to store in verification service
   exactAadhaarNumber?: string; // Full 12-digit Aadhaar: 1234 5678 9012 (stored securely)
   exactPANNumber?: string; // Full PAN: ABCDE1234F (stored securely)
@@ -320,7 +320,7 @@ const LeadSchema = new Schema<ILead>({
     aadhaarNumber: String, // Masked: XXXX XXXX 1234
     panNumber: String, // Masked: ABXXXX1234
     addressDetails: String, // Manual address entry
-    // ✅ Exact details (unmasked) - entered by operations/admin during verification
+    // ✅ Exact details (unmasked) - entered by onboarder/admin during verification
     // These are used during account creation to store in verification service
     exactAadhaarNumber: String, // Full 12-digit Aadhaar: 1234 5678 9012 (stored securely)
     exactPANNumber: String, // Full PAN: ABCDE1234F (stored securely)

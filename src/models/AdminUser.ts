@@ -24,7 +24,7 @@ export interface IAdminUser extends Document {
   profilePhoto?: string;
 
   // Organization
-  role: 'admin' | 'operations' | 'marketing' | 'support' | 'trust';
+  role: 'admin' | 'onboarder' | 'qualifier' | 'support' | 'trust' | 'lead_access_manager';
   team?: string;
   department?: string;
 
@@ -91,9 +91,9 @@ const AdminUserSchema = new Schema<IAdminUser>(
     // Organization
     role: {
       type: String,
-      enum: ['admin', 'operations', 'marketing', 'support', 'trust'],
+      enum: ['admin', 'onboarder', 'qualifier', 'support', 'trust', 'lead_access_manager'],
       required: true,
-      default: 'marketing',
+      default: 'qualifier',
     },
     team: { type: String, trim: true },
     department: { type: String, trim: true },

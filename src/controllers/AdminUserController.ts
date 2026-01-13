@@ -17,7 +17,7 @@ export class AdminUserController {
       return res.status(400).json({ success: false, error: 'uid, email, and role are required' });
     }
 
-    if (!['admin', 'operations', 'marketing', 'support', 'trust'].includes(role)) {
+    if (!['admin', 'onboarder', 'qualifier', 'support', 'trust', 'lead_access_manager'].includes(role)) {
       return res.status(400).json({ success: false, error: 'Invalid role' });
     }
 
@@ -52,7 +52,7 @@ export class AdminUserController {
     const { role } = req.body as { role?: string };
     const actor = (req as any).admin?.uid || 'system';
 
-    if (!role || !['admin', 'operations', 'marketing', 'support', 'trust'].includes(role)) {
+    if (!role || !['admin', 'onboarder', 'qualifier', 'support', 'trust', 'lead_access_manager'].includes(role)) {
       return res.status(400).json({ success: false, error: 'Invalid role' });
     }
 

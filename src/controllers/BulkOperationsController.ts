@@ -37,7 +37,7 @@ export class BulkOperationsController {
         return;
       }
 
-      const role = (req.admin.role || 'marketing') as UserRole;
+      const role = (req.admin.role || 'qualifier') as UserRole;
       
       // Get admin UID (support both Firebase uid and JWT userId)
       const adminUid = req.admin?.uid || req.admin?.userId;

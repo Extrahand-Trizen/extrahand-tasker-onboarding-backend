@@ -35,13 +35,28 @@ export class InviteController {
         });
       }
 
+      // Get the current user's role
+      const currentUserRole = (req as any).admin?.role;
+      
       // Validate role
-      const validRoles = ['admin', 'operations', 'marketing', 'support', 'trust'];
+      const validRoles = ['admin', 'onboarder', 'qualifier', 'support', 'trust', 'lead_access_manager'];
       if (!validRoles.includes(role)) {
         return res.status(400).json({
           success: false,
           error: `Role must be one of: ${validRoles.join(', ')}`,
         });
+      }
+
+      // ✅ Lead Access Manager can only create invites for Qualifier and Onboarder
+      if (currentUserRole === 'lead_access_manager') {
+        const allowedRoles = ['qualifier', 'onboarder'];
+        if (!allowedRoles.includes(role)) {
+          return res.status(403).json({
+            success: false,
+            error: 'Permission denied',
+            message: 'Lead Access Manager can only create invites for Qualifier and Onboarder roles',
+          });
+        }
       }
 
       // Check if user already exists with this email
