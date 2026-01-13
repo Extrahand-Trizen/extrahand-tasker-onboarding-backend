@@ -12,7 +12,7 @@
   # ---------- DEPENDENCIES ----------
   FROM base AS deps
   
-  COPY package.json package-lock.json* ./
+  COPY package.json package-lock.json ./
   
   # Install all deps (dev needed for TS build)
   RUN npm ci --no-audit --no-fund
