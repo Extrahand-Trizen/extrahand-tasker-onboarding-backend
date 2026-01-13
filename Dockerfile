@@ -12,10 +12,19 @@
   # ---------- DEPENDENCIES ----------
   FROM base AS deps
   
-  COPY package.json package-lock.json ./
+  # Copy package files (package-lock.json may not be in build context)
+  COPY package.json ./
+  COPY package-lock.json* ./
   
   # Install all deps (dev needed for TS build)
-  RUN npm ci --no-audit --no-fund
+  # Use npm ci if package-lock.json exists, otherwise use npm install
+  RUN if [ -f package-lock.json ]; then \
+        echo "Using npm ci (package-lock.json found)"; \
+        npm ci --no-audit --no-fund; \
+      else \
+        echo "Using npm install (package-lock.json not found)"; \
+        npm install --no-audit --no-fund; \
+      fi
   
   # ---------- BUILD ----------
   FROM base AS build
