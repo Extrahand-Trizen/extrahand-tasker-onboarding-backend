@@ -182,7 +182,7 @@ export class BulkLeadImportService {
           || '';
 
         // Parse experience level
-        const experienceLevel = (record.experienceLevel || record['Experience Level'] || '').toLowerCase();
+        const experienceLevel = (record.experienceLevel || record['Experience Level'] || record['Experience Level (beginner/intermediate/experienced)']||'').toLowerCase();
         const validExperienceLevels = ['beginner', 'intermediate', 'experienced'];
         const mappedExperienceLevel = validExperienceLevels.includes(experienceLevel) 
           ? experienceLevel as 'beginner' | 'intermediate' | 'experienced'
@@ -199,8 +199,8 @@ export class BulkLeadImportService {
           name: record.name || record['Full Name'] || '',
           phone: record.phone || record['Phone Number'] || record['Mobile Number'] || record['Phone'] || '',
           email: record.email || record['Email'] || '',
-          city: record.city || record['City'] || record['City / Area'] || '',
-          state: record.state || record['State'] || '',
+          city: record.city || record['City'] || record['City / Area'] || record['City (optional)'] || '',
+          state: record.state || record['State'] || record['State (optional)'] || '',
           address: record.address || record['Address'] || '',
           pincode: record.pincode || record['Pincode'] || record['Pin Code'] || record['PIN'] || '',
           primaryCategory: mappedPrimaryCategory,
@@ -245,17 +245,17 @@ export class BulkLeadImportService {
       return { valid: false, error: 'Invalid phone number (10 digits, starting with 6-9). Can be +91-XXXXXXXXXX or just XXXXXXXXXX' };
     }
 
-    // if (!row.city || row.city.trim().length < 2) {
-    //   return { valid: false, error: 'City is required' };
-    // }
+    if (!row.city || row.city.trim().length < 2) {
+      return { valid: false, error: 'City is required' };
+    }
 
-    // if (!row.state || row.state.trim().length < 2) {
-    //   return { valid: false, error: 'State is required' };
-    // }
+    if (!row.state || row.state.trim().length < 2) {
+      return { valid: false, error: 'State is required' };
+    }
 
-    // if (!row.address || row.address.trim().length < 5) {
-    //   return { valid: false, error: 'Address is required (minimum 5 characters)' };
-    // }
+    if (!row.address || row.address.trim().length < 5) {
+      return { valid: false, error: 'Address is required (minimum 5 characters)' };
+    }
 
     // Check primary category - use row value or default
     const primaryCategory = (row.primaryCategory || row.primarySkill || defaultPrimaryCategory || '').trim();
@@ -288,6 +288,15 @@ export class BulkLeadImportService {
     const secondaryCategory = (row.secondaryCategory || defaultSecondaryCategory || '').trim();
     if (!secondaryCategory || secondaryCategory.length < 1) {
       return { valid: false, error: 'Secondary category is required (either in CSV or provided as default)' };
+    }
+    if(!row.city || row.city.trim().length < 2) {
+      return { valid: false, error: 'City is required' };
+    }
+    if(!row.state || row.state.trim().length < 2) {
+      return { valid: false, error: 'State is required' };
+    }
+    if(!row.address || row.address.trim().length < 5) {
+      return { valid: false, error: 'Address is required (minimum 5 characters)' };
     }
 
     // Validate experience level is provided
