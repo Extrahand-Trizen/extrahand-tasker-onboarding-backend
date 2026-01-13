@@ -737,8 +737,9 @@ export class BulkUploadService {
   }
 
   /**
-   * Process bulk creates - Creates leads + Firebase users + MongoDB profiles
-   * OPTIMIZED: Uses bulk duplicate checks to minimize database queries and API calls
+   * Process bulk creates - Creates LEADS ONLY (no Firebase users, no profiles)
+   * ✅ SECURITY: Accounts will only be created via invite acceptance flow
+   * OPTIMIZED: Uses bulk duplicate checks to minimize database queries
    */
   private static async processCreates(
     users: ParsedUser[],
@@ -749,14 +750,14 @@ export class BulkUploadService {
     success: number;
     failed: number;
     leadIds: string[];
-    userIds: string[];
+    userIds: string[];  // ✅ Always empty - no accounts created
     errors: Array<{ row: number; uid?: string; phone?: string; error: string }>;
   }> {
     const processingResult = {
       success: 0,
       failed: 0,
       leadIds: [] as string[],
-      userIds: [] as string[],
+      userIds: [] as string[],  // ✅ Always empty - no accounts created
       errors: [] as Array<{
         row: number;
         uid?: string;
@@ -766,7 +767,7 @@ export class BulkUploadService {
     };
 
     logger.info(
-      `Processing ${users.length} creates (leads + Firebase + profiles) from bulk upload`
+      `Processing ${users.length} lead creations from bulk upload (NO accounts will be created)`
     );
 
     // STEP 1: Bulk duplicate check - Check ALL phones at once (single MongoDB query)
@@ -782,9 +783,7 @@ export class BulkUploadService {
       allPhoneNumbers
     );
 
-    const existingProfilePhonesSet = new Set<string>();
-
-    // STEP 3: Filter out duplicates before processing
+    // STEP 2: Filter out duplicates before processing
     interface UserToProcess {
       user: ParsedUser;
       originalIndex: number;
@@ -804,7 +803,6 @@ export class BulkUploadService {
     users.forEach((user, index) => {
       const csvRowNumber = index + 2; // +2 for header row and 0-index
       const normalizedPhone = DuplicateCheckService.normalizePhone(user.phone!);
-      const formattedPhoneForApi = UserCreationService.formatPhone(user.phone!);
 
       // Check for duplicate within this file first
       if (seenPhonesInFile.has(normalizedPhone)) {
@@ -839,20 +837,6 @@ export class BulkUploadService {
         return;
       }
 
-      // Check if profile already exists (if we have bulk check data)
-      if (existingProfilePhonesSet.has(formattedPhoneForApi)) {
-        duplicateErrors.push({
-          row: csvRowNumber,
-          phone: user.phone,
-          error: `User profile already exists with phone number ${formattedPhoneForApi}`,
-        });
-        logger.debug(`Skipping duplicate profile`, {
-          row: csvRowNumber,
-          phone: formattedPhoneForApi,
-        });
-        return;
-      }
-
       // User passed duplicate checks, add to processing queue
       usersToProcess.push({
         user,
@@ -876,366 +860,123 @@ export class BulkUploadService {
       return processingResult;
     }
 
-    // STEP 4: Process remaining users in batches (for Firebase rate limits)
-    const FIREBASE_BATCH_SIZE = 10;
-    const processingBatches: UserToProcess[][] = [];
-
-    for (let i = 0; i < usersToProcess.length; i += FIREBASE_BATCH_SIZE) {
-      processingBatches.push(usersToProcess.slice(i, i + FIREBASE_BATCH_SIZE));
-    }
-
-    for (
-      let batchIndex = 0;
-      batchIndex < processingBatches.length;
-      batchIndex++
-    ) {
-      const currentBatch = processingBatches[batchIndex];
-      const batchStartRow =
-        processingBatches
-          .slice(0, batchIndex)
-          .reduce((sum, batch) => sum + batch.length, 0) + 2;
-
-      try {
-        // Step 4a: Create all leads in parallel (no duplicates, safe to parallelize)
-        interface LeadCreationResult {
-          success: boolean;
-          lead?: any;
-          userData?: ParsedUser;
-          originalIndex?: number;
-          csvRowNumber?: number;
-          error?: string;
-        }
-
-        const leadCreationPromises = currentBatch.map(
-          async (userToProcess): Promise<LeadCreationResult> => {
-            try {
-              const createdLead = await LeadService.createLead(
-                {
-                  name: userToProcess.user.name!,
-                  phone: userToProcess.user.phone!,
-                  email: userToProcess.user.email,
-                  city: userToProcess.user.city || "Unknown",
-                  state: userToProcess.user.state,
-                  address: userToProcess.user.address,
-                  pincode: userToProcess.user.pincode,
-                  primaryCategory:
-                    userToProcess.user.primaryCategory ||
-                    userToProcess.user.primarySkill ||
-                    "other",
-                  primarySkill:
-                    userToProcess.user.primaryCategory ||
-                    userToProcess.user.primarySkill ||
-                    "other", // For backward compatibility
-                  secondaryCategory:
-                    userToProcess.user.secondaryCategory ||
-                    userToProcess.user.secondarySkill ||
-                    "",
-                  secondarySkill:
-                    userToProcess.user.secondaryCategory ||
-                    userToProcess.user.secondarySkill ||
-                    "", // For backward compatibility
-                  experienceLevel: (userToProcess.user.experienceLevel ||
-                    "intermediate") as
-                    | "beginner"
-                    | "intermediate"
-                    | "experienced",
-                  workingDays: userToProcess.user.workingDays,
-                  preferredTimeSlot: userToProcess.user.preferredTimeSlot,
-                  source: (userToProcess.user.source as any) || "campaign",
-                  sourceDetails: `Bulk upload: ${importId}`,
-                  agentCampaignId: userToProcess.user.agentCampaignId,
-                  addedBy: adminUid,
-                  addedByName: undefined,
-                },
-                {
-                  // For bulk uploads, rely on phone duplicate check only
-                  // to avoid false positives on name+city fuzzy matching.
-                  skipNameCityDuplicate: true,
-                }
-              );
-
-              // Update lead status and creationMethod
-              createdLead.status = "account_created";
-              createdLead.creationMethod = "bulk_upload";
-              createdLead.statusHistory.push({
-                status: "account_created",
-                changedBy: adminUid,
-                changedAt: new Date(),
-                notes: "Created via bulk upload",
-              });
-              await createdLead.save();
-
-              return {
-                success: true,
-                lead: createdLead,
-                userData: userToProcess.user,
-                originalIndex: userToProcess.originalIndex,
-                csvRowNumber: userToProcess.csvRowNumber,
-              };
-            } catch (error: any) {
-              // Check if error is about duplicate (from LeadService.createLead)
-              const isDuplicateError =
-                error.message?.includes("Duplicate") ||
-                error.message?.includes("duplicate");
-              return {
-                success: false,
-                error: isDuplicateError
-                  ? error.message
-                  : `Lead creation failed: ${error.message}`,
-                csvRowNumber: userToProcess.csvRowNumber,
-              };
+    // STEP 3: Create leads ONLY (no Firebase, no profiles, no accounts)
+    const leadCreationPromises = usersToProcess.map(
+      async (userToProcess): Promise<{ success: boolean; leadId?: string; error?: string }> => {
+        try {
+          const createdLead = await LeadService.createLead(
+            {
+              name: userToProcess.user.name!,
+              phone: userToProcess.user.phone!,
+              email: userToProcess.user.email,
+              city: userToProcess.user.city || "Unknown",
+              state: userToProcess.user.state,
+              address: userToProcess.user.address,
+              pincode: userToProcess.user.pincode,
+              primaryCategory:
+                userToProcess.user.primaryCategory ||
+                userToProcess.user.primarySkill ||
+                "other",
+              primarySkill:
+                userToProcess.user.primaryCategory ||
+                userToProcess.user.primarySkill ||
+                "other", // For backward compatibility
+              secondaryCategory:
+                userToProcess.user.secondaryCategory ||
+                userToProcess.user.secondarySkill ||
+                "",
+              secondarySkill:
+                userToProcess.user.secondaryCategory ||
+                userToProcess.user.secondarySkill ||
+                "", // For backward compatibility
+              experienceLevel: (userToProcess.user.experienceLevel ||
+                "intermediate") as
+                | "beginner"
+                | "intermediate"
+                | "experienced",
+              yearsOfExperience: userToProcess.user.yearsOfExperience,
+              workingDays: userToProcess.user.workingDays,
+              preferredTimeSlot: userToProcess.user.preferredTimeSlot,
+              source: (userToProcess.user.source as any) || "campaign",
+              sourceDetails: `Bulk upload: ${importId}`,
+              agentCampaignId: userToProcess.user.agentCampaignId,
+              addedBy: adminUid,
+              addedByName: undefined,
+            },
+            {
+              // For bulk uploads, rely on phone duplicate check only
+              // to avoid false positives on name+city fuzzy matching.
+              skipNameCityDuplicate: true,
             }
-          }
-        );
+          );
 
-        const leadCreationResults = await Promise.all(leadCreationPromises);
-
-        // Separate successful and failed lead creations
-        const successfulLeadCreations = leadCreationResults.filter(
-          (result) => result.success
-        ) as Array<{
-          success: true;
-          lead: any;
-          userData: ParsedUser;
-          originalIndex: number;
-          csvRowNumber: number;
-        }>;
-
-        const failedLeadCreations = leadCreationResults.filter(
-          (result) => !result.success
-        ) as Array<{
-          success: false;
-          error: string;
-          csvRowNumber: number;
-        }>;
-
-        // Track failed lead creations
-        failedLeadCreations.forEach((failedCreation) => {
-          processingResult.failed++;
-          processingResult.errors.push({
-            row: failedCreation.csvRowNumber,
-            phone: currentBatch.find(
-              (u) => u.csvRowNumber === failedCreation.csvRowNumber
-            )?.user.phone,
-            error: failedCreation.error,
+          // ✅ Set status to "new" (NOT "account_created")
+          // ✅ Accounts will only be created via invite acceptance flow
+          createdLead.status = "new";
+          createdLead.creationMethod = "bulk_upload";
+          createdLead.statusHistory.push({
+            status: "new",
+            changedBy: adminUid,
+            changedAt: new Date(),
+            notes: "Lead created via bulk upload - account will be created after invite acceptance",
           });
-        });
+          await createdLead.save();
 
-        // Step 4b: Create Firebase users for successfully created leads
-        if (successfulLeadCreations.length > 0) {
-          interface FirebaseUserCreationData {
-            email: string;
-            password: string;
-            displayName: string;
-            phoneNumber: string;
-            emailVerified: boolean;
-            disabled: boolean;
-          }
+          processingResult.success++;
+          processingResult.leadIds.push(createdLead.leadId);
 
-          const firebaseUsersToCreate: FirebaseUserCreationData[] =
-            successfulLeadCreations.map((leadCreation, index) => {
-              const phoneDigitsOnly = leadCreation.userData.phone!.replace(
-                /\D/g,
-                ""
-              );
-              const timestamp = Date.now();
-              const temporaryEmail =
-                leadCreation.userData.email ||
-                `helper_${phoneDigitsOnly}_${timestamp}_${index}@extrahand.temp`;
+          logger.debug(`Successfully created lead (no account)`, {
+            leadId: createdLead.leadId,
+            name: userToProcess.user.name,
+            phone: userToProcess.user.phone,
+          });
 
-              return {
-                email: temporaryEmail,
-                password: UserCreationService.generateTempPassword(),
-                displayName: leadCreation.userData.name!,
-                phoneNumber: UserCreationService.formatPhone(
-                  leadCreation.userData.phone!
-                ),
-                emailVerified: false,
-                disabled: false,
-              };
-            });
-
-          logger.info(
-            `Creating ${firebaseUsersToCreate.length} Firebase users in batch ${
-              batchIndex + 1
-            }`
-          );
-          const firebaseCreationResult =
-            await UserCreationService.createUsersBulk(firebaseUsersToCreate);
-
-          // Step 4c: Map successfully created Firebase users to their leads
-          interface LeadFirebasePair {
-            lead: any;
-            userData: ParsedUser;
-            firebaseUid: string;
-            originalIndex: number;
-            csvRowNumber: number;
-          }
-
-          const leadFirebasePairs: LeadFirebasePair[] = [];
-
-          firebaseCreationResult.users.forEach(
-            (createdFirebaseUser, firebaseIndex) => {
-              const correspondingLeadCreation =
-                successfulLeadCreations[firebaseIndex];
-              if (correspondingLeadCreation) {
-                leadFirebasePairs.push({
-                  lead: correspondingLeadCreation.lead,
-                  userData: correspondingLeadCreation.userData,
-                  firebaseUid: createdFirebaseUser.uid,
-                  originalIndex: correspondingLeadCreation.originalIndex,
-                  csvRowNumber: correspondingLeadCreation.csvRowNumber,
-                });
-              }
-            }
-          );
-
-          // Handle Firebase creation errors
-          if (
-            firebaseCreationResult.errors &&
-            firebaseCreationResult.errors.length > 0
-          ) {
-            firebaseCreationResult.errors.forEach((firebaseError) => {
-              const correspondingLeadCreation =
-                successfulLeadCreations[firebaseError.index];
-              if (correspondingLeadCreation) {
-                processingResult.failed++;
-                processingResult.errors.push({
-                  row: correspondingLeadCreation.csvRowNumber,
-                  phone: correspondingLeadCreation.userData.phone,
-                  error: `Firebase creation failed: ${firebaseError.error.message}`,
-                });
-              }
-            });
-          }
-
-          // Step 4d: Create MongoDB profiles for successful Firebase users
-          if (leadFirebasePairs.length > 0) {
-            logger.info(
-              `Creating ${leadFirebasePairs.length} MongoDB profiles in batch ${
-                batchIndex + 1
-              }`
-            );
-
-            const profileDocumentsToCreate = leadFirebasePairs.map((pair) => {
-              const profileDocument =
-                UserCreationService.prepareProfileDocument(
-                  pair.firebaseUid,
-                  pair.userData,
-                  {
-                    isAdminVerified: true,
-                    phoneVerified: false,
-                  }
-                );
-              profileDocument._userData = pair.userData;
-              return profileDocument;
-            });
-
-            const profileCreationResult =
-              await UserCreationService.createProfilesBulk(
-                profileDocumentsToCreate
-              );
-
-            // Step 4e: Update leads with activationData and track final results
-            for (const leadFirebasePair of leadFirebasePairs) {
-              const wasProfileCreated = profileCreationResult.success.includes(
-                leadFirebasePair.firebaseUid
-              );
-
-              if (wasProfileCreated) {
-                // Update lead with activationData
-                leadFirebasePair.lead.activationData = {
-                  activatedAt: new Date(),
-                  firebaseUid: leadFirebasePair.firebaseUid,
-                  profileCreated: true,
-                };
-                leadFirebasePair.lead.statusHistory.push({
-                  status: "account_created",
-                  changedBy: adminUid,
-                  changedAt: new Date(),
-                  notes: "Firebase account and profile created via bulk upload",
-                });
-                await leadFirebasePair.lead.save();
-
-                processingResult.success++;
-                processingResult.leadIds.push(leadFirebasePair.lead.leadId);
-                processingResult.userIds.push(leadFirebasePair.firebaseUid);
-
-                logger.debug(`Successfully created complete account`, {
-                  leadId: leadFirebasePair.lead.leadId,
-                  firebaseUid: leadFirebasePair.firebaseUid,
-                  name: leadFirebasePair.userData.name,
-                });
-
-                // Send welcome email only if sendEmails is true (fire and forget - don't block on email)
-                if (sendEmails && leadFirebasePair.userData.email) {
-                  EmailServiceClient.sendAccountCreatedEmail(
-                    leadFirebasePair.userData.email,
-                    leadFirebasePair.userData.name!,
-                    leadFirebasePair.userData.phone
-                  ).catch((emailError) => {
-                    // Log but don't fail the account creation
-                    logger.warn('Failed to send welcome email', {
-                      userId: leadFirebasePair.firebaseUid,
-                      email: leadFirebasePair.userData.email,
-                      error: emailError,
-                    });
-                  });
-                } else if (sendEmails && !leadFirebasePair.userData.email) {
-                  logger.debug('Skipping email - no email address provided', {
-                    userId: leadFirebasePair.firebaseUid,
-                    phone: leadFirebasePair.userData.phone,
-                  });
-                } else {
-                  logger.debug('Skipping email - sendEmails is disabled', {
-                    userId: leadFirebasePair.firebaseUid,
-                    email: leadFirebasePair.userData.email,
-                  });
-                }
-              } else {
-                // Profile creation failed, but Firebase user exists
-                const profileCreationError = profileCreationResult.failed.find(
-                  (failed) => failed.uid === leadFirebasePair.firebaseUid
-                );
-                processingResult.failed++;
-                processingResult.errors.push({
-                  row: leadFirebasePair.csvRowNumber,
-                  phone: leadFirebasePair.userData.phone,
-                  error: `Profile creation failed: ${
-                    profileCreationError?.error || "Unknown error"
-                  }`,
-                });
-              }
-            }
-
-            // Handle profile creation failures
-            profileCreationResult.failed.forEach((failedProfile) => {
-              const correspondingPair = leadFirebasePairs.find(
-                (pair) => pair.firebaseUid === failedProfile.uid
-              );
-              if (correspondingPair) {
-                processingResult.failed++;
-                processingResult.errors.push({
-                  row: correspondingPair.csvRowNumber,
-                  phone: correspondingPair.userData.phone,
-                  error: `Profile creation failed: ${failedProfile.error}`,
-                });
-              }
-            });
-          }
-        }
-      } catch (batchError: any) {
-        logger.error(`Batch ${batchIndex + 1} processing failed:`, batchError);
-        currentBatch.forEach((userToProcess) => {
+          return {
+            success: true,
+            leadId: createdLead.leadId,
+          };
+        } catch (error: any) {
+          // Check if error is about duplicate (from LeadService.createLead)
+          const isDuplicateError =
+            error.message?.includes("Duplicate") ||
+            error.message?.includes("duplicate");
+          
           processingResult.failed++;
           processingResult.errors.push({
             row: userToProcess.csvRowNumber,
             phone: userToProcess.user.phone,
-            error: batchError.message || "Batch processing failed",
+            error: isDuplicateError
+              ? error.message
+              : `Lead creation failed: ${error.message}`,
           });
-        });
+
+          return {
+            success: false,
+            error: isDuplicateError
+              ? error.message
+              : `Lead creation failed: ${error.message}`,
+          };
+        }
       }
-    }
+    );
+
+    await Promise.allSettled(leadCreationPromises);
+
+    logger.info("Bulk lead creation completed (NO accounts created)", {
+      importId,
+      success: processingResult.success,
+      failed: processingResult.failed,
+      total: users.length,
+      note: "Accounts will only be created via invite acceptance flow",
+    });
+
+    // ✅ NO Firebase user creation
+    // ✅ NO Profile creation
+    // ✅ NO Account created emails
+    // ✅ NO Status set to "account_created"
+    // ✅ userIds array remains empty
+
+    return processingResult;
 
     logger.info("Bulk creation completed", {
       totalUsers: users.length,

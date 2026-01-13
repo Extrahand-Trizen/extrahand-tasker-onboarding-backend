@@ -92,9 +92,19 @@ export class BulkUploadController {
         sendEmails
       );
 
+      // ✅ Updated response message
       res.json({
         success: true,
-        data: result,
+        message: "Leads created successfully. No accounts were created. Use the invite system to create accounts for qualified leads.",
+        data: {
+          ...result,
+          note: "Accounts will only be created when users accept invites. This ensures proper consent and data integrity.",
+          nextSteps: [
+            "Review and qualify leads in the Tasker List",
+            "Send invites to qualified leads",
+            "Accounts will be created when users accept invites"
+          ]
+        },
       });
     } catch (error: any) {
       logger.error("Bulk upload error", { error: error.message });

@@ -7,7 +7,6 @@ import logger from '../config/logger';
 import axios from 'axios';
 import { env } from '../config/env';
 import { maskAadhaar, maskPAN, sanitizeAadhaarInput, sanitizePANInput, validateAadhaar, validatePAN } from '../utils/compliance';
-import { EmailServiceClient } from './EmailServiceClient';
 
 export interface ActivationResult {
   success: boolean;
@@ -297,22 +296,8 @@ export class ActivationService {
         profileCreated = true;
         logger.info('Profile created for lead', { leadId, firebaseUid: userRecord.uid });
         
-        // Send welcome email (fire and forget - don't block on email)
-        if (lead.email) {
-          EmailServiceClient.sendAccountCreatedEmail(
-            lead.email,
-            lead.name,
-            lead.phone
-          ).catch((emailError) => {
-            // Log but don't fail the account creation
-            logger.warn('Failed to send welcome email', {
-              leadId,
-              firebaseUid: userRecord.uid,
-              email: lead.email,
-              error: emailError,
-            });
-          });
-        }
+        // ✅ REMOVED: Auto confirmation email sending
+        // Emails should be sent manually when needed, not automatically during activation
         
         // ✅ Store exact details (unmasked) in verification service
         // These will be used for user verification and profile creation
