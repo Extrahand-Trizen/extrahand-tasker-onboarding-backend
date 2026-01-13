@@ -894,7 +894,7 @@ export class BulkUploadService {
                 | "beginner"
                 | "intermediate"
                 | "experienced",
-              yearsOfExperience: userToProcess.user.yearsOfExperience,
+              // ❌ REMOVED: yearsOfExperience - not part of CreateLeadData interface
               workingDays: userToProcess.user.workingDays,
               preferredTimeSlot: userToProcess.user.preferredTimeSlot,
               source: (userToProcess.user.source as any) || "campaign",
