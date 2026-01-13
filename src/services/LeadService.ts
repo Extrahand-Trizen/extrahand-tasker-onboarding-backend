@@ -389,7 +389,8 @@ export class LeadService {
       // ✅ Auto-transition: When marketing sets status to 'documents_submitted', 
       // automatically transition to 'under_verification' so lead appears in verification queue
       let finalStatus = newStatus;
-      if (newStatus === 'documents_submitted' && currentStatus !== 'under_verification' && currentStatus !== 'approved' && currentStatus !== 'activated') {
+      // ✅ UPDATED: Removed 'activated' check - activation is now tracked via accountStatus, not lead status
+      if (newStatus === 'documents_submitted' && currentStatus !== 'under_verification' && currentStatus !== 'approved') {
         finalStatus = 'under_verification';
         logger.info('Auto-transitioning lead from documents_submitted to under_verification', {
           leadId,
@@ -712,7 +713,8 @@ export class LeadService {
         const freshLead = await this.getLeadById(leadId);
         if (freshLead) {
           const criteria = ApprovalService.checkApprovalCriteria(freshLead);
-          if (criteria.canApprove && freshLead.status !== 'approved' && freshLead.status !== 'activated') {
+          // ✅ UPDATED: Removed 'activated' check - activation is now tracked via accountStatus, not lead status
+          if (criteria.canApprove && freshLead.status !== 'approved') {
             // Auto-approve if all criteria met
             try {
               await this.updateStatus(leadId, {

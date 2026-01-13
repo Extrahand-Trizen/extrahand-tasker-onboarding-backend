@@ -1,5 +1,6 @@
 export type UserRole = 'marketing' | 'operations' | 'admin' | 'support';
 
+// ✅ LEAD STATUS - CRM/Onboarding concern (ends at approved)
 export type LeadStatus = 
   | 'lead_added'
   | 'contacted'
@@ -8,9 +9,14 @@ export type LeadStatus =
   | 'under_verification'
   | 'approved'
   | 'rejected'
-  | 'account_created'
-  | 'activated'
   | 'inactive';
+
+// ✅ ACCOUNT STATUS - Auth/Platform concern (starts after lead approval)
+export type AccountStatus = 
+  | 'not_created'  // No login exists yet
+  | 'invited'      // Invite sent, waiting for user
+  | 'activated'    // User accepted invite + can log in
+  | 'suspended';   // Access blocked
 
 export interface Permissions {
   canViewLeads: boolean;
@@ -50,12 +56,12 @@ export const PERMISSIONS: Record<UserRole, Permissions> = {
     canAssignSkills: false,
     canApprove: false,
     canReject: false,
-    canActivate: true, // Marketing team handles account creation
+    canActivate: false, // ❌ REMOVED - Marketing cannot activate accounts (login access)
     canViewAnalytics: false,
     canViewSettings: false,
     canBulkImport: true,
     canBulkApprove: false,
-    canBulkActivate: true, // Allow bulk activation for marketing
+    canBulkActivate: false, // ❌ REMOVED - Marketing cannot bulk activate
     canAddNotes: true,
     canViewAllNotes: true,
     canCommunicate: true
@@ -147,10 +153,8 @@ export function canUpdateStatus(role: UserRole, currentStatus: LeadStatus, newSt
     return true;
   }
   
-  // Special case: Allow activation if user has canActivate permission
-  if (newStatus === 'activated' && permissions.canActivate) {
-    return currentStatus === 'approved'; // Can only activate from approved status
-  }
+  // ❌ REMOVED: Special case for activation - activation is now separate from lead status
+  // Activation is handled via canActivate permission and accountStatus field, not via status update
   
   if (Array.isArray(permissions.canUpdateStatus)) {
     // Marketing can only move forward in pipeline (up to documents_submitted)

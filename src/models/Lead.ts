@@ -1,5 +1,6 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
+// ✅ LEAD STATUS - CRM/Onboarding concern (ends at approved)
 export type LeadStatus = 
   | 'lead_added'
   | 'contacted'
@@ -8,9 +9,14 @@ export type LeadStatus =
   | 'under_verification'
   | 'approved'
   | 'rejected'
-  | 'account_created'
-  | 'activated'
   | 'inactive';
+
+// ✅ ACCOUNT STATUS - Auth/Platform concern (starts after lead approval)
+export type AccountStatus = 
+  | 'not_created'  // No login exists yet
+  | 'invited'      // Invite sent, waiting for user
+  | 'activated'    // User accepted invite + can log in
+  | 'suspended';   // Access blocked
 
 export type LeadSource = 'referral' | 'campaign' | 'walk-in' | 'agent' | 'other';
 
@@ -114,7 +120,8 @@ export interface ILead extends Document {
   addedByName?: string;
   
   // Status pipeline
-  status: LeadStatus;
+  status: LeadStatus;  // ✅ Lead status only (ends at approved)
+  accountStatus: AccountStatus;  // ✅ NEW: Separate account status (starts after approval)
   statusHistory: IStatusHistory[];
   
   // Skills & services
@@ -242,11 +249,18 @@ const LeadSchema = new Schema<ILead>({
       'under_verification',
       'approved',
       'rejected',
-      'account_created',
-      'activated',
       'inactive'
+      // ❌ REMOVED: 'account_created', 'activated' - these are account statuses, not lead statuses
     ],
     default: 'lead_added',
+    required: true,
+    index: true
+  },
+  // ✅ NEW: Account status field (separate from lead status)
+  accountStatus: {
+    type: String,
+    enum: ['not_created', 'invited', 'activated', 'suspended'],
+    default: 'not_created',
     required: true,
     index: true
   },
@@ -261,9 +275,8 @@ const LeadSchema = new Schema<ILead>({
         'under_verification',
         'approved',
         'rejected',
-        'account_created',
-        'activated',
         'inactive'
+        // ❌ REMOVED: 'account_created', 'activated' - these are account statuses, not lead statuses
       ]
     },
     changedBy: String,

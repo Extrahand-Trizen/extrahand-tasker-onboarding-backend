@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { AdminRequest } from '../middleware/adminAuth';
 import { ActivationService } from '../services/ActivationService';
 import { ApprovalService } from '../services/ApprovalService';
+import { getPermissions, UserRole } from '../lib/permissions';
 import logger from '../config/logger';
 
 export class ActivationController {
@@ -42,17 +43,28 @@ export class ActivationController {
   }
 
   /**
-   * Activate a single lead
+   * Activate a single lead (create account)
    * POST /api/v1/admin/caos/leads/:leadId/activate
+   * ✅ ENFORCES: Only Operations and Admin can activate
    */
   static async activateLead(req: AdminRequest, res: Response) {
     try {
       const { leadId } = req.params;
       const userId = req.admin?.uid || req.user?.uid || 'system';
       const userName = req.admin?.name || req.user?.name || req.user?.email || 'Admin';
-      const role = req.admin?.role || 'operations';
+      const adminRole = (req.admin?.role || 'marketing') as UserRole;
 
-      const result = await ActivationService.activateLead(leadId, userId, userName, role);
+      // ✅ BACKEND ENFORCEMENT: Marketing cannot activate
+      const permissions = getPermissions(adminRole);
+      if (!permissions.canActivate) {
+        return res.status(403).json({
+          success: false,
+          error: 'Permission denied',
+          message: 'Only Operations and Admin can activate accounts. Marketing can only send invites.'
+        });
+      }
+
+      const result = await ActivationService.activateLead(leadId, userId, userName, adminRole);
 
       if (!result.success) {
         return res.status(400).json({
@@ -85,13 +97,24 @@ export class ActivationController {
   /**
    * Bulk activate leads
    * POST /api/v1/admin/caos/leads/bulk-activate
+   * ✅ ENFORCES: Only Operations and Admin can bulk activate
    */
   static async bulkActivateLeads(req: AdminRequest, res: Response) {
     try {
       const { leadIds } = req.body;
       const userId = req.admin?.uid || req.user?.uid || 'system';
       const userName = req.admin?.name || req.user?.name || req.user?.email || 'Admin';
-      const role = req.admin?.role || 'operations';
+      const adminRole = (req.admin?.role || 'marketing') as UserRole;
+
+      // ✅ BACKEND ENFORCEMENT: Marketing cannot bulk activate
+      const permissions = getPermissions(adminRole);
+      if (!permissions.canBulkActivate) {
+        return res.status(403).json({
+          success: false,
+          error: 'Permission denied',
+          message: 'Only Operations and Admin can bulk activate accounts. Marketing can only send invites.'
+        });
+      }
 
       if (!Array.isArray(leadIds) || leadIds.length === 0) {
         return res.status(400).json({
@@ -100,7 +123,7 @@ export class ActivationController {
         });
       }
 
-      const result = await ActivationService.bulkActivateLeads(leadIds, userId, userName, role);
+      const result = await ActivationService.bulkActivateLeads(leadIds, userId, userName, adminRole);
 
       res.json({
         success: true,

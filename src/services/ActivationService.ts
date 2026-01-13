@@ -368,21 +368,28 @@ export class ActivationService {
         profileCreated
       };
 
-      // Update status to activated
-      // Use 'operations' role for activation (system-initiated status change)
-      // This allows activation regardless of the user's role, since activation is a system operation
-      const userRole: UserRole = (role as UserRole) || 'operations';
-      await LeadService.updateStatus(leadId, {
-        status: 'activated',
-        notes: `Lead activated. Firebase UID: ${userRecord.uid}`,
+      // ✅ UPDATE: Set accountStatus to 'activated' (NOT lead status)
+      lead.accountStatus = 'activated';
+      
+      // ✅ KEEP lead status as 'approved' (don't change it)
+      // Lead status remains 'approved' - that's the end of the lead journey
+      
+      // Add status history entry for account activation
+      lead.statusHistory.push({
+        status: lead.status,  // Keep lead status (should be 'approved')
         changedBy: activatedBy,
-        changedByName: activatedByName
-      }, userRole);
+        changedAt: new Date(),
+        notes: `Account activated. Firebase UID: ${userRecord.uid}. Account status: activated`
+      });
+      
+      await lead.save();
 
       logger.info('Lead activated successfully', {
         leadId,
         firebaseUid: userRecord.uid,
-        profileCreated
+        profileCreated,
+        accountStatus: 'activated',
+        leadStatus: lead.status  // Should remain 'approved'
       });
 
       return {
