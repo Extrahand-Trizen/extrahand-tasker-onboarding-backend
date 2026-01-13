@@ -910,12 +910,12 @@ export class BulkUploadService {
             }
           );
 
-          // ✅ Set status to "new" (NOT "account_created")
+          // ✅ Set status to "lead_added" (initial status for new leads)
           // ✅ Accounts will only be created via invite acceptance flow
-          createdLead.status = "new";
+          createdLead.status = "lead_added";
           createdLead.creationMethod = "bulk_upload";
           createdLead.statusHistory.push({
-            status: "new",
+            status: "lead_added",
             changedBy: adminUid,
             changedAt: new Date(),
             notes: "Lead created via bulk upload - account will be created after invite acceptance",
