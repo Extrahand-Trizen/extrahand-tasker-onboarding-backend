@@ -17,10 +17,13 @@
   COPY package-lock.json* ./
   
   # Install all deps (dev needed for TS build)
-  # Use npm ci if package-lock.json exists, otherwise use npm install
+  # Try npm ci first if package-lock.json exists, fall back to npm install if it fails or doesn't exist
   RUN if [ -f package-lock.json ]; then \
-        echo "Using npm ci (package-lock.json found)"; \
-        npm ci --no-audit --no-fund; \
+        echo "Attempting npm ci (package-lock.json found)"; \
+        npm ci --no-audit --no-fund || ( \
+          echo "npm ci failed (lock file out of sync), falling back to npm install"; \
+          npm install --no-audit --no-fund \
+        ); \
       else \
         echo "Using npm install (package-lock.json not found)"; \
         npm install --no-audit --no-fund; \
