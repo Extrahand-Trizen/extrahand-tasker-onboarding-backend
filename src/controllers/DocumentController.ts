@@ -169,13 +169,9 @@ export class DocumentController {
         return;
       }
 
-      // ✅ Document status based on role:
-      // - Marketing: 'pending' (needs verification by operations team)
-      // - Operations/Admin: 'verified' (trusted uploaders can auto-verify)
-      // - Default: 'pending' (safe default - requires manual verification)
-      const adminRole = req.admin?.role || 'marketing';
       // ✅ ALL document uploads require manual verification by operations/admin team
       // No auto-approval - all documents start with 'pending' status regardless of who uploads
+      // Note: adminRole is already defined above (line 29) for permission checking
       const documentStatus = 'pending';
       
       logger.info('Document upload - all documents set to pending for manual verification', {
