@@ -222,8 +222,17 @@ export class BulkLeadImportService {
 
   /**
    * Validate import row
+   * @param row - The row to validate
+   * @param rowNumber - Row number for error reporting
+   * @param defaultPrimaryCategory - Default primary category if not in CSV
+   * @param defaultSecondaryCategory - Default secondary category if not in CSV
    */
-  static validateRow(row: BulkLeadImportRow, rowNumber: number): { valid: boolean; error?: string } {
+  static validateRow(
+    row: BulkLeadImportRow, 
+    rowNumber: number,
+    defaultPrimaryCategory?: string,
+    defaultSecondaryCategory?: string
+  ): { valid: boolean; error?: string } {
     if (!row.name || row.name.trim().length < 2) {
       return { valid: false, error: 'Name is required and must be at least 2 characters' };
     }
@@ -248,9 +257,10 @@ export class BulkLeadImportService {
     //   return { valid: false, error: 'Address is required (minimum 5 characters)' };
     // }
 
-    const primaryCategory = (row.primaryCategory || row.primarySkill || '').trim();
+    // Check primary category - use row value or default
+    const primaryCategory = (row.primaryCategory || row.primarySkill || defaultPrimaryCategory || '').trim();
     if (!primaryCategory || primaryCategory.length < 2) {
-      return { valid: false, error: 'Primary category is required' };
+      return { valid: false, error: 'Primary category is required (either in CSV or provided as default)' };
     }
 
     // Validate primary category is one of the allowed categories
@@ -274,8 +284,9 @@ export class BulkLeadImportService {
       return { valid: false, error: `Invalid primary category. Must be one of: ${validCategories.join(', ')}` };
     }
 
-    // Validate secondary category is provided (either in CSV or as default)
-    if (!row.secondaryCategory || row.secondaryCategory.trim().length < 1) {
+    // Check secondary category - use row value or default
+    const secondaryCategory = (row.secondaryCategory || defaultSecondaryCategory || '').trim();
+    if (!secondaryCategory || secondaryCategory.length < 1) {
       return { valid: false, error: 'Secondary category is required (either in CSV or provided as default)' };
     }
 
@@ -344,9 +355,11 @@ export class BulkLeadImportService {
 
     // 2. Bulk duplicate check against database
     const allPhones = rows.map((r) => r.phone).filter(Boolean);
+    logger.info(`[Preview] Performing bulk duplicate check for ${allPhones.length} phone numbers`);
     const existingLeadsByPhoneMap = await DuplicateCheckService.checkPhonesBulk(
       allPhones
     );
+    logger.info(`[Preview] Duplicate check completed. Found ${existingLeadsByPhoneMap.size} existing leads`);
 
     // 3. Track in-file duplicates
     const seenPhonesInFile = new Set<string>();
@@ -371,8 +384,8 @@ export class BulkLeadImportService {
         : undefined;
       const isDuplicateInDb = !!existingLead;
 
-      // Validate row
-      const validation = this.validateRow(row, rowNumber);
+      // Validate row (pass default categories for validation)
+      const validation = this.validateRow(row, rowNumber, defaultPrimaryCategory, defaultSecondaryCategory);
       const rowErrors: string[] = [];
 
       if (!validation.valid && validation.error) {
@@ -484,8 +497,8 @@ export class BulkLeadImportService {
         const rowNumber = i + 2; // +2 because CSV has header and 0-indexed
 
         try {
-          // Validate row
-          const validation = this.validateRow(row, rowNumber);
+          // Validate row (pass default categories for validation)
+          const validation = this.validateRow(row, rowNumber, defaultPrimaryCategory, defaultSecondaryCategory);
           if (!validation.valid) {
             errors.push({
               row: rowNumber,
