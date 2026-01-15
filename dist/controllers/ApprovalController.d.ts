@@ -4,6 +4,8 @@ export declare class ApprovalController {
     /**
      * Get approval queue (leads ready for approval)
      * GET /api/v1/admin/caos/leads/approval-queue
+     * ✅ ISOLATION: Qualifiers only see leads they added (but they shouldn't access approval queue anyway)
+     * Note: Approval queue is typically for onboarders/admin, but we add isolation for consistency
      */
     static getApprovalQueue(req: AdminRequest, res: Response): Promise<void>;
     /**

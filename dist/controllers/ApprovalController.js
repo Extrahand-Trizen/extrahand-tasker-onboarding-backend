@@ -11,16 +11,34 @@ class ApprovalController {
     /**
      * Get approval queue (leads ready for approval)
      * GET /api/v1/admin/caos/leads/approval-queue
+     * ✅ ISOLATION: Qualifiers only see leads they added (but they shouldn't access approval queue anyway)
+     * Note: Approval queue is typically for onboarders/admin, but we add isolation for consistency
      */
     static async getApprovalQueue(req, res) {
         try {
+            if (!req.admin) {
+                res.status(401).json({
+                    success: false,
+                    error: 'Authentication required'
+                });
+                return;
+            }
             const { city, primarySkill, page, limit } = req.query;
-            const result = await ApprovalService_1.ApprovalService.getApprovalQueue({
+            const role = req.admin.role;
+            const userId = req.admin.userId || req.admin.uid;
+            // Build filters
+            const filters = {
                 city: city,
                 primarySkill: primarySkill,
                 page: page ? parseInt(page) : undefined,
                 limit: limit ? parseInt(limit) : undefined
-            });
+            };
+            // ✅ ISOLATION: Qualifiers can only see leads they added
+            // Onboarders and Lead Access Managers can see all leads
+            if (role === 'qualifier' && userId) {
+                filters.addedBy = userId;
+            }
+            const result = await ApprovalService_1.ApprovalService.getApprovalQueue(filters);
             // Check approval criteria for each lead
             const leadsWithCriteria = result.leads.map(lead => {
                 const criteria = ApprovalService_1.ApprovalService.checkApprovalCriteria(lead);

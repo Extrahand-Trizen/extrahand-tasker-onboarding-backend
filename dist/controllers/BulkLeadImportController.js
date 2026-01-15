@@ -163,7 +163,8 @@ class BulkLeadImportController {
     }
     /**
      * Get import history with filters
-     * ✅ Only accessible to lead_access_manager for visibility
+     * ✅ Lead Access Managers can see all imports
+     * ✅ Qualifiers can see only their own imports
      * GET /api/v1/admin/caos/leads/bulk-import/history
      */
     static async getImportHistory(req, res) {
@@ -175,13 +176,19 @@ class BulkLeadImportController {
                 });
                 return;
             }
-            // ✅ Restrict visibility to lead_access_manager only
             const userRole = req.admin?.role;
-            if (userRole !== 'lead_access_manager') {
+            const userId = req.admin?.userId || req.admin?.uid;
+            // ✅ ISOLATION: Qualifiers can only see their own imports
+            // Lead Access Managers can see all imports
+            if (userRole === 'qualifier' && userId) {
+                // Qualifiers can only see their own imports - filter by createdBy
+                // Don't allow them to filter by other users
+            }
+            else if (userRole !== 'lead_access_manager') {
                 res.status(403).json({
                     success: false,
                     error: 'Permission denied',
-                    message: 'Import history visibility is restricted to Lead Access Manager only',
+                    message: 'Import history is only accessible to Lead Access Managers and Qualifiers',
                 });
                 return;
             }
@@ -195,8 +202,8 @@ class BulkLeadImportController {
             const from = req.query.from ? new Date(req.query.from) : undefined;
             const to = req.query.to ? new Date(req.query.to) : undefined;
             const status = req.query.status;
-            const result = await BulkLeadImportService_1.BulkLeadImportService.getImportHistory({
-                userId: createdBy,
+            // ✅ ISOLATION: For qualifiers, force filter by their own userId
+            const filters = {
                 role,
                 createdByEmail,
                 createdByName,
@@ -205,7 +212,20 @@ class BulkLeadImportController {
                 status,
                 page,
                 limit,
-            });
+            };
+            if (userRole === 'qualifier' && userId) {
+                // Qualifiers can only see their own imports
+                filters.userId = userId;
+                logger_1.default.debug('Qualifier isolation applied to import history', {
+                    userId,
+                    role: userRole
+                });
+            }
+            else if (userRole === 'lead_access_manager') {
+                // Lead Access Managers can filter by any user
+                filters.userId = createdBy;
+            }
+            const result = await BulkLeadImportService_1.BulkLeadImportService.getImportHistory(filters);
             res.json({
                 success: true,
                 data: result,

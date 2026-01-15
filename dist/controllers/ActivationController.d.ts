@@ -4,6 +4,8 @@ export declare class ActivationController {
     /**
      * Get activation queue (approved leads ready for activation)
      * GET /api/v1/admin/caos/leads/activation-queue
+     * ✅ ISOLATION: Qualifiers only see leads they added (but they shouldn't access activation queue anyway)
+     * Note: Activation queue is typically for onboarders/admin, but we add isolation for consistency
      */
     static getActivationQueue(req: AdminRequest, res: Response): Promise<void>;
     /**

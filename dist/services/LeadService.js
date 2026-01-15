@@ -220,8 +220,10 @@ class LeadService {
                     .lean(),
                 Lead_1.default.countDocuments(query)
             ]);
+            // Normalize lead data to ensure primaryCategory is present
+            const normalizedLeads = leads.map(lead => this.normalizeLeadData(lead));
             return {
-                leads: leads,
+                leads: normalizedLeads,
                 total,
                 page,
                 limit,

@@ -16,10 +16,12 @@ export declare class ApprovalService {
     static checkApprovalCriteria(lead: ILead): ApprovalCriteria;
     /**
      * Get leads ready for approval (under_verification status)
+     * ✅ ISOLATION: Supports addedBy filter for qualifier isolation
      */
     static getApprovalQueue(filters?: {
         city?: string;
         primarySkill?: string;
+        addedBy?: string;
         page?: number;
         limit?: number;
     }): Promise<{
@@ -30,10 +32,12 @@ export declare class ApprovalService {
     }>;
     /**
      * Get leads ready for activation (approved status)
+     * ✅ ISOLATION: Supports addedBy filter for qualifier isolation
      */
     static getActivationQueue(filters?: {
         city?: string;
         primarySkill?: string;
+        addedBy?: string;
         page?: number;
         limit?: number;
     }): Promise<{

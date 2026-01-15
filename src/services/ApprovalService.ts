@@ -108,11 +108,13 @@ export class ApprovalService {
 
   /**
    * Get leads ready for approval (under_verification status)
+   * ✅ ISOLATION: Supports addedBy filter for qualifier isolation
    */
   static async getApprovalQueue(
     filters?: {
       city?: string;
       primarySkill?: string;
+      addedBy?: string; // ✅ For qualifier isolation
       page?: number;
       limit?: number;
     }
@@ -137,6 +139,11 @@ export class ApprovalService {
 
       if (filters?.primarySkill) {
         query.primarySkill = new RegExp(filters.primarySkill, 'i');
+      }
+
+      // ✅ ISOLATION: Filter by addedBy if provided (for qualifiers)
+      if (filters?.addedBy) {
+        query.addedBy = filters.addedBy;
       }
 
       const [leads, total] = await Promise.all([
@@ -165,11 +172,13 @@ export class ApprovalService {
 
   /**
    * Get leads ready for activation (approved status)
+   * ✅ ISOLATION: Supports addedBy filter for qualifier isolation
    */
   static async getActivationQueue(
     filters?: {
       city?: string;
       primarySkill?: string;
+      addedBy?: string; // ✅ For qualifier isolation
       page?: number;
       limit?: number;
     }
@@ -194,6 +203,11 @@ export class ApprovalService {
       const baseQuery: any = {
         status: 'approved'
       };
+
+      // ✅ ISOLATION: Filter by addedBy if provided (for qualifiers)
+      if (filters?.addedBy) {
+        baseQuery.addedBy = filters.addedBy;
+      }
 
       // Add activation check - lead is NOT activated if:
       // 1. activationData doesn't exist, OR

@@ -336,8 +336,11 @@ export class LeadService {
         Lead.countDocuments(query)
       ]);
 
+      // Normalize lead data to ensure primaryCategory is present
+      const normalizedLeads = leads.map(lead => this.normalizeLeadData(lead));
+
       return {
-        leads: leads as unknown as ILead[],
+        leads: normalizedLeads as unknown as ILead[],
         total,
         page,
         limit,

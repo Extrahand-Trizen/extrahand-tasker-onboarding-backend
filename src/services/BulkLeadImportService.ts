@@ -485,22 +485,60 @@ export class BulkLeadImportService {
       }).session(session).lean();
 
       if (existingImport && existingImport.status === 'completed') {
-        // Idempotent: return existing result
-        await session.commitTransaction();
-        logger.info('Idempotent import: returning existing result', {
-          importId: existingImport.importId,
-          fileHash: fileHash.substring(0, 16) + '...',
-          userId
-        });
+        // ✅ Check if all leads from previous import are inactive/deleted
+        // If so, allow re-import
+        if (existingImport.importedUserIds && existingImport.importedUserIds.length > 0) {
+          const activeLeadsCount = await Lead.countDocuments({
+            leadId: { $in: existingImport.importedUserIds },
+            status: { $nin: ['inactive', 'rejected'] } // Count only active leads
+          }).session(session);
 
-        return {
-          importId: existingImport.importId,
-          totalRows: existingImport.totalRows,
-          successCount: existingImport.successCount,
-          failedCount: existingImport.failedCount,
-          errors: (existingImport.errors || []) as any,
-          importedLeadIds: existingImport.importedUserIds || [],
-        };
+          if (activeLeadsCount === 0) {
+            // All leads from previous import are inactive/deleted - allow re-import
+            logger.info('Previous import leads are all inactive - allowing re-import', {
+              previousImportId: existingImport.importId,
+              fileHash: fileHash.substring(0, 16) + '...',
+              userId,
+              previousLeadCount: existingImport.importedUserIds.length
+            });
+            // Continue with new import (don't return existing result)
+          } else {
+            // Some leads are still active - return existing result (idempotent)
+            await session.commitTransaction();
+            logger.info('Idempotent import: returning existing result', {
+              importId: existingImport.importId,
+              fileHash: fileHash.substring(0, 16) + '...',
+              userId,
+              activeLeadsCount
+            });
+
+            return {
+              importId: existingImport.importId,
+              totalRows: existingImport.totalRows,
+              successCount: existingImport.successCount,
+              failedCount: existingImport.failedCount,
+              errors: (existingImport.errors || []) as any,
+              importedLeadIds: existingImport.importedUserIds || [],
+            };
+          }
+        } else {
+          // No leads were imported previously - return existing result
+          await session.commitTransaction();
+          logger.info('Idempotent import: returning existing result (no leads imported)', {
+            importId: existingImport.importId,
+            fileHash: fileHash.substring(0, 16) + '...',
+            userId
+          });
+
+          return {
+            importId: existingImport.importId,
+            totalRows: existingImport.totalRows,
+            successCount: existingImport.successCount,
+            failedCount: existingImport.failedCount,
+            errors: (existingImport.errors || []) as any,
+            importedLeadIds: existingImport.importedUserIds || [],
+          };
+        }
       }
 
       // STEP 3: Parse CSV
@@ -508,6 +546,25 @@ export class BulkLeadImportService {
       
       // STEP 4: Create or get import record atomically (prevent duplicate processing)
       const importId = `IMPORT-${Date.now()}-${uuidv4().substring(0, 8).toUpperCase()}`;
+      
+      // ✅ If previous import exists and all leads are inactive, delete it first to allow re-import
+      if (existingImport && existingImport.status === 'completed') {
+        const activeLeadsCount = await Lead.countDocuments({
+          leadId: { $in: existingImport.importedUserIds || [] },
+          status: { $nin: ['inactive', 'rejected'] }
+        }).session(session);
+
+        if (activeLeadsCount === 0) {
+          // Delete the old import record to allow new one
+          await BulkImport.deleteOne({ 
+            importId: existingImport.importId 
+          }).session(session);
+          logger.info('Deleted previous import record to allow re-import', {
+            previousImportId: existingImport.importId,
+            userId
+          });
+        }
+      }
       
       const importRecordResult = await BulkImport.findOneAndUpdate(
         {
@@ -700,6 +757,14 @@ export class BulkLeadImportService {
       let importedLeadIds: string[] = [];
       
       if (leadsToInsert.length > 0) {
+        // Log before insertion for debugging
+        logger.info('Preparing to insert leads', {
+          importId,
+          count: leadsToInsert.length,
+          sampleLeadIds: leadsToInsert.slice(0, 3).map(l => l.leadId),
+          userId
+        });
+        
         try {
           // Use insertMany with ordered: false to continue on errors
           const insertResult = await Lead.insertMany(
@@ -709,13 +774,48 @@ export class BulkLeadImportService {
               session
             }
           );
+          
+          logger.info('insertMany completed', {
+            importId,
+            resultCount: insertResult.length,
+            resultType: Array.isArray(insertResult) ? 'array' : typeof insertResult,
+            sampleResult: insertResult.length > 0 ? {
+              hasLeadId: !!insertResult[0].leadId,
+              keys: Object.keys(insertResult[0] || {}),
+              leadIdValue: insertResult[0]?.leadId
+            } : null
+          });
 
-          importedLeadIds = insertResult.map(lead => lead.leadId);
+          // Extract leadIds from inserted documents
+          // insertMany returns Mongoose documents, leadId should be directly accessible
+          importedLeadIds = insertResult.map((lead: any) => {
+            // Try multiple ways to access leadId (Mongoose document can be accessed differently)
+            const leadId = lead.leadId || (lead.toObject && lead.toObject().leadId) || lead._doc?.leadId;
+            if (!leadId) {
+              logger.error('Lead ID not found in insert result', {
+                leadKeys: Object.keys(lead),
+                leadIdType: typeof lead.leadId,
+                importId
+              });
+            }
+            return leadId;
+          }).filter(Boolean); // Remove any undefined values
+          
+          // If extraction failed, try to get from original leadsToInsert
+          if (importedLeadIds.length === 0 && insertResult.length > 0) {
+            logger.warn('Failed to extract leadIds from insertResult, using original data', {
+              importId,
+              insertResultLength: insertResult.length,
+              leadsToInsertLength: leadsToInsert.length
+            });
+            importedLeadIds = leadsToInsert.map(lead => lead.leadId).filter(Boolean);
+          }
 
           logger.info('Bulk insert completed', {
             importId,
             attempted: leadsToInsert.length,
             successful: importedLeadIds.length,
+            importedLeadIds: importedLeadIds.slice(0, 5), // Log first 5 for debugging
             userId
           });
 
@@ -783,6 +883,76 @@ export class BulkLeadImportService {
       );
 
       await session.commitTransaction();
+      logger.info('Transaction committed successfully', { 
+        importId, 
+        importedLeadIdsCount: importedLeadIds.length,
+        importedLeadIds: importedLeadIds.slice(0, 3)
+      });
+      
+      // End session after commit
+      await session.endSession();
+
+      // Verify leads were actually saved (for debugging)
+      // Use a new query outside the transaction to verify persistence
+      if (importedLeadIds.length > 0) {
+        try {
+          // Small delay to ensure write is visible (MongoDB eventual consistency)
+          await new Promise(resolve => setTimeout(resolve, 100));
+          
+          const verifyCount = await Lead.countDocuments({ 
+            leadId: { $in: importedLeadIds } 
+          });
+          
+          if (verifyCount !== importedLeadIds.length) {
+            logger.error('❌ Lead count mismatch after commit - leads may not be persisted!', {
+              importId,
+              expected: importedLeadIds.length,
+              actual: verifyCount,
+              importedLeadIds: importedLeadIds.slice(0, 5),
+              missingCount: importedLeadIds.length - verifyCount
+            });
+            
+            // Try to find which leads are missing
+            const foundLeads = await Lead.find({ 
+              leadId: { $in: importedLeadIds } 
+            }).select('leadId name phone').lean();
+            const foundLeadIds = foundLeads.map(l => l.leadId);
+            const missingLeadIds = importedLeadIds.filter(id => !foundLeadIds.includes(id));
+            
+            if (missingLeadIds.length > 0) {
+              logger.error('Missing lead IDs after commit', {
+                importId,
+                missingLeadIds: missingLeadIds.slice(0, 5),
+                foundLeadIds: foundLeadIds.slice(0, 5)
+              });
+              
+              // Try to query one missing lead directly
+              if (missingLeadIds.length > 0) {
+                const testLead = await Lead.findOne({ leadId: missingLeadIds[0] }).lean();
+                logger.error('Direct query test for missing lead', {
+                  importId,
+                  testLeadId: missingLeadIds[0],
+                  found: !!testLead,
+                  testLeadData: testLead ? { leadId: testLead.leadId, name: testLead.name } : null
+                });
+              }
+            }
+          } else {
+            logger.info('✅ Leads verified in database after commit', {
+              importId,
+              count: verifyCount,
+              sampleLeadIds: importedLeadIds.slice(0, 3)
+            });
+          }
+        } catch (verifyError: any) {
+          logger.error('Error verifying leads after commit', {
+            importId,
+            error: verifyError.message,
+            stack: verifyError.stack,
+            importedLeadIds: importedLeadIds.slice(0, 3)
+          });
+        }
+      }
 
       logger.info('Bulk lead import completed', {
         importId,

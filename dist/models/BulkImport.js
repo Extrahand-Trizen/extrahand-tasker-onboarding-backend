@@ -48,7 +48,8 @@ const BulkImportSchema = new mongoose_1.Schema({
         index: true
     },
     // Idempotency - file hash to prevent duplicate uploads
-    fileHash: { type: String, unique: true, sparse: true, index: true },
+    // ✅ Changed from unique to allow re-uploads (compound unique index with createdBy instead)
+    fileHash: { type: String, index: true },
     fileName: { type: String, required: true },
     totalRows: { type: Number, required: true },
     successCount: { type: Number, default: 0 },
@@ -76,7 +77,8 @@ const BulkImportSchema = new mongoose_1.Schema({
     completedAt: Date
 }, { timestamps: true });
 // Compound indexes for efficient queries
-BulkImportSchema.index({ fileHash: 1, createdBy: 1 }); // Idempotency check
+// ✅ Compound unique index: same file can be uploaded by different users, but not twice by same user (unless leads are deleted)
+BulkImportSchema.index({ fileHash: 1, createdBy: 1 }, { unique: true, sparse: true }); // Idempotency check per user
 BulkImportSchema.index({ createdBy: 1, createdAt: -1 }); // User's imports
 BulkImportSchema.index({ createdByRole: 1, createdAt: -1 }); // Role filter
 BulkImportSchema.index({ createdByEmail: 1, createdAt: -1 }); // Email filter

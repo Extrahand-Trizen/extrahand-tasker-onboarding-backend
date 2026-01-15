@@ -9,11 +9,13 @@ export declare class LeadController {
     /**
      * Get lead by ID
      * GET /api/v1/admin/caos/leads/:leadId
+     * ✅ ISOLATION: Qualifiers can only access leads they added
      */
     static getLead(req: AdminRequest, res: Response): Promise<void>;
     /**
      * Search and filter leads
      * GET /api/v1/admin/caos/leads
+     * ✅ ISOLATION: Qualifiers only see leads they added
      */
     static searchLeads(req: AdminRequest, res: Response): Promise<void>;
     /**
@@ -24,6 +26,7 @@ export declare class LeadController {
     /**
      * Update lead status
      * PUT /api/v1/admin/caos/leads/:leadId/status
+     * ✅ ISOLATION: Qualifiers can only update leads they added
      */
     static updateStatus(req: AdminRequest, res: Response): Promise<void>;
     /**

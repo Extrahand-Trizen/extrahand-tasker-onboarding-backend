@@ -16,7 +16,7 @@ class DuplicateCheckService {
             const normalizedPhone = this.normalizePhone(phone);
             const existingLead = await Lead_1.default.findOne({
                 phone: normalizedPhone,
-                status: { $ne: 'rejected' } // Don't match rejected leads
+                status: { $nin: ['rejected', 'inactive'] } // ✅ Don't match rejected or inactive (deleted) leads
             }).lean();
             if (existingLead) {
                 logger_1.default.info('Duplicate phone found', {
@@ -50,7 +50,7 @@ class DuplicateCheckService {
                 $and: [
                     { name: { $regex: new RegExp(normalizedName, 'i') } },
                     { city: { $regex: new RegExp(normalizedCity, 'i') } },
-                    { status: { $ne: 'rejected' } }
+                    { status: { $nin: ['rejected', 'inactive'] } } // ✅ Don't match rejected or inactive (deleted) leads
                 ]
             }).lean();
             if (existingLead) {
@@ -125,7 +125,7 @@ class DuplicateCheckService {
             // Single MongoDB query to find all existing leads with these phone numbers
             const existingLeads = await Lead_1.default.find({
                 phone: { $in: uniqueNormalizedPhones },
-                status: { $ne: 'rejected' } // Don't match rejected leads
+                status: { $nin: ['rejected', 'inactive'] } // ✅ Don't match rejected or inactive (deleted) leads
             }).lean();
             // Create a map for O(1) lookup: normalizedPhone -> existingLead
             const duplicatePhoneToLeadMap = new Map();

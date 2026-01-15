@@ -18,7 +18,8 @@ export declare class BulkLeadImportController {
     static downloadTemplate(req: AdminRequest, res: Response): Promise<void>;
     /**
      * Get import history with filters
-     * ✅ Only accessible to lead_access_manager for visibility
+     * ✅ Lead Access Managers can see all imports
+     * ✅ Qualifiers can see only their own imports
      * GET /api/v1/admin/caos/leads/bulk-import/history
      */
     static getImportHistory(req: AdminRequest, res: Response): Promise<void>;

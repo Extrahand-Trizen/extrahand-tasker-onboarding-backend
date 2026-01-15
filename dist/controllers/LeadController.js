@@ -7,6 +7,33 @@ exports.LeadController = void 0;
 const LeadService_1 = require("../services/LeadService");
 const DuplicateCheckService_1 = require("../services/DuplicateCheckService");
 const logger_1 = __importDefault(require("../config/logger"));
+/**
+ * Helper function to get consistent userId from req.admin
+ * Handles both JWT (userId) and Firebase (uid) authentication
+ */
+function getUserId(req) {
+    return req.admin?.userId || req.admin?.uid;
+}
+/**
+ * Helper function to check if user can access a lead (for qualifiers)
+ * Qualifiers can only access leads they added
+ * Lead Access Managers and Onboarders can access all leads
+ */
+function canAccessLead(req, leadAddedBy) {
+    const role = req.admin?.role;
+    const userId = getUserId(req);
+    // Lead Access Managers and Onboarders can access all leads
+    if (role === 'lead_access_manager' || role === 'onboarder') {
+        return true;
+    }
+    // Qualifiers can only access their own leads
+    if (role === 'qualifier') {
+        return userId === leadAddedBy;
+    }
+    // Support and Trust roles - check permissions (they might have read-only access to all)
+    // For now, allow them to see all (can be restricted later if needed)
+    return true;
+}
 class LeadController {
     /**
      * Create a new lead
@@ -106,15 +133,32 @@ class LeadController {
     /**
      * Get lead by ID
      * GET /api/v1/admin/caos/leads/:leadId
+     * ✅ ISOLATION: Qualifiers can only access leads they added
      */
     static async getLead(req, res) {
         try {
+            if (!req.admin) {
+                res.status(401).json({
+                    success: false,
+                    error: 'Authentication required'
+                });
+                return;
+            }
             const { leadId } = req.params;
             const lead = await LeadService_1.LeadService.getLeadById(leadId);
             if (!lead) {
                 res.status(404).json({
                     success: false,
                     error: 'Lead not found'
+                });
+                return;
+            }
+            // ✅ ISOLATION: Check if qualifier can access this lead
+            if (!canAccessLead(req, lead.addedBy)) {
+                res.status(403).json({
+                    success: false,
+                    error: 'Forbidden',
+                    message: 'You can only access leads that you have added.'
                 });
                 return;
             }
@@ -138,10 +182,20 @@ class LeadController {
     /**
      * Search and filter leads
      * GET /api/v1/admin/caos/leads
+     * ✅ ISOLATION: Qualifiers only see leads they added
      */
     static async searchLeads(req, res) {
         try {
+            if (!req.admin) {
+                res.status(401).json({
+                    success: false,
+                    error: 'Authentication required'
+                });
+                return;
+            }
             const { status, city, primarySkill, source, addedBy, search, startDate, endDate, page, limit } = req.query;
+            const role = req.admin.role;
+            const userId = getUserId(req);
             const filters = {
                 status: status,
                 city: city,
@@ -154,6 +208,16 @@ class LeadController {
                 page: page ? parseInt(page) : undefined,
                 limit: limit ? parseInt(limit) : undefined
             };
+            // ✅ ISOLATION: Qualifiers can only see leads they added
+            // Lead Access Managers and Onboarders can see all leads
+            if (role === 'qualifier' && userId) {
+                filters.addedBy = userId; // Override any client-supplied addedBy
+                logger_1.default.debug('Qualifier isolation applied', {
+                    userId,
+                    role,
+                    filteredBy: userId
+                });
+            }
             const result = await LeadService_1.LeadService.searchLeads(filters);
             res.json({
                 success: true,
@@ -214,6 +278,7 @@ class LeadController {
     /**
      * Update lead status
      * PUT /api/v1/admin/caos/leads/:leadId/status
+     * ✅ ISOLATION: Qualifiers can only update leads they added
      */
     static async updateStatus(req, res) {
         try {
@@ -230,6 +295,23 @@ class LeadController {
                 res.status(400).json({
                     success: false,
                     error: 'Status is required'
+                });
+                return;
+            }
+            // ✅ ISOLATION: Check if qualifier can access this lead
+            const existingLead = await LeadService_1.LeadService.getLeadById(leadId);
+            if (!existingLead) {
+                res.status(404).json({
+                    success: false,
+                    error: 'Lead not found'
+                });
+                return;
+            }
+            if (!canAccessLead(req, existingLead.addedBy)) {
+                res.status(403).json({
+                    success: false,
+                    error: 'Forbidden',
+                    message: 'You can only update leads that you have added.'
                 });
                 return;
             }

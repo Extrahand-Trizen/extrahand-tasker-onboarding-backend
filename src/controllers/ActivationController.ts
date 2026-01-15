@@ -9,17 +9,38 @@ export class ActivationController {
   /**
    * Get activation queue (approved leads ready for activation)
    * GET /api/v1/admin/caos/leads/activation-queue
+   * ✅ ISOLATION: Qualifiers only see leads they added (but they shouldn't access activation queue anyway)
+   * Note: Activation queue is typically for onboarders/admin, but we add isolation for consistency
    */
   static async getActivationQueue(req: AdminRequest, res: Response) {
     try {
-      const { city, primarySkill, page, limit } = req.query;
+      if (!req.admin) {
+        res.status(401).json({
+          success: false,
+          error: 'Authentication required'
+        });
+        return;
+      }
 
-      const result = await ApprovalService.getActivationQueue({
+      const { city, primarySkill, page, limit } = req.query;
+      const role = req.admin.role as UserRole;
+      const userId = req.admin.userId || req.admin.uid;
+
+      // Build filters
+      const filters: any = {
         city: city as string,
         primarySkill: primarySkill as string,
         page: page ? parseInt(page as string) : undefined,
         limit: limit ? parseInt(limit as string) : undefined
-      });
+      };
+
+      // ✅ ISOLATION: Qualifiers can only see leads they added
+      // Onboarders and Lead Access Managers can see all leads
+      if (role === 'qualifier' && userId) {
+        filters.addedBy = userId;
+      }
+
+      const result = await ApprovalService.getActivationQueue(filters);
 
       res.json({
         success: true,
