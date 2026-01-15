@@ -68,7 +68,7 @@ class LeadController {
                 preferredTimeSlot,
                 source,
                 sourceDetails,
-                addedBy: req.admin.uid,
+                addedBy: req.admin.uid || req.admin?.userId || "",
                 addedByName: req.admin.name
             };
             try {
@@ -233,11 +233,11 @@ class LeadController {
                 });
                 return;
             }
-            const role = (req.admin.role || 'marketing');
+            const role = (req.admin.role || 'qualifier');
             const statusData = {
                 status,
                 notes,
-                changedBy: req.admin.uid,
+                changedBy: req.admin.uid || req.admin?.userId || "",
                 changedByName: req.admin.name
             };
             try {
@@ -301,7 +301,7 @@ class LeadController {
                 });
                 return;
             }
-            const lead = await LeadService_1.LeadService.addNote(leadId, note, req.admin.uid, req.admin.name, isPrivate);
+            const lead = await LeadService_1.LeadService.addNote(leadId, note, req.admin.uid || req.admin?.userId || "", req.admin.name, isPrivate);
             if (!lead) {
                 res.status(404).json({
                     success: false,

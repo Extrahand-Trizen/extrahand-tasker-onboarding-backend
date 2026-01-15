@@ -123,7 +123,7 @@ class ApprovalController {
                 notes: notes || 'Lead approved',
                 changedBy: userId,
                 changedByName: userName
-            }, req.user?.role || 'admin');
+            }, req.user?.role || 'lead_access_manager');
             res.json({
                 success: true,
                 data: updatedLead,
@@ -186,7 +186,7 @@ class ApprovalController {
                         notes: notes || 'Bulk approved',
                         changedBy: userId,
                         changedByName: userName
-                    }, req.user?.role || 'admin');
+                    }, req.user?.role || 'lead_access_manager');
                     success.push(leadId);
                 }
                 catch (error) {

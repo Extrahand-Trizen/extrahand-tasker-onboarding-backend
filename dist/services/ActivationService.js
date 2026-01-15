@@ -6,11 +6,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.ActivationService = void 0;
 const firebase_1 = require("../config/firebase");
 const Lead_1 = __importDefault(require("../models/Lead"));
-const LeadService_1 = require("./LeadService");
 const logger_1 = __importDefault(require("../config/logger"));
 const axios_1 = __importDefault(require("axios"));
 const env_1 = require("../config/env");
-const EmailServiceClient_1 = require("./EmailServiceClient");
 class ActivationService {
     /**
      * Activate a single lead (create Firebase user + Profile)
@@ -150,7 +148,7 @@ class ActivationService {
             const hasAddress = !!addressDoc && addressDoc.status === 'verified';
             // ✅ Extract exact details (unmasked) for storage in verification service
             // Prefer exact details (entered during verification) over masked values
-            // Exact details are entered by operations/admin during document verification
+            // Exact details are entered by onboarder/admin during document verification
             const exactAadhaar = aadhaarDoc?.exactAadhaarNumber || aadhaarDoc?.aadhaarNumber;
             const exactPAN = panDoc?.exactPANNumber || panDoc?.panNumber;
             // ✅ Address can come from address_proof document OR from Aadhaar verification
@@ -260,18 +258,8 @@ class ActivationService {
                 });
                 profileCreated = true;
                 logger_1.default.info('Profile created for lead', { leadId, firebaseUid: userRecord.uid });
-                // Send welcome email (fire and forget - don't block on email)
-                if (lead.email) {
-                    EmailServiceClient_1.EmailServiceClient.sendAccountCreatedEmail(lead.email, lead.name, lead.phone).catch((emailError) => {
-                        // Log but don't fail the account creation
-                        logger_1.default.warn('Failed to send welcome email', {
-                            leadId,
-                            firebaseUid: userRecord.uid,
-                            email: lead.email,
-                            error: emailError,
-                        });
-                    });
-                }
+                // ✅ REMOVED: Auto confirmation email sending
+                // Emails should be sent manually when needed, not automatically during activation
                 // ✅ Store exact details (unmasked) in verification service
                 // These will be used for user verification and profile creation
                 // Skip for Scenario B (quick onboarding - users verify themselves later)
@@ -288,7 +276,7 @@ class ActivationService {
                                 verifierInfo = {
                                     userId: verifierId,
                                     userName: 'Document Verifier', // Admin who verified during lead stage
-                                    role: 'operations'
+                                    role: 'onboarder'
                                 };
                             }
                         }
@@ -336,20 +324,24 @@ class ActivationService {
                 firebaseUid: userRecord.uid,
                 profileCreated
             };
-            // Update status to activated
-            // Use 'operations' role for activation (system-initiated status change)
-            // This allows activation regardless of the user's role, since activation is a system operation
-            const userRole = role || 'operations';
-            await LeadService_1.LeadService.updateStatus(leadId, {
-                status: 'activated',
-                notes: `Lead activated. Firebase UID: ${userRecord.uid}`,
+            // ✅ UPDATE: Set accountStatus to 'activated' (NOT lead status)
+            lead.accountStatus = 'activated';
+            // ✅ KEEP lead status as 'approved' (don't change it)
+            // Lead status remains 'approved' - that's the end of the lead journey
+            // Add status history entry for account activation
+            lead.statusHistory.push({
+                status: lead.status, // Keep lead status (should be 'approved')
                 changedBy: activatedBy,
-                changedByName: activatedByName
-            }, userRole);
+                changedAt: new Date(),
+                notes: `Account activated. Firebase UID: ${userRecord.uid}. Account status: activated`
+            });
+            await lead.save();
             logger_1.default.info('Lead activated successfully', {
                 leadId,
                 firebaseUid: userRecord.uid,
-                profileCreated
+                profileCreated,
+                accountStatus: 'activated',
+                leadStatus: lead.status // Should remain 'approved'
             });
             return {
                 success: true,

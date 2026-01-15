@@ -5,12 +5,12 @@ exports.getPermissions = getPermissions;
 exports.hasPermission = hasPermission;
 exports.canUpdateStatus = canUpdateStatus;
 exports.PERMISSIONS = {
-    marketing: {
+    qualifier: {
         canViewLeads: true,
         canCreateLead: true,
         canUpdateLead: true,
         canDeleteLead: false,
-        canUpdateStatus: ['lead_added', 'contacted', 'interested', 'documents_submitted'], // ✅ Marketing can move up to documents_submitted
+        canUpdateStatus: ['lead_added', 'contacted', 'interested'], // ✅ Qualifier can only move up to 'interested' - Onboarder handles documents
         canViewDocuments: true,
         canUploadDocuments: false,
         canVerifyDocuments: false,
@@ -18,17 +18,17 @@ exports.PERMISSIONS = {
         canAssignSkills: false,
         canApprove: false,
         canReject: false,
-        canActivate: true, // Marketing team handles account creation
+        canActivate: false, // ❌ REMOVED - Qualifier cannot activate accounts (login access)
         canViewAnalytics: false,
         canViewSettings: false,
         canBulkImport: true,
         canBulkApprove: false,
-        canBulkActivate: true, // Allow bulk activation for marketing
+        canBulkActivate: false, // ❌ REMOVED - Qualifier cannot bulk activate
         canAddNotes: true,
         canViewAllNotes: true,
         canCommunicate: true
     },
-    operations: {
+    onboarder: {
         canViewLeads: true,
         canCreateLead: true,
         canUpdateLead: true,
@@ -51,7 +51,7 @@ exports.PERMISSIONS = {
         canViewAllNotes: true,
         canCommunicate: true
     },
-    admin: {
+    lead_access_manager: {
         canViewLeads: true,
         canCreateLead: true,
         canUpdateLead: true,
@@ -96,10 +96,33 @@ exports.PERMISSIONS = {
         canAddNotes: true,
         canViewAllNotes: true,
         canCommunicate: true
+    },
+    trust: {
+        canViewLeads: true,
+        canCreateLead: false,
+        canUpdateLead: false,
+        canDeleteLead: false,
+        canUpdateStatus: [],
+        canViewDocuments: true,
+        canUploadDocuments: false,
+        canVerifyDocuments: false,
+        canViewSkills: true,
+        canAssignSkills: false,
+        canApprove: false,
+        canReject: false,
+        canActivate: false,
+        canViewAnalytics: false,
+        canViewSettings: false,
+        canBulkImport: false,
+        canBulkApprove: false,
+        canBulkActivate: false,
+        canAddNotes: false,
+        canViewAllNotes: true,
+        canCommunicate: false
     }
 };
 function getPermissions(role) {
-    return exports.PERMISSIONS[role] || exports.PERMISSIONS.marketing;
+    return exports.PERMISSIONS[role] || exports.PERMISSIONS.qualifier;
 }
 function hasPermission(role, permission) {
     const permissions = getPermissions(role);
@@ -110,14 +133,12 @@ function canUpdateStatus(role, currentStatus, newStatus) {
     if (permissions.canUpdateStatus === 'all') {
         return true;
     }
-    // Special case: Allow activation if user has canActivate permission
-    if (newStatus === 'activated' && permissions.canActivate) {
-        return currentStatus === 'approved'; // Can only activate from approved status
-    }
+    // ❌ REMOVED: Special case for activation - activation is now separate from lead status
+    // Activation is handled via canActivate permission and accountStatus field, not via status update
     if (Array.isArray(permissions.canUpdateStatus)) {
-        // Marketing can only move forward in pipeline (up to documents_submitted)
-        if (role === 'marketing') {
-            const statusOrder = ['lead_added', 'contacted', 'interested', 'documents_submitted'];
+        // Qualifier can only move forward in pipeline (up to 'interested')
+        if (role === 'qualifier') {
+            const statusOrder = ['lead_added', 'contacted', 'interested'];
             const currentIndex = statusOrder.indexOf(currentStatus);
             const newIndex = statusOrder.indexOf(newStatus);
             // ✅ Allow moving forward in pipeline, or staying at same status

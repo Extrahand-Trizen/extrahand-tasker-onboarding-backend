@@ -5,7 +5,11 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.UserManagementController = void 0;
 const AdminUser_1 = __importDefault(require("../models/AdminUser"));
+const AdminInvite_1 = __importDefault(require("../models/AdminInvite"));
+const PasswordResetToken_1 = __importDefault(require("../models/PasswordResetToken"));
 const logger_1 = __importDefault(require("../config/logger"));
+const env_1 = require("../config/env");
+const EmailServiceClient_1 = require("../services/EmailServiceClient");
 class UserManagementController {
     /**
      * List all admin users
@@ -43,14 +47,14 @@ class UserManagementController {
         }
     }
     /**
-     * Get user details
+     * Get user details with full history
      * GET /api/v1/admin/users/:userId
      */
     static async getById(req, res) {
         try {
             const { userId } = req.params;
             const user = await AdminUser_1.default.findOne({ userId })
-                .select('-passwordHash -refreshTokens')
+                .select('-passwordHash')
                 .lean();
             if (!user) {
                 return res.status(404).json({
@@ -58,9 +62,63 @@ class UserManagementController {
                     error: 'User not found',
                 });
             }
+            // Get invite information if available
+            let inviteInfo = null;
+            if (user.inviteId) {
+                inviteInfo = await AdminInvite_1.default.findOne({ inviteId: user.inviteId })
+                    .select('email createdAt expiresAt status usedByEmail usedByName usedAt')
+                    .lean();
+            }
+            // Get active sessions (refreshTokens)
+            const activeSessions = (user.refreshTokens || [])
+                .filter((token) => new Date(token.expiresAt) > new Date())
+                .map((token) => ({
+                deviceInfo: token.deviceInfo || 'Unknown',
+                ipAddress: token.ipAddress || 'Unknown',
+                createdAt: token.createdAt,
+                lastUsedAt: token.lastUsedAt,
+                expiresAt: token.expiresAt,
+            }));
+            // Build activity timeline
+            const activityTimeline = [];
+            if (user.createdAt) {
+                activityTimeline.push({
+                    type: 'account_created',
+                    date: user.createdAt,
+                    description: `Account created via ${user.joinedVia || 'manual'}`,
+                });
+            }
+            if (inviteInfo?.usedAt) {
+                activityTimeline.push({
+                    type: 'invite_accepted',
+                    date: inviteInfo.usedAt,
+                    description: `Invite accepted by ${inviteInfo.usedByName || inviteInfo.usedByEmail || 'user'}`,
+                });
+            }
+            if (user.lastRoleChangeAt && user.lastRoleChangeBy) {
+                activityTimeline.push({
+                    type: 'role_changed',
+                    date: user.lastRoleChangeAt,
+                    description: `Role changed by ${user.lastRoleChangeBy}`,
+                });
+            }
+            if (user.lastLoginAt) {
+                activityTimeline.push({
+                    type: 'last_login',
+                    date: user.lastLoginAt,
+                    description: `Last login (Total: ${user.loginCount || 0} logins)`,
+                });
+            }
+            // Sort by date (newest first)
+            activityTimeline.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
             return res.json({
                 success: true,
-                data: user,
+                data: {
+                    ...user,
+                    inviteInfo,
+                    activeSessions,
+                    activityTimeline,
+                },
             });
         }
         catch (error) {
@@ -80,7 +138,8 @@ class UserManagementController {
             const { userId } = req.params;
             const { role } = req.body;
             const actorId = req.admin?.userId || 'system';
-            if (!role || !['admin', 'operations', 'marketing', 'support', 'trust'].includes(role)) {
+            const currentUserRole = req.admin?.role;
+            if (!role || !['lead_access_manager', 'onboarder', 'qualifier', 'support', 'trust'].includes(role)) {
                 return res.status(400).json({
                     success: false,
                     error: 'Invalid role',
@@ -93,11 +152,11 @@ class UserManagementController {
                     error: 'User not found',
                 });
             }
-            // Prevent self-role change to non-admin
-            if (user.userId === actorId && role !== 'admin') {
+            // Prevent self-role change to non-lead_access_manager
+            if (user.userId === actorId && role !== 'lead_access_manager') {
                 return res.status(400).json({
                     success: false,
-                    error: 'Cannot change your own role from admin',
+                    error: 'Cannot change your own role from lead_access_manager',
                 });
             }
             user.role = role;
@@ -209,6 +268,224 @@ class UserManagementController {
             return res.status(500).json({
                 success: false,
                 error: 'Failed to update user',
+            });
+        }
+    }
+    /**
+     * Initiate password reset by admin
+     * POST /api/v1/admin/users/:userId/reset-password
+     */
+    static async resetPassword(req, res) {
+        try {
+            const { userId } = req.params;
+            const actorId = req.admin?.userId || 'system';
+            const user = await AdminUser_1.default.findOne({ userId });
+            if (!user) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'User not found',
+                });
+            }
+            // Validate user has an email
+            if (!user.email) {
+                logger_1.default.error('Password reset failed: User has no email address', {
+                    userId: user.userId,
+                    initiatedBy: actorId,
+                });
+                return res.status(400).json({
+                    success: false,
+                    error: 'User does not have an email address configured',
+                });
+            }
+            // Create password reset token
+            const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+            const resetToken = await PasswordResetToken_1.default.create({
+                userId: user.userId,
+                email: user.email,
+                expiresAt,
+                createdBy: actorId,
+            });
+            const resetLink = `${env_1.env.FRONTEND_URL}/reset-password?token=${resetToken.token}`;
+            logger_1.default.info('Password reset token created', {
+                userId: user.userId,
+                email: user.email,
+                initiatedBy: actorId,
+                tokenId: resetToken.token.substring(0, 8) + '...',
+                expiresAt: expiresAt.toISOString(),
+            });
+            // Send password reset email
+            const emailResult = await EmailServiceClient_1.EmailServiceClient.sendPasswordResetEmail(user.email, resetLink, user.name || user.email.split('@')[0], expiresAt // Pass expiresAt to email template
+            );
+            if (!emailResult.success) {
+                logger_1.default.error('Password reset email failed to send', {
+                    userId: user.userId,
+                    email: user.email,
+                    initiatedBy: actorId,
+                    error: emailResult.error,
+                    resetLink: resetLink, // Log link for manual sending if needed
+                });
+                // Return error but include reset link for manual sending
+                return res.status(500).json({
+                    success: false,
+                    error: 'Failed to send password reset email',
+                    message: emailResult.error || 'Email service unavailable',
+                    data: {
+                        emailSent: false,
+                        resetLink: resetLink, // Provide link so admin can manually send
+                        email: user.email,
+                        expiresAt: expiresAt.toISOString(),
+                    },
+                });
+            }
+            logger_1.default.info('Password reset email sent successfully', {
+                userId: user.userId,
+                email: user.email,
+                initiatedBy: actorId,
+                messageId: emailResult.messageId,
+                expiresAt: expiresAt.toISOString(),
+            });
+            return res.json({
+                success: true,
+                message: `Password reset email sent to ${user.email}`,
+                data: {
+                    emailSent: true,
+                    email: user.email,
+                    expiresAt: expiresAt.toISOString(),
+                },
+            });
+        }
+        catch (error) {
+            logger_1.default.error('Password reset error', {
+                error: error.message,
+                stack: error.stack,
+                userId: req.params.userId,
+                initiatedBy: req.admin?.userId || 'system',
+            });
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to initiate password reset',
+                message: error.message || 'An unexpected error occurred',
+            });
+        }
+    }
+    /**
+     * Get active sessions for a user
+     * GET /api/v1/admin/users/:userId/sessions
+     */
+    static async getSessions(req, res) {
+        try {
+            const { userId } = req.params;
+            const user = await AdminUser_1.default.findOne({ userId })
+                .select('refreshTokens email name');
+            if (!user) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'User not found',
+                });
+            }
+            const activeSessions = (user.refreshTokens || [])
+                .filter((token) => new Date(token.expiresAt) > new Date())
+                .map((token, index) => ({
+                id: index, // Use index as ID since tokens don't have _id
+                deviceInfo: token.deviceInfo || 'Unknown',
+                ipAddress: token.ipAddress || 'Unknown',
+                createdAt: token.createdAt,
+                lastUsedAt: token.lastUsedAt,
+                expiresAt: token.expiresAt,
+                token: token.token.substring(0, 20) + '...', // Partial token for identification
+            }));
+            return res.json({
+                success: true,
+                data: activeSessions,
+            });
+        }
+        catch (error) {
+            logger_1.default.error('Get sessions error', { error: error.message });
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to fetch sessions',
+            });
+        }
+    }
+    /**
+     * Revoke a specific session
+     * DELETE /api/v1/admin/users/:userId/sessions/:sessionIndex
+     */
+    static async revokeSession(req, res) {
+        try {
+            const { userId, sessionIndex } = req.params;
+            const actorId = req.admin?.userId || 'system';
+            const user = await AdminUser_1.default.findOne({ userId });
+            if (!user) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'User not found',
+                });
+            }
+            const sessionIdx = parseInt(sessionIndex, 10);
+            if (isNaN(sessionIdx) || sessionIdx < 0 || sessionIdx >= (user.refreshTokens?.length || 0)) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Invalid session index',
+                });
+            }
+            // Remove the session
+            const removedSession = user.refreshTokens.splice(sessionIdx, 1)[0];
+            await user.save();
+            logger_1.default.info('Session revoked by admin', {
+                userId: user.userId,
+                email: user.email,
+                revokedBy: actorId,
+                deviceInfo: removedSession.deviceInfo,
+                ipAddress: removedSession.ipAddress,
+            });
+            return res.json({
+                success: true,
+                message: 'Session revoked successfully',
+            });
+        }
+        catch (error) {
+            logger_1.default.error('Revoke session error', { error: error.message });
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to revoke session',
+            });
+        }
+    }
+    /**
+     * Revoke all sessions for a user
+     * DELETE /api/v1/admin/users/:userId/sessions
+     */
+    static async revokeAllSessions(req, res) {
+        try {
+            const { userId } = req.params;
+            const actorId = req.admin?.userId || 'system';
+            const user = await AdminUser_1.default.findOne({ userId });
+            if (!user) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'User not found',
+                });
+            }
+            const sessionCount = user.refreshTokens?.length || 0;
+            user.refreshTokens = [];
+            await user.save();
+            logger_1.default.info('All sessions revoked by admin', {
+                userId: user.userId,
+                email: user.email,
+                revokedBy: actorId,
+                sessionCount,
+            });
+            return res.json({
+                success: true,
+                message: `All ${sessionCount} session(s) revoked successfully`,
+            });
+        }
+        catch (error) {
+            logger_1.default.error('Revoke all sessions error', { error: error.message });
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to revoke sessions',
             });
         }
     }

@@ -53,6 +53,13 @@ router.get(
   BulkLeadImportController.getImportHistory
 );
 
+// Get imported leads for an import (must come before :importId route)
+router.get(
+  '/:importId/leads',
+  requirePermission('canViewLeads'),
+  BulkLeadImportController.getImportedLeads
+);
+
 // Export UIDs from import (must come before :importId route)
 router.get(
   '/:importId/export-uids',

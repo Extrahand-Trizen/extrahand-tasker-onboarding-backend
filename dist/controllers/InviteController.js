@@ -9,6 +9,17 @@ const AdminUser_1 = __importDefault(require("../models/AdminUser"));
 const logger_1 = __importDefault(require("../config/logger"));
 const env_1 = require("../config/env");
 const EmailServiceClient_1 = require("../services/EmailServiceClient");
+/**
+ * Construct invite link URL
+ * Uses FRONTEND_URL environment variable which should be set to:
+ * - Production: https://partner.extrahand.in
+ * - Development: http://localhost:3000
+ */
+function getInviteLink(token) {
+    // Ensure FRONTEND_URL doesn't have trailing slash
+    const baseUrl = env_1.env.FRONTEND_URL.replace(/\/$/, '');
+    return `${baseUrl}/invite/${token}`;
+}
 class InviteController {
     /**
      * Create a new invite
@@ -25,8 +36,10 @@ class InviteController {
                     error: 'Email and role are required',
                 });
             }
+            // Get the current user's role
+            const currentUserRole = req.admin?.role;
             // Validate role
-            const validRoles = ['admin', 'operations', 'marketing', 'support', 'trust'];
+            const validRoles = ['lead_access_manager', 'onboarder', 'qualifier', 'support', 'trust'];
             if (!validRoles.includes(role)) {
                 return res.status(400).json({
                     success: false,
@@ -65,7 +78,7 @@ class InviteController {
                 createdBy,
                 expiresAt: new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000),
             });
-            const inviteLink = `${env_1.env.FRONTEND_URL}/invite/${invite.token}`;
+            const inviteLink = getInviteLink(invite.token);
             // Send invite email (fire and forget - don't block on email)
             EmailServiceClient_1.EmailServiceClient.sendAdminInviteEmail(invite.email, invite.role, inviteLink, invite.expiresAt, invite.team, invite.department)
                 .then((emailResult) => {
@@ -300,7 +313,7 @@ class InviteController {
             invite.expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
             invite.status = 'pending';
             await invite.save();
-            const inviteLink = `${env_1.env.FRONTEND_URL}/invite/${invite.token}`;
+            const inviteLink = getInviteLink(invite.token);
             logger_1.default.info('Invite resent', {
                 inviteId,
                 email: invite.email,

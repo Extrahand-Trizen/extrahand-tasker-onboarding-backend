@@ -72,6 +72,11 @@ export declare class LeadService {
         skipNameCityDuplicate?: boolean;
     }): Promise<ILead>;
     /**
+     * Normalize lead data to ensure primaryCategory is always present
+     * (fallback to primarySkill for backward compatibility)
+     */
+    private static normalizeLeadData;
+    /**
      * Get lead by ID
      */
     static getLeadById(leadId: string): Promise<ILead | null>;

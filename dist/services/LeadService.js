@@ -76,8 +76,10 @@ class LeadService {
                 state: data.state?.trim(),
                 address: data.address?.trim(),
                 pincode: data.pincode?.trim(),
-                primarySkill: primarySkillCategory,
-                secondarySkill: secondaryCategoryValue,
+                primarySkill: primarySkillCategory, // Legacy field
+                primaryCategory: primarySkillCategory, // New field
+                secondarySkill: secondaryCategoryValue, // Legacy field
+                secondaryCategory: secondaryCategoryValue, // New field
                 experienceLevel: data.experienceLevel,
                 workingDays: data.workingDays?.trim(),
                 preferredTimeSlot: data.preferredTimeSlot?.trim(),
@@ -130,12 +132,32 @@ class LeadService {
         }
     }
     /**
+     * Normalize lead data to ensure primaryCategory is always present
+     * (fallback to primarySkill for backward compatibility)
+     */
+    static normalizeLeadData(lead) {
+        if (!lead)
+            return lead;
+        // Ensure primaryCategory is set (fallback to primarySkill for old leads)
+        if (!lead.primaryCategory && lead.primarySkill) {
+            lead.primaryCategory = lead.primarySkill;
+        }
+        // Ensure secondaryCategory is set (fallback to secondarySkill for old leads)
+        if (!lead.secondaryCategory && lead.secondarySkill) {
+            lead.secondaryCategory = lead.secondarySkill;
+        }
+        return lead;
+    }
+    /**
      * Get lead by ID
      */
     static async getLeadById(leadId) {
         try {
             const lead = await Lead_1.default.findOne({ leadId }).lean();
-            return lead;
+            if (!lead)
+                return null;
+            // Normalize lead data to ensure primaryCategory is present
+            return this.normalizeLeadData(lead);
         }
         catch (error) {
             logger_1.default.error('Error getting lead', {
@@ -270,7 +292,8 @@ class LeadService {
             // ✅ Auto-transition: When marketing sets status to 'documents_submitted', 
             // automatically transition to 'under_verification' so lead appears in verification queue
             let finalStatus = newStatus;
-            if (newStatus === 'documents_submitted' && currentStatus !== 'under_verification' && currentStatus !== 'approved' && currentStatus !== 'activated') {
+            // ✅ UPDATED: Removed 'activated' check - activation is now tracked via accountStatus, not lead status
+            if (newStatus === 'documents_submitted' && currentStatus !== 'under_verification' && currentStatus !== 'approved') {
                 finalStatus = 'under_verification';
                 logger_1.default.info('Auto-transitioning lead from documents_submitted to under_verification', {
                     leadId,
@@ -351,7 +374,7 @@ class LeadService {
             lead.documents.push(document);
             const updatedLead = await lead.save();
             // Log activity
-            await this.logActivity(leadId, 'document_upload', `Document uploaded: ${document.type}`, document.uploadedAt ? 'system' : 'admin', undefined, { documentType: document.type });
+            await this.logActivity(leadId, 'document_upload', `Document uploaded: ${document.type}`, document.uploadedAt ? 'system' : 'lead_access_manager', undefined, { documentType: document.type });
             return updatedLead;
         }
         catch (error) {
@@ -464,7 +487,7 @@ class LeadService {
             lead.documents.splice(documentIndex, 1);
             const updatedLead = await lead.save();
             // Log activity
-            await this.logActivity(leadId, 'document_upload', `Document deleted: ${documentType}`, 'admin', undefined, { documentType });
+            await this.logActivity(leadId, 'document_upload', `Document deleted: ${documentType}`, 'lead_access_manager', undefined, { documentType });
             return updatedLead;
         }
         catch (error) {
@@ -493,14 +516,15 @@ class LeadService {
             lead.skills.push(skill);
             const updatedLead = await lead.save();
             // Log activity
-            await this.logActivity(leadId, 'skill_assigned', `Skill assigned: ${skill.name}`, skill.assignedBy || 'admin', undefined, { skillName: skill.name, category: skill.category });
+            await this.logActivity(leadId, 'skill_assigned', `Skill assigned: ${skill.name}`, skill.assignedBy || 'lead_access_manager', undefined, { skillName: skill.name, category: skill.category });
             // Check if lead should be auto-approved (refresh lead to get latest state)
             if (updatedLead) {
                 // Refresh lead from database to ensure we have latest documents and skills
                 const freshLead = await this.getLeadById(leadId);
                 if (freshLead) {
                     const criteria = ApprovalService_1.ApprovalService.checkApprovalCriteria(freshLead);
-                    if (criteria.canApprove && freshLead.status !== 'approved' && freshLead.status !== 'activated') {
+                    // ✅ UPDATED: Removed 'activated' check - activation is now tracked via accountStatus, not lead status
+                    if (criteria.canApprove && freshLead.status !== 'approved') {
                         // Auto-approve if all criteria met
                         try {
                             await this.updateStatus(leadId, {
@@ -508,7 +532,7 @@ class LeadService {
                                 notes: 'Auto-approved: All documents verified and criteria met',
                                 changedBy: 'system',
                                 changedByName: 'System (Auto-approval)'
-                            }, 'admin');
+                            }, 'lead_access_manager');
                             logger_1.default.info('Lead auto-approved after skill assignment', {
                                 leadId,
                                 criteria: {
@@ -566,7 +590,7 @@ class LeadService {
             Object.assign(skill, updateData);
             const updatedLead = await lead.save();
             // Log activity
-            await this.logActivity(leadId, 'skill_assigned', `Skill updated: ${skill.name}`, 'admin', undefined, { skillName: skill.name, updates: updateData });
+            await this.logActivity(leadId, 'skill_assigned', `Skill updated: ${skill.name}`, 'lead_access_manager', undefined, { skillName: skill.name, updates: updateData });
             return updatedLead;
         }
         catch (error) {
@@ -594,7 +618,7 @@ class LeadService {
             lead.skills.splice(skillIndex, 1);
             const updatedLead = await lead.save();
             // Log activity
-            await this.logActivity(leadId, 'skill_assigned', `Skill removed: ${skillName}`, 'admin', undefined, { skillName });
+            await this.logActivity(leadId, 'skill_assigned', `Skill removed: ${skillName}`, 'lead_access_manager', undefined, { skillName });
             return updatedLead;
         }
         catch (error) {

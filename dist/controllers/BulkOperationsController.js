@@ -35,7 +35,16 @@ class BulkOperationsController {
                 });
                 return;
             }
-            const role = (req.admin.role || 'marketing');
+            const role = (req.admin.role || 'qualifier');
+            // Get admin UID (support both Firebase uid and JWT userId)
+            const adminUid = req.admin?.uid || req.admin?.userId;
+            if (!adminUid) {
+                res.status(401).json({
+                    success: false,
+                    error: 'Admin UID not found',
+                });
+                return;
+            }
             const results = {
                 success: 0,
                 failed: 0,
@@ -46,8 +55,8 @@ class BulkOperationsController {
                     await LeadService_1.LeadService.updateStatus(leadId, {
                         status: status,
                         notes,
-                        changedBy: req.admin.uid,
-                        changedByName: req.admin.name,
+                        changedBy: adminUid, // TypeScript now knows this is string (not undefined)
+                        changedByName: req.admin?.name, // Optional parameter, can be undefined
                     }, role);
                     results.success++;
                 }

@@ -61,10 +61,21 @@ class BulkUploadController {
             }
             const primaryCategory = req.body.primaryCategory;
             const secondaryCategory = req.body.secondaryCategory;
-            const result = await BulkUploadService_1.BulkUploadService.processBulkUpload(req.file.buffer, req.file.originalname, adminUid, primaryCategory, secondaryCategory);
+            const sendEmails = req.body.sendEmails !== 'false' && req.body.sendEmails !== false; // Default to true
+            const result = await BulkUploadService_1.BulkUploadService.processBulkUpload(req.file.buffer, req.file.originalname, adminUid, primaryCategory, secondaryCategory, sendEmails);
+            // ✅ Updated response message
             res.json({
                 success: true,
-                data: result,
+                message: "Leads created successfully. No accounts were created. Use the invite system to create accounts for qualified leads.",
+                data: {
+                    ...result,
+                    note: "Accounts will only be created when users accept invites. This ensures proper consent and data integrity.",
+                    nextSteps: [
+                        "Review and qualify leads in the Tasker List",
+                        "Send invites to qualified leads",
+                        "Accounts will be created when users accept invites"
+                    ]
+                },
             });
         }
         catch (error) {

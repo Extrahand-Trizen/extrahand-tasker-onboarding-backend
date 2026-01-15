@@ -125,7 +125,9 @@ export interface ILead extends Document {
   statusHistory: IStatusHistory[];
   
   // Skills & services
-  primarySkill: string;
+  primarySkill: string;  // Legacy field (for backward compatibility)
+  primaryCategory?: string;  // New field name (preferred)
+  secondaryCategory?: string;  // New field name (preferred)
   skills: ILeadSkill[];
   
   // Documents

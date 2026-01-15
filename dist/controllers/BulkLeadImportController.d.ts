@@ -17,7 +17,8 @@ export declare class BulkLeadImportController {
      */
     static downloadTemplate(req: AdminRequest, res: Response): Promise<void>;
     /**
-     * Get import history
+     * Get import history with filters
+     * ✅ Only accessible to lead_access_manager for visibility
      * GET /api/v1/admin/caos/leads/bulk-import/history
      */
     static getImportHistory(req: AdminRequest, res: Response): Promise<void>;
@@ -26,6 +27,11 @@ export declare class BulkLeadImportController {
      * GET /api/v1/admin/caos/leads/bulk-import/:importId
      */
     static getImportDetails(req: AdminRequest, res: Response): Promise<void>;
+    /**
+     * Get imported leads for an import (paginated)
+     * GET /api/v1/onboarding/leads/bulk-import/:importId/leads
+     */
+    static getImportedLeads(req: AdminRequest, res: Response): Promise<void>;
     /**
      * Export UIDs from import (CSV format with uid, name, phone)
      * GET /api/v1/admin/caos/leads/bulk-import/:importId/export-uids

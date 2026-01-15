@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const multer_1 = __importDefault(require("multer"));
 const adminAuth_1 = require("../middleware/adminAuth");
+const roleAuth_1 = require("../middleware/roleAuth");
 const logger_1 = __importDefault(require("../config/logger"));
 const UploadService_1 = require("../services/UploadService");
 const router = (0, express_1.Router)();
@@ -27,7 +28,7 @@ const upload = (0, multer_1.default)({
  * Direct document upload to storage (MinIO/S3).
  * Requires admin auth (Firebase). Uploads directly to configured storage provider.
  */
-router.post('/document', adminAuth_1.adminAuthMiddleware, (req, res, next) => {
+router.post('/document', adminAuth_1.adminAuthMiddleware, (0, roleAuth_1.requirePermission)('canUploadDocuments'), (req, res, next) => {
     upload.single('file')(req, res, (err) => {
         if (err) {
             logger_1.default.error('Multer error', { error: err.message });

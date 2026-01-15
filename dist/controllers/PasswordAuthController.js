@@ -94,7 +94,7 @@ class PasswordAuthController {
      */
     static async setPassword(req, res) {
         try {
-            const { inviteToken, password } = req.body;
+            const { inviteToken, password, name } = req.body;
             if (!inviteToken || !password) {
                 return res.status(400).json({
                     success: false,
@@ -146,7 +146,7 @@ class PasswordAuthController {
                 email: invite.email.toLowerCase(),
                 inviteEmail: invite.email.toLowerCase(),
                 passwordHash,
-                name: invite.email.split('@')[0], // Default name from email
+                name: name?.trim() || invite.email.split('@')[0], // Use provided name or default from email
                 role: invite.role,
                 team: invite.team,
                 department: invite.department,

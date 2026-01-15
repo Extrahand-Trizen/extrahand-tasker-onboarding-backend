@@ -3,7 +3,7 @@ export interface IAdminInvite extends Document {
     inviteId: string;
     token: string;
     email: string;
-    role: 'admin' | 'operations' | 'marketing' | 'support' | 'trust';
+    role: 'lead_access_manager' | 'onboarder' | 'qualifier' | 'support' | 'trust';
     team?: string;
     department?: string;
     status: 'pending' | 'accepted' | 'expired' | 'revoked';

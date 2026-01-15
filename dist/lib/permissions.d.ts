@@ -1,5 +1,6 @@
-export type UserRole = 'marketing' | 'operations' | 'admin' | 'support';
-export type LeadStatus = 'lead_added' | 'contacted' | 'interested' | 'documents_submitted' | 'under_verification' | 'approved' | 'rejected' | 'account_created' | 'activated' | 'inactive';
+export type UserRole = 'qualifier' | 'onboarder' | 'lead_access_manager' | 'support' | 'trust';
+export type LeadStatus = 'lead_added' | 'contacted' | 'interested' | 'documents_submitted' | 'under_verification' | 'approved' | 'rejected' | 'inactive';
+export type AccountStatus = 'not_created' | 'invited' | 'activated' | 'suspended';
 export interface Permissions {
     canViewLeads: boolean;
     canCreateLead: boolean;

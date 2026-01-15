@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.DocumentController = void 0;
+const permissions_1 = require("../lib/permissions");
 const LeadService_1 = require("../services/LeadService");
 const ActivationService_1 = require("../services/ActivationService");
 const VerificationServiceClient_1 = require("../services/VerificationServiceClient");
@@ -22,6 +23,17 @@ class DocumentController {
                 res.status(401).json({
                     success: false,
                     error: 'Authentication required',
+                });
+                return;
+            }
+            // ✅ Check canUploadDocuments permission
+            const adminRole = (req.admin?.role || 'qualifier');
+            const permissions = (0, permissions_1.getPermissions)(adminRole);
+            if (!permissions.canUploadDocuments) {
+                res.status(403).json({
+                    success: false,
+                    error: 'Permission denied',
+                    message: 'You do not have permission to upload documents. Only Onboarder and Admin can upload documents.',
                 });
                 return;
             }
@@ -63,10 +75,11 @@ class DocumentController {
                 }
                 maskedAadhaar = (0, compliance_1.maskAadhaar)(sanitized);
                 // Audit log for sensitive data entry
+                const adminUid = req.admin?.uid || req.admin?.userId || 'unknown';
                 logger_1.default.info('Aadhaar number entered manually', {
                     leadId,
-                    adminUid: req.admin.uid,
-                    adminName: req.admin.name,
+                    adminUid,
+                    adminName: req.admin?.name,
                     timestamp: new Date().toISOString(),
                 });
             }
@@ -83,10 +96,11 @@ class DocumentController {
                 }
                 maskedPAN = (0, compliance_1.maskPAN)(sanitized);
                 // Audit log for sensitive data entry
+                const adminUid = req.admin?.uid || req.admin?.userId || 'unknown';
                 logger_1.default.info('PAN number entered manually', {
                     leadId,
-                    adminUid: req.admin.uid,
-                    adminName: req.admin.name,
+                    adminUid,
+                    adminName: req.admin?.name,
                     timestamp: new Date().toISOString(),
                 });
             }
@@ -103,10 +117,11 @@ class DocumentController {
                 }
                 addressDetailsText = trimmed;
                 // Audit log for address entry
+                const adminUid = req.admin?.uid || req.admin?.userId || 'unknown';
                 logger_1.default.info('Address proof entered manually', {
                     leadId,
-                    adminUid: req.admin.uid,
-                    adminName: req.admin.name,
+                    adminUid,
+                    adminName: req.admin?.name,
                     timestamp: new Date().toISOString(),
                 });
             }
@@ -140,13 +155,9 @@ class DocumentController {
                 });
                 return;
             }
-            // ✅ Document status based on role:
-            // - Marketing: 'pending' (needs verification by operations team)
-            // - Operations/Admin: 'verified' (trusted uploaders can auto-verify)
-            // - Default: 'pending' (safe default - requires manual verification)
-            const adminRole = req.admin?.role || 'marketing';
-            // ✅ ALL document uploads require manual verification by operations/admin team
+            // ✅ ALL document uploads require manual verification by onboarder/admin team
             // No auto-approval - all documents start with 'pending' status regardless of who uploads
+            // Note: adminRole is already defined above (line 29) for permission checking
             const documentStatus = 'pending';
             logger_1.default.info('Document upload - all documents set to pending for manual verification', {
                 leadId,
@@ -168,7 +179,7 @@ class DocumentController {
             // Add document to lead
             const updatedLead = await LeadService_1.LeadService.addDocument(leadId, newDocument);
             // ✅ Auto-approval removed: Leads will not be automatically approved after document upload
-            // Approval must be done manually by the verification/operations team through the approval queue
+            // Approval must be done manually by the verification/onboarder team through the approval queue
             res.json({
                 success: true,
                 data: updatedLead,
@@ -202,7 +213,7 @@ class DocumentController {
             }
             const { leadId, documentIndex } = req.params;
             const { status, rejectionReason, 
-            // ✅ Exact details (unmasked) - entered by operations/admin during verification
+            // ✅ Exact details (unmasked) - entered by onboarder/admin during verification
             exactAadhaarNumber, exactPANNumber, exactAddressDetails } = req.body;
             if (!status || !['verified', 'rejected'].includes(status)) {
                 res.status(400).json({
@@ -262,7 +273,18 @@ class DocumentController {
                     return;
                 }
             }
-            const updatedLead = await LeadService_1.LeadService.verifyDocument(leadId, index, status, req.admin.uid, req.admin.name, rejectionReason, 
+            // Get admin UID (support both Firebase uid and JWT userId)
+            const adminUid = req.admin?.uid || req.admin?.userId;
+            if (!adminUid) {
+                res.status(401).json({
+                    success: false,
+                    error: 'Admin UID not found',
+                });
+                return;
+            }
+            const updatedLead = await LeadService_1.LeadService.verifyDocument(leadId, index, status, adminUid, // TypeScript now knows this is string (not undefined)
+            req.admin?.name, // Optional parameter, can be undefined
+            rejectionReason, 
             // ✅ Pass exact details for storage
             status === 'verified' ? {
                 exactAadhaarNumber,
@@ -334,10 +356,11 @@ class DocumentController {
                     }
                     if (Object.keys(verificationData).length > 0) {
                         // Pass admin info for tracking who verified the document
+                        // adminUid is already extracted and validated earlier in this function
                         const adminInfo = {
-                            userId: req.admin.uid,
-                            userName: req.admin.email || req.admin.uid,
-                            role: req.admin.role || 'admin'
+                            userId: adminUid, // Use the validated adminUid from earlier
+                            userName: req.admin?.email || req.admin?.name || adminUid,
+                            role: req.admin?.role || 'lead_access_manager'
                         };
                         await ActivationService_1.ActivationService.storeVerificationData(firebaseUid, verificationData, adminInfo);
                         logger_1.default.info('✅ Stored verification data in verification service for existing account', {
@@ -592,8 +615,19 @@ class DocumentController {
                 });
                 return;
             }
+            // Get admin UID (support both Firebase uid and JWT userId)
+            const adminUid = req.admin?.uid || req.admin?.userId;
+            if (!adminUid) {
+                res.status(401).json({
+                    success: false,
+                    error: 'Admin UID not found',
+                });
+                return;
+            }
             // Mark document as verified
-            const updatedLead = await LeadService_1.LeadService.verifyDocument(leadId, index, 'verified', req.admin.uid, req.admin.name || req.admin.email, undefined, {
+            const updatedLead = await LeadService_1.LeadService.verifyDocument(leadId, index, 'verified', adminUid, // TypeScript now knows this is string (not undefined)
+            req.admin?.name || req.admin?.email, // Optional parameter, can be undefined
+            undefined, {
                 exactAadhaarNumber: cleaned
             });
             if (!updatedLead) {
@@ -614,8 +648,9 @@ class DocumentController {
                         pincode: result.verifiedData.address.pincode || ''
                     });
                     // Mark address as verified (since it came from verified Aadhaar)
+                    // adminUid is already extracted and validated earlier in this function
                     await LeadService_1.LeadService.markAddressAsVerified(leadId, {
-                        verifiedBy: req.admin.uid,
+                        verifiedBy: adminUid, // Use the validated adminUid from earlier
                         verifiedAt: new Date(),
                         source: 'aadhaar_verification'
                     });
@@ -635,10 +670,11 @@ class DocumentController {
             // ✅ Store verification data in verification service
             if (lead.activationData?.firebaseUid) {
                 try {
+                    // adminUid is already extracted and validated earlier in this function
                     const adminInfo = {
-                        userId: req.admin.uid,
-                        userName: req.admin.name || req.admin.email || req.admin.uid,
-                        role: req.admin.role || 'admin'
+                        userId: adminUid, // Use the validated adminUid from earlier
+                        userName: req.admin?.name || req.admin?.email || adminUid,
+                        role: req.admin?.role || 'admin'
                     };
                     await ActivationService_1.ActivationService.storeVerificationData(lead.activationData.firebaseUid, { aadhaarNumber: cleaned }, adminInfo, { provider: 'cashfree', verificationSource: 'admin_api' } // ✅ Pass correct provider and source
                     );
@@ -798,8 +834,19 @@ class DocumentController {
                 });
                 return;
             }
+            // Get admin UID (support both Firebase uid and JWT userId)
+            const adminUid = req.admin?.uid || req.admin?.userId;
+            if (!adminUid) {
+                res.status(401).json({
+                    success: false,
+                    error: 'Admin UID not found',
+                });
+                return;
+            }
             // Mark document as verified
-            const updatedLead = await LeadService_1.LeadService.verifyDocument(leadId, index, 'verified', req.admin.uid, req.admin.name || req.admin.email, undefined, {
+            const updatedLead = await LeadService_1.LeadService.verifyDocument(leadId, index, 'verified', adminUid, // TypeScript now knows this is string (not undefined)
+            req.admin?.name || req.admin?.email, // Optional parameter, can be undefined
+            undefined, {
                 exactPANNumber: cleaned
             });
             if (!updatedLead) {
@@ -812,10 +859,11 @@ class DocumentController {
             // ✅ Store verification data in verification service
             if (lead.activationData?.firebaseUid) {
                 try {
+                    // adminUid is already extracted and validated earlier in this function
                     const adminInfo = {
-                        userId: req.admin.uid,
-                        userName: req.admin.name || req.admin.email || req.admin.uid,
-                        role: req.admin.role || 'admin'
+                        userId: adminUid, // Use the validated adminUid from earlier
+                        userName: req.admin?.name || req.admin?.email || adminUid,
+                        role: req.admin?.role || 'admin'
                     };
                     await ActivationService_1.ActivationService.storeVerificationData(lead.activationData.firebaseUid, { panNumber: cleaned }, adminInfo, { provider: 'cashfree', verificationSource: 'admin_api' } // ✅ Pass correct provider and source
                     );

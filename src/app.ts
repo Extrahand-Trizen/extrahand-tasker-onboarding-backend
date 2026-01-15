@@ -58,8 +58,12 @@ app.use('/api/v1/admin/users', userManagementRoutes);
 app.use('/api/v1/internal/bulk-upload', bulkUploadRoutes);
 
 // Onboarding routes (tasker onboarding platform)
-app.use('/api/v1/onboarding/leads', leadsRoutes);
+// IMPORTANT: Mount bulk-import routes BEFORE generic leads routes
+// so that paths like /api/v1/onboarding/leads/bulk-import/history
+// don't get intercepted by the generic /leads routes (which can
+// return "Lead not found" 404s).
 app.use('/api/v1/onboarding/leads/bulk-import', bulkLeadImportRoutes);
+app.use('/api/v1/onboarding/leads', leadsRoutes);
 app.use('/api/v1/onboarding/leads', approvalRoutes);
 app.use('/api/v1/onboarding/leads', activationRoutes);
 app.use('/api/v1/onboarding/analytics', analyticsRoutes);

@@ -41,8 +41,12 @@ export declare class BulkLeadImportService {
     static parseCSV(fileBuffer: Buffer, defaultPrimaryCategory?: string, defaultSecondaryCategory?: string): BulkLeadImportRow[];
     /**
      * Validate import row
+     * @param row - The row to validate
+     * @param rowNumber - Row number for error reporting
+     * @param defaultPrimaryCategory - Default primary category if not in CSV
+     * @param defaultSecondaryCategory - Default secondary category if not in CSV
      */
-    static validateRow(row: BulkLeadImportRow, rowNumber: number): {
+    static validateRow(row: BulkLeadImportRow, rowNumber: number, defaultPrimaryCategory?: string, defaultSecondaryCategory?: string): {
         valid: boolean;
         error?: string;
     };
@@ -76,28 +80,34 @@ export declare class BulkLeadImportService {
     }>;
     /**
      * Bulk import leads from CSV
+     * ✅ Idempotent: Same file uploaded twice returns existing result
+     * ✅ Concurrent-safe: Uses MongoDB transactions and atomic operations
+     * ✅ Efficient: Uses bulk operations for better performance
      */
-    static bulkImportLeads(fileBuffer: Buffer, fileName: string, adminUid: string, adminName?: string, source?: LeadSource, defaultPrimaryCategory?: string, defaultSecondaryCategory?: string): Promise<BulkLeadImportResult>;
+    static bulkImportLeads(fileBuffer: Buffer, fileName: string, userId: string, // Changed from adminUid to userId (works for any role)
+    adminName?: string, adminEmail?: string, adminRole?: 'qualifier' | 'onboarder' | 'lead_access_manager', source?: LeadSource, defaultPrimaryCategory?: string, defaultSecondaryCategory?: string): Promise<BulkLeadImportResult>;
     /**
      * Generate CSV template for lead import
      * If categories are provided, they will be pre-filled in the template (or columns removed)
      */
     static generateTemplate(primaryCategory?: string, secondaryCategory?: string): string;
     /**
-     * Get import history
+     * Get import history with filters
+     * ✅ Efficient: Uses indexes and pagination
+     * ✅ Concurrent-safe: Read-only queries
      */
-    static getImportHistory(adminUid?: string, page?: number, limit?: number): Promise<{
-        imports: {
-            importId: any;
-            fileName: any;
-            totalRows: any;
-            successCount: any;
-            failedCount: any;
-            status: any;
-            operationType: any;
-            createdAt: any;
-            completedAt: any;
-        }[];
+    static getImportHistory(filters?: {
+        userId?: string;
+        role?: 'qualifier' | 'onboarder' | 'lead_access_manager';
+        createdByEmail?: string;
+        createdByName?: string;
+        from?: Date;
+        to?: Date;
+        status?: 'pending' | 'processing' | 'completed' | 'failed';
+        page?: number;
+        limit?: number;
+    }): Promise<{
+        imports: IBulkImport[];
         pagination: {
             page: number;
             limit: number;

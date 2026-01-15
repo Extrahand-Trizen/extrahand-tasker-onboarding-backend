@@ -21,6 +21,41 @@ const adminAuthMiddleware = async (req, res, next) => {
             return;
         }
         const token = authHeader.split('Bearer ')[1];
+        // Try JWT authentication first (new system)
+        try {
+            const decoded = (0, jwt_1.verifyAccessToken)(token);
+            // Get user from database to verify they're still active
+            const adminUser = await AdminUser_1.default.findOne({
+                userId: decoded.userId,
+                status: 'active',
+            }).select('-refreshTokens -passwordHash');
+            if (!adminUser) {
+                throw new Error('User not found or inactive');
+            }
+            req.admin = {
+                userId: adminUser.userId,
+                email: adminUser.email,
+                name: adminUser.name,
+                role: adminUser.role,
+                team: adminUser.team,
+                department: adminUser.department,
+            };
+            // Set user alias for backward compatibility
+            req.user = req.admin;
+            logger_1.default.debug('Admin authenticated via JWT', {
+                userId: adminUser.userId,
+                email: adminUser.email,
+                role: adminUser.role
+            });
+            return next();
+        }
+        catch (jwtError) {
+            // JWT authentication failed, try Firebase (legacy)
+            logger_1.default.debug('JWT auth failed, trying Firebase', {
+                error: jwtError.message
+            });
+        }
+        // Fallback to Firebase authentication (legacy)
         try {
             const decodedToken = await firebase_1.auth.verifyIdToken(token);
             // ✅ Query AdminUser database to get correct role
@@ -30,6 +65,7 @@ const adminAuthMiddleware = async (req, res, next) => {
                 const adminUser = await AdminUser_1.default.findOne({ uid: decodedToken.uid });
                 if (adminUser) {
                     adminRole = adminUser.role; // ✅ Use database role as source of truth
+                    adminName = adminUser.name;
                     logger_1.default.debug('Admin role from database', {
                         uid: decodedToken.uid,
                         email: decodedToken.email,
@@ -54,20 +90,21 @@ const adminAuthMiddleware = async (req, res, next) => {
                 uid: decodedToken.uid,
                 email: decodedToken.email,
                 name: decodedToken.name || adminName,
-                role: adminRole || 'marketing' // ✅ Use database role, fallback to Firebase, then 'marketing'
+                role: adminRole || 'qualifier' // ✅ Use database role, fallback to Firebase, then 'qualifier'
             };
             // Set user alias for backward compatibility
             req.user = req.admin;
-            logger_1.default.debug('Admin authenticated', {
+            logger_1.default.debug('Admin authenticated via Firebase', {
                 uid: decodedToken.uid,
                 email: decodedToken.email,
                 role: req.admin.role
             });
-            next();
+            return next();
         }
-        catch (error) {
-            logger_1.default.warn('Admin auth failed: Invalid token', {
-                error: error.message
+        catch (firebaseError) {
+            logger_1.default.warn('Both JWT and Firebase auth failed', {
+                jwtError: 'JWT verification failed',
+                firebaseError: firebaseError.message
             });
             res.status(401).json({
                 success: false,

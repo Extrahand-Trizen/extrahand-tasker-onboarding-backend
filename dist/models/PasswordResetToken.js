@@ -38,13 +38,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importStar(require("mongoose"));
 const crypto_1 = __importDefault(require("crypto"));
-const AdminInviteSchema = new mongoose_1.Schema({
-    inviteId: {
-        type: String,
-        required: true,
-        unique: true,
-        default: () => `INV-${Date.now()}-${crypto_1.default.randomBytes(4).toString('hex').toUpperCase()}`,
-    },
+const PasswordResetTokenSchema = new mongoose_1.Schema({
     token: {
         type: String,
         required: true,
@@ -52,58 +46,31 @@ const AdminInviteSchema = new mongoose_1.Schema({
         index: true,
         default: () => crypto_1.default.randomBytes(32).toString('hex'),
     },
+    userId: {
+        type: String,
+        required: true,
+        index: true,
+    },
     email: {
         type: String,
         required: true,
         lowercase: true,
-        trim: true,
-        validate: {
-            validator: (v) => {
-                return (v.endsWith('@trizenventures.com') ||
-                    v.endsWith('@extrahand.in') ||
-                    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) // Basic email validation as fallback
-                );
-            },
-            message: 'Email must be from @trizenventures.com or @extrahand.in',
-        },
     },
-    role: {
-        type: String,
-        enum: ['lead_access_manager', 'onboarder', 'qualifier', 'support', 'trust'],
-        required: true,
-    },
-    team: { type: String, trim: true },
-    department: { type: String, trim: true },
-    status: {
-        type: String,
-        enum: ['pending', 'accepted', 'expired', 'revoked'],
-        default: 'pending',
-        index: true,
-    },
-    createdBy: { type: String, required: true }, // userId (not Firebase UID)
     expiresAt: {
         type: Date,
         required: true,
-        default: () => new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+        default: () => new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
+        index: { expireAfterSeconds: 0 },
+    },
+    used: {
+        type: Boolean,
+        default: false,
         index: true,
     },
-    usedBy: { type: String }, // userId (not Firebase UID)
-    usedByEmail: { type: String, lowercase: true }, // Actual email they used
-    usedByName: { type: String }, // Name from Microsoft
-    usedAt: { type: Date },
-    lastLoginAt: { type: Date },
-    loginCount: { type: Number, default: 0 },
-    emailSent: { type: Boolean, default: false },
-    emailSentAt: { type: Date },
-    emailError: { type: String },
-    metadata: { type: mongoose_1.Schema.Types.Mixed },
+    usedAt: Date,
+    createdBy: String,
 }, { timestamps: true });
-// Indexes for efficient queries
-AdminInviteSchema.index({ email: 1, status: 1 });
-AdminInviteSchema.index({ status: 1, expiresAt: 1 });
-// Method to check if invite is valid
-AdminInviteSchema.methods.isValid = function () {
-    return this.status === 'pending' && this.expiresAt > new Date();
-};
-exports.default = mongoose_1.default.model('AdminInvite', AdminInviteSchema);
-//# sourceMappingURL=AdminInvite.js.map
+PasswordResetTokenSchema.index({ userId: 1, used: 1 });
+PasswordResetTokenSchema.index({ token: 1, used: 1 });
+exports.default = mongoose_1.default.model('PasswordResetToken', PasswordResetTokenSchema);
+//# sourceMappingURL=PasswordResetToken.js.map

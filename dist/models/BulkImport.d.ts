@@ -1,7 +1,12 @@
 import mongoose, { Document } from 'mongoose';
 export interface IBulkImport extends Omit<Document, 'errors'> {
     importId: string;
-    adminUid: string;
+    adminUid?: string;
+    createdBy: string;
+    createdByName?: string;
+    createdByEmail?: string;
+    createdByRole?: 'qualifier' | 'onboarder' | 'lead_access_manager';
+    fileHash?: string;
     fileName: string;
     totalRows: number;
     successCount: number;

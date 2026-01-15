@@ -16,7 +16,7 @@ export interface IAdminUser extends Document {
     firstName?: string;
     lastName?: string;
     profilePhoto?: string;
-    role: 'admin' | 'operations' | 'marketing' | 'support' | 'trust';
+    role: 'lead_access_manager' | 'onboarder' | 'qualifier' | 'support' | 'trust';
     team?: string;
     department?: string;
     status: 'active' | 'suspended' | 'inactive';

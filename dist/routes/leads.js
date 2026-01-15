@@ -37,7 +37,7 @@ router.post('/:leadId/notes', (0, roleAuth_1.requirePermission)('canAddNotes'), 
 router.post('/bulk-status', (0, roleAuth_1.requirePermission)('canUpdateLead'), BulkOperationsController_1.BulkOperationsController.bulkStatusChange);
 router.post('/bulk-assign-skills', (0, roleAuth_1.requirePermission)('canAssignSkills'), BulkOperationsController_1.BulkOperationsController.bulkAssignSkills);
 // Document management
-router.post('/:leadId/documents', (0, roleAuth_1.requirePermission)('canUpdateLead'), DocumentController_1.DocumentController.uploadDocument);
+router.post('/:leadId/documents', (0, roleAuth_1.requirePermission)('canUploadDocuments'), DocumentController_1.DocumentController.uploadDocument);
 // Aadhaar verification (API-based)
 router.post('/:leadId/documents/:documentIndex/verify-aadhaar/initiate', (0, roleAuth_1.requirePermission)('canVerifyDocuments'), DocumentController_1.DocumentController.initiateAadhaarVerification);
 router.post('/:leadId/documents/:documentIndex/verify-aadhaar/verify', (0, roleAuth_1.requirePermission)('canVerifyDocuments'), DocumentController_1.DocumentController.verifyAadhaarOTP);

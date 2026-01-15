@@ -16,7 +16,7 @@ function requirePermission(permission) {
             });
             return;
         }
-        const role = (req.admin.role || 'marketing');
+        const role = (req.admin.role || 'qualifier');
         if (!(0, permissions_1.hasPermission)(role, permission)) {
             logger_1.default.warn('Permission denied', {
                 uid: req.admin.uid,
@@ -42,7 +42,7 @@ function requireRole(...allowedRoles) {
             });
             return;
         }
-        const role = (req.admin.role || 'marketing');
+        const role = (req.admin.role || 'qualifier');
         if (!allowedRoles.includes(role)) {
             logger_1.default.warn('Role access denied', {
                 uid: req.admin.uid,

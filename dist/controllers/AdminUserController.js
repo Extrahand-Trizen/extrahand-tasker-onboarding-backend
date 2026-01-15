@@ -18,7 +18,7 @@ class AdminUserController {
         if (!uid || !email || !role) {
             return res.status(400).json({ success: false, error: 'uid, email, and role are required' });
         }
-        if (!['admin', 'operations', 'marketing', 'support', 'trust'].includes(role)) {
+        if (!['lead_access_manager', 'onboarder', 'qualifier', 'support', 'trust'].includes(role)) {
             return res.status(400).json({ success: false, error: 'Invalid role' });
         }
         const existing = await AdminUser_1.default.findOne({ uid });
@@ -48,7 +48,7 @@ class AdminUserController {
         const { uid } = req.params;
         const { role } = req.body;
         const actor = req.admin?.uid || 'system';
-        if (!role || !['admin', 'operations', 'marketing', 'support', 'trust'].includes(role)) {
+        if (!role || !['lead_access_manager', 'onboarder', 'qualifier', 'support', 'trust'].includes(role)) {
             return res.status(400).json({ success: false, error: 'Invalid role' });
         }
         const adminUser = await AdminUser_1.default.findOne({ uid });

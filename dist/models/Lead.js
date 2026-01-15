@@ -125,11 +125,18 @@ const LeadSchema = new mongoose_1.Schema({
             'under_verification',
             'approved',
             'rejected',
-            'account_created',
-            'activated',
             'inactive'
+            // ❌ REMOVED: 'account_created', 'activated' - these are account statuses, not lead statuses
         ],
         default: 'lead_added',
+        required: true,
+        index: true
+    },
+    // ✅ NEW: Account status field (separate from lead status)
+    accountStatus: {
+        type: String,
+        enum: ['not_created', 'invited', 'activated', 'suspended'],
+        default: 'not_created',
         required: true,
         index: true
     },
@@ -144,9 +151,8 @@ const LeadSchema = new mongoose_1.Schema({
                     'under_verification',
                     'approved',
                     'rejected',
-                    'account_created',
-                    'activated',
                     'inactive'
+                    // ❌ REMOVED: 'account_created', 'activated' - these are account statuses, not lead statuses
                 ]
             },
             changedBy: String,
@@ -190,7 +196,7 @@ const LeadSchema = new mongoose_1.Schema({
             aadhaarNumber: String, // Masked: XXXX XXXX 1234
             panNumber: String, // Masked: ABXXXX1234
             addressDetails: String, // Manual address entry
-            // ✅ Exact details (unmasked) - entered by operations/admin during verification
+            // ✅ Exact details (unmasked) - entered by onboarder/admin during verification
             // These are used during account creation to store in verification service
             exactAadhaarNumber: String, // Full 12-digit Aadhaar: 1234 5678 9012 (stored securely)
             exactPANNumber: String, // Full PAN: ABCDE1234F (stored securely)

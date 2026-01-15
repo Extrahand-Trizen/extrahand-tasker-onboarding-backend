@@ -34,6 +34,8 @@ router.post('/', (0, roleAuth_1.requirePermission)('canBulkImport'), upload.sing
 router.get('/template', (0, roleAuth_1.requirePermission)('canBulkImport'), BulkLeadImportController_1.BulkLeadImportController.downloadTemplate);
 // Import history
 router.get('/history', (0, roleAuth_1.requirePermission)('canViewLeads'), BulkLeadImportController_1.BulkLeadImportController.getImportHistory);
+// Get imported leads for an import (must come before :importId route)
+router.get('/:importId/leads', (0, roleAuth_1.requirePermission)('canViewLeads'), BulkLeadImportController_1.BulkLeadImportController.getImportedLeads);
 // Export UIDs from import (must come before :importId route)
 router.get('/:importId/export-uids', (0, roleAuth_1.requirePermission)('canViewLeads'), BulkLeadImportController_1.BulkLeadImportController.exportUids);
 // Import details

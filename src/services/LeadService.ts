@@ -155,8 +155,10 @@ export class LeadService {
         state: data.state?.trim(),
         address: data.address?.trim(),
         pincode: data.pincode?.trim(),
-        primarySkill: primarySkillCategory,
-        secondarySkill: secondaryCategoryValue,
+        primarySkill: primarySkillCategory,  // Legacy field
+        primaryCategory: primarySkillCategory,  // New field
+        secondarySkill: secondaryCategoryValue,  // Legacy field
+        secondaryCategory: secondaryCategoryValue,  // New field
         experienceLevel: data.experienceLevel,
         workingDays: data.workingDays?.trim(),
         preferredTimeSlot: data.preferredTimeSlot?.trim(),
@@ -227,12 +229,35 @@ export class LeadService {
   }
 
   /**
+   * Normalize lead data to ensure primaryCategory is always present
+   * (fallback to primarySkill for backward compatibility)
+   */
+  private static normalizeLeadData(lead: any): any {
+    if (!lead) return lead;
+    
+    // Ensure primaryCategory is set (fallback to primarySkill for old leads)
+    if (!lead.primaryCategory && lead.primarySkill) {
+      lead.primaryCategory = lead.primarySkill;
+    }
+    
+    // Ensure secondaryCategory is set (fallback to secondarySkill for old leads)
+    if (!lead.secondaryCategory && lead.secondarySkill) {
+      lead.secondaryCategory = lead.secondarySkill;
+    }
+    
+    return lead;
+  }
+
+  /**
    * Get lead by ID
    */
   static async getLeadById(leadId: string): Promise<ILead | null> {
     try {
       const lead = await Lead.findOne({ leadId }).lean();
-      return lead as ILead | null;
+      if (!lead) return null;
+      
+      // Normalize lead data to ensure primaryCategory is present
+      return this.normalizeLeadData(lead) as ILead;
     } catch (error: any) {
       logger.error('Error getting lead', {
         error: error.message,

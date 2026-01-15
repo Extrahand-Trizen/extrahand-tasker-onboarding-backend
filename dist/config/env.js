@@ -31,7 +31,7 @@ const envSchema = zod_1.z.object({
     SERVICE_AUTH_TOKEN: zod_1.z.string().min(32),
     USER_SERVICE_URL: zod_1.z.string().url().optional(),
     VERIFICATION_SERVICE_URL: zod_1.z.string().url().optional(),
-    EMAIL_SERVICE_URL: zod_1.z.string().url().optional(),
+    EMAIL_SERVICE_URL: zod_1.z.string().url('EMAIL_SERVICE_URL must be a valid URL').optional(),
     // JWT Authentication
     JWT_SECRET: zod_1.z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
     JWT_REFRESH_SECRET: zod_1.z.string().min(32, 'JWT_REFRESH_SECRET must be at least 32 characters'),
@@ -39,7 +39,9 @@ const envSchema = zod_1.z.object({
     MICROSOFT_CLIENT_ID: zod_1.z.string().optional(),
     MICROSOFT_CLIENT_SECRET: zod_1.z.string().optional(),
     MICROSOFT_REDIRECT_URI: zod_1.z.string().url('MICROSOFT_REDIRECT_URI must be a valid URL').optional(),
-    // Frontend URL
+    // Frontend URL - Used for invite links and password reset links
+    // Production: https://partner.extrahand.in
+    // Development: http://localhost:3000
     FRONTEND_URL: zod_1.z.string().url().default('http://localhost:3000'),
     LOG_LEVEL: zod_1.z.enum(['error', 'warn', 'info', 'debug']).default('info'),
     // Storage Configuration

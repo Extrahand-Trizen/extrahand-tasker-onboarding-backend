@@ -85,10 +85,11 @@ export declare class BulkUploadService {
     /**
      * Process bulk operations (create, update, delete) - Optimized with Firebase and MongoDB bulk operations
      */
-    static processBulkUpload(fileBuffer: Buffer, fileName: string, adminUid: string, defaultPrimaryCategory?: string, defaultSecondaryCategory?: string): Promise<BulkUploadResult>;
+    static processBulkUpload(fileBuffer: Buffer, fileName: string, adminUid: string, defaultPrimaryCategory?: string, defaultSecondaryCategory?: string, sendEmails?: boolean): Promise<BulkUploadResult>;
     /**
-     * Process bulk creates - Creates leads + Firebase users + MongoDB profiles
-     * OPTIMIZED: Uses bulk duplicate checks to minimize database queries and API calls
+     * Process bulk creates - Creates LEADS ONLY (no Firebase users, no profiles)
+     * ✅ SECURITY: Accounts will only be created via invite acceptance flow
+     * OPTIMIZED: Uses bulk duplicate checks to minimize database queries
      */
     private static processCreates;
     /**

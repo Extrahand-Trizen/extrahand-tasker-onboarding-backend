@@ -1,5 +1,6 @@
 import mongoose, { Document } from 'mongoose';
-export type LeadStatus = 'lead_added' | 'contacted' | 'interested' | 'documents_submitted' | 'under_verification' | 'approved' | 'rejected' | 'account_created' | 'activated' | 'inactive';
+export type LeadStatus = 'lead_added' | 'contacted' | 'interested' | 'documents_submitted' | 'under_verification' | 'approved' | 'rejected' | 'inactive';
+export type AccountStatus = 'not_created' | 'invited' | 'activated' | 'suspended';
 export type LeadSource = 'referral' | 'campaign' | 'walk-in' | 'agent' | 'other';
 export type CreationMethod = 'manual_onboarding' | 'bulk_upload' | 'direct_activation';
 export interface IStatusHistory {
@@ -85,8 +86,11 @@ export interface ILead extends Document {
     addedBy: string;
     addedByName?: string;
     status: LeadStatus;
+    accountStatus: AccountStatus;
     statusHistory: IStatusHistory[];
     primarySkill: string;
+    primaryCategory?: string;
+    secondaryCategory?: string;
     skills: ILeadSkill[];
     documents: ILeadDocument[];
     verificationStatus: IVerificationStatus;

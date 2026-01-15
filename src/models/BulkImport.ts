@@ -2,7 +2,15 @@ import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IBulkImport extends Omit<Document, 'errors'> {
   importId: string;
-  adminUid: string;
+  // Legacy field (kept for backward compatibility)
+  adminUid?: string;
+  // New creator tracking fields
+  createdBy: string;        // userId (works for any role)
+  createdByName?: string;   // Name of uploader
+  createdByEmail?: string;  // Email of uploader
+  createdByRole?: 'qualifier' | 'onboarder' | 'lead_access_manager'; // Role of uploader
+  // Idempotency
+  fileHash?: string;        // SHA-256 hash of file content for idempotency
   fileName: string;
   totalRows: number;
   successCount: number;
@@ -24,7 +32,19 @@ export interface IBulkImport extends Omit<Document, 'errors'> {
 
 const BulkImportSchema = new Schema<IBulkImport>({
   importId: { type: String, required: true, unique: true, index: true },
-  adminUid: { type: String, required: true, index: true },
+  // Legacy field (kept for backward compatibility)
+  adminUid: { type: String, index: true },
+  // New creator tracking fields
+  createdBy: { type: String, required: true, index: true }, // userId
+  createdByName: { type: String, index: true },
+  createdByEmail: { type: String, index: true },
+  createdByRole: {
+    type: String,
+    enum: ['qualifier', 'onboarder', 'lead_access_manager'],
+    index: true
+  },
+  // Idempotency - file hash to prevent duplicate uploads
+  fileHash: { type: String, unique: true, sparse: true, index: true },
   fileName: { type: String, required: true },
   totalRows: { type: Number, required: true },
   successCount: { type: Number, default: 0 },
@@ -51,6 +71,14 @@ const BulkImportSchema = new Schema<IBulkImport>({
   deletedUserIds: [String],
   completedAt: Date
 }, { timestamps: true });
+
+// Compound indexes for efficient queries
+BulkImportSchema.index({ fileHash: 1, createdBy: 1 }); // Idempotency check
+BulkImportSchema.index({ createdBy: 1, createdAt: -1 }); // User's imports
+BulkImportSchema.index({ createdByRole: 1, createdAt: -1 }); // Role filter
+BulkImportSchema.index({ createdByEmail: 1, createdAt: -1 }); // Email filter
+BulkImportSchema.index({ status: 1, createdAt: -1 }); // Status filter
+BulkImportSchema.index({ createdByRole: 1, status: 1, createdAt: -1 }); // Combined filter
 
 export default mongoose.model<IBulkImport>('BulkImport', BulkImportSchema);
 

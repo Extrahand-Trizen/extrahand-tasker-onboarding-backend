@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.ActivationController = void 0;
 const ActivationService_1 = require("../services/ActivationService");
 const ApprovalService_1 = require("../services/ApprovalService");
+const permissions_1 = require("../lib/permissions");
 const logger_1 = __importDefault(require("../config/logger"));
 class ActivationController {
     /**
@@ -43,16 +44,26 @@ class ActivationController {
         }
     }
     /**
-     * Activate a single lead
+     * Activate a single lead (create account)
      * POST /api/v1/admin/caos/leads/:leadId/activate
+     * ✅ ENFORCES: Only Onboarder and Admin can activate
      */
     static async activateLead(req, res) {
         try {
             const { leadId } = req.params;
             const userId = req.admin?.uid || req.user?.uid || 'system';
             const userName = req.admin?.name || req.user?.name || req.user?.email || 'Admin';
-            const role = req.admin?.role || 'operations';
-            const result = await ActivationService_1.ActivationService.activateLead(leadId, userId, userName, role);
+            const adminRole = (req.admin?.role || 'qualifier');
+            // ✅ BACKEND ENFORCEMENT: Marketing cannot activate
+            const permissions = (0, permissions_1.getPermissions)(adminRole);
+            if (!permissions.canActivate) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Permission denied',
+                    message: 'Only Onboarder and Admin can activate accounts. Marketing can only send invites.'
+                });
+            }
+            const result = await ActivationService_1.ActivationService.activateLead(leadId, userId, userName, adminRole);
             if (!result.success) {
                 return res.status(400).json({
                     success: false,
@@ -83,20 +94,30 @@ class ActivationController {
     /**
      * Bulk activate leads
      * POST /api/v1/admin/caos/leads/bulk-activate
+     * ✅ ENFORCES: Only Onboarder and Admin can bulk activate
      */
     static async bulkActivateLeads(req, res) {
         try {
             const { leadIds } = req.body;
             const userId = req.admin?.uid || req.user?.uid || 'system';
             const userName = req.admin?.name || req.user?.name || req.user?.email || 'Admin';
-            const role = req.admin?.role || 'operations';
+            const adminRole = (req.admin?.role || 'qualifier');
+            // ✅ BACKEND ENFORCEMENT: Marketing cannot bulk activate
+            const permissions = (0, permissions_1.getPermissions)(adminRole);
+            if (!permissions.canBulkActivate) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Permission denied',
+                    message: 'Only Onboarder and Admin can bulk activate accounts. Marketing can only send invites.'
+                });
+            }
             if (!Array.isArray(leadIds) || leadIds.length === 0) {
                 return res.status(400).json({
                     success: false,
                     error: 'leadIds must be a non-empty array'
                 });
             }
-            const result = await ActivationService_1.ActivationService.bulkActivateLeads(leadIds, userId, userName, role);
+            const result = await ActivationService_1.ActivationService.bulkActivateLeads(leadIds, userId, userName, adminRole);
             res.json({
                 success: true,
                 data: result,

@@ -65,9 +65,9 @@ const AdminUserSchema = new mongoose_1.Schema({
     // Organization
     role: {
         type: String,
-        enum: ['admin', 'operations', 'marketing', 'support', 'trust'],
+        enum: ['lead_access_manager', 'onboarder', 'qualifier', 'support', 'trust'],
         required: true,
-        default: 'marketing',
+        default: 'qualifier',
     },
     team: { type: String, trim: true },
     department: { type: String, trim: true },

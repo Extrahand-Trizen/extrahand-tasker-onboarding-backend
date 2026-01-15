@@ -6,7 +6,7 @@ const adminAuth_1 = require("../middleware/adminAuth");
 const roleAuth_1 = require("../middleware/roleAuth");
 const router = (0, express_1.Router)();
 // Temporarily removing role guard (adminAuth only)
-router.use(adminAuth_1.adminAuthMiddleware, (0, roleAuth_1.requireRole)('admin'));
+router.use(adminAuth_1.adminAuthMiddleware, (0, roleAuth_1.requireRole)('lead_access_manager'));
 router.get('/', AdminUserController_1.AdminUserController.list);
 router.post('/', AdminUserController_1.AdminUserController.create);
 router.put('/:uid/role', AdminUserController_1.AdminUserController.updateRole);

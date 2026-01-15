@@ -36,7 +36,19 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importStar(require("mongoose"));
 const BulkImportSchema = new mongoose_1.Schema({
     importId: { type: String, required: true, unique: true, index: true },
-    adminUid: { type: String, required: true, index: true },
+    // Legacy field (kept for backward compatibility)
+    adminUid: { type: String, index: true },
+    // New creator tracking fields
+    createdBy: { type: String, required: true, index: true }, // userId
+    createdByName: { type: String, index: true },
+    createdByEmail: { type: String, index: true },
+    createdByRole: {
+        type: String,
+        enum: ['qualifier', 'onboarder', 'lead_access_manager'],
+        index: true
+    },
+    // Idempotency - file hash to prevent duplicate uploads
+    fileHash: { type: String, unique: true, sparse: true, index: true },
     fileName: { type: String, required: true },
     totalRows: { type: Number, required: true },
     successCount: { type: Number, default: 0 },
@@ -63,5 +75,12 @@ const BulkImportSchema = new mongoose_1.Schema({
     deletedUserIds: [String],
     completedAt: Date
 }, { timestamps: true });
+// Compound indexes for efficient queries
+BulkImportSchema.index({ fileHash: 1, createdBy: 1 }); // Idempotency check
+BulkImportSchema.index({ createdBy: 1, createdAt: -1 }); // User's imports
+BulkImportSchema.index({ createdByRole: 1, createdAt: -1 }); // Role filter
+BulkImportSchema.index({ createdByEmail: 1, createdAt: -1 }); // Email filter
+BulkImportSchema.index({ status: 1, createdAt: -1 }); // Status filter
+BulkImportSchema.index({ createdByRole: 1, status: 1, createdAt: -1 }); // Combined filter
 exports.default = mongoose_1.default.model('BulkImport', BulkImportSchema);
 //# sourceMappingURL=BulkImport.js.map

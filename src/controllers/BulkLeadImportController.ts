@@ -80,21 +80,26 @@ export class BulkLeadImportController {
 
       const { source, primaryCategory, secondaryCategory } = req.body; // Optional: override for all leads
 
-      // Get admin UID (support both Firebase uid and JWT userId)
-      const adminUid = req.admin?.uid || req.admin?.userId;
-      if (!adminUid) {
+      // Get userId (support both Firebase uid and JWT userId)
+      const userId = req.admin?.uid || req.admin?.userId;
+      if (!userId) {
         res.status(401).json({
           success: false,
-          error: 'Admin UID not found',
+          error: 'User ID not found',
         });
         return;
       }
 
+      // Get user role for tracking
+      const adminRole = req.admin?.role as 'qualifier' | 'onboarder' | 'lead_access_manager' | undefined;
+
       const result = await BulkLeadImportService.bulkImportLeads(
         file.buffer,
         file.originalname,
-        adminUid, // TypeScript now knows this is string (not undefined) after the check above
-        req.admin?.name, // Optional parameter, can be undefined
+        userId,
+        req.admin?.name,
+        req.admin?.email,
+        adminRole,
         source,
         primaryCategory,
         secondaryCategory
@@ -149,7 +154,8 @@ export class BulkLeadImportController {
   }
 
   /**
-   * Get import history
+   * Get import history with filters
+   * ✅ Only accessible to lead_access_manager for visibility
    * GET /api/v1/admin/caos/leads/bulk-import/history
    */
   static async getImportHistory(req: AdminRequest, res: Response): Promise<void> {
@@ -162,11 +168,39 @@ export class BulkLeadImportController {
         return;
       }
 
+      // ✅ Restrict visibility to lead_access_manager only
+      const userRole = req.admin?.role;
+      if (userRole !== 'lead_access_manager') {
+        res.status(403).json({
+          success: false,
+          error: 'Permission denied',
+          message: 'Import history visibility is restricted to Lead Access Manager only',
+        });
+        return;
+      }
+
+      // Parse query parameters
       const page = parseInt(req.query.page as string) || 1;
       const limit = parseInt(req.query.limit as string) || 20;
-      const adminUid = req.query.all === 'true' ? undefined : req.admin.uid;
+      const role = req.query.role as 'qualifier' | 'onboarder' | 'lead_access_manager' | undefined;
+      const createdBy = req.query.createdBy as string | undefined;
+      const createdByEmail = req.query.createdByEmail as string | undefined;
+      const createdByName = req.query.createdByName as string | undefined;
+      const from = req.query.from ? new Date(req.query.from as string) : undefined;
+      const to = req.query.to ? new Date(req.query.to as string) : undefined;
+      const status = req.query.status as 'pending' | 'processing' | 'completed' | 'failed' | undefined;
 
-      const result = await BulkLeadImportService.getImportHistory(adminUid, page, limit);
+      const result = await BulkLeadImportService.getImportHistory({
+        userId: createdBy,
+        role,
+        createdByEmail,
+        createdByName,
+        from,
+        to,
+        status,
+        page,
+        limit,
+      });
 
       res.json({
         success: true,
@@ -175,6 +209,7 @@ export class BulkLeadImportController {
     } catch (error: any) {
       logger.error('Error in getImportHistory controller', {
         error: error.message,
+        stack: error.stack,
       });
       res.status(500).json({
         success: false,
@@ -214,6 +249,89 @@ export class BulkLeadImportController {
       res.status(500).json({
         success: false,
         error: 'Failed to fetch import details',
+        message: error.message,
+      });
+    }
+  }
+
+  /**
+   * Get imported leads for an import (paginated)
+   * GET /api/v1/onboarding/leads/bulk-import/:importId/leads
+   */
+  static async getImportedLeads(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      if (!req.admin) {
+        res.status(401).json({
+          success: false,
+          error: 'Authentication required',
+        });
+        return;
+      }
+
+      const { importId } = req.params;
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 10;
+      const skip = (page - 1) * limit;
+
+      const importRecord = await BulkImport.findOne({ importId });
+
+      if (!importRecord) {
+        res.status(404).json({
+          success: false,
+          error: 'Import not found',
+        });
+        return;
+      }
+
+      const leadIds = importRecord.importedUserIds || [];
+      const total = leadIds.length;
+
+      // Get paginated lead IDs
+      const paginatedLeadIds = leadIds.slice(skip, skip + limit);
+
+      // Fetch leads
+      const leads = await Lead.find({ leadId: { $in: paginatedLeadIds } })
+        .select('leadId name phone email city state address pincode primarySkill primaryCategory secondarySkill secondaryCategory status createdAt')
+        .lean();
+
+      // Map to expected format
+      const leadsData = leads.map((lead: any) => ({
+        uid: lead.leadId, // Use leadId as uid for consistency
+        leadId: lead.leadId,
+        name: lead.name,
+        phone: lead.phone,
+        email: lead.email,
+        city: lead.city,
+        state: lead.state,
+        address: lead.address,
+        primarySkill: lead.primaryCategory || lead.primarySkill, // Prefer primaryCategory
+        primaryCategory: lead.primaryCategory || lead.primarySkill, // Ensure primaryCategory is set
+        secondarySkill: lead.secondaryCategory || lead.secondarySkill, // Prefer secondaryCategory
+        secondaryCategory: lead.secondaryCategory || lead.secondarySkill, // Ensure secondaryCategory is set
+        status: lead.status,
+        createdAt: lead.createdAt,
+      }));
+
+      res.json({
+        success: true,
+        data: {
+          users: leadsData,
+          pagination: {
+            page,
+            limit,
+            total,
+            totalPages: Math.ceil(total / limit),
+          },
+        },
+      });
+    } catch (error: any) {
+      logger.error('Error in getImportedLeads controller', {
+        error: error.message,
+        importId: req.params.importId,
+      });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch imported leads',
         message: error.message,
       });
     }
