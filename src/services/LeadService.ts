@@ -508,7 +508,7 @@ export class LeadService {
         leadId,
         'document_upload',
         `Document uploaded: ${document.type}`,
-        document.uploadedAt ? 'system' : 'admin',
+        document.uploadedAt ? 'system' : 'lead_access_manager',
         undefined,
         { documentType: document.type }
       );
@@ -657,7 +657,7 @@ export class LeadService {
         leadId,
         'document_upload',
         `Document deleted: ${documentType}`,
-        'admin',
+        'lead_access_manager',
         undefined,
         { documentType }
       );
@@ -702,7 +702,7 @@ export class LeadService {
         leadId,
         'skill_assigned',
         `Skill assigned: ${skill.name}`,
-        skill.assignedBy || 'admin',
+        skill.assignedBy || 'lead_access_manager',
         undefined,
         { skillName: skill.name, category: skill.category }
       );
@@ -722,7 +722,7 @@ export class LeadService {
                 notes: 'Auto-approved: All documents verified and criteria met',
                 changedBy: 'system',
                 changedByName: 'System (Auto-approval)'
-              }, 'admin');
+              }, 'lead_access_manager');
               logger.info('Lead auto-approved after skill assignment', { 
                 leadId,
                 criteria: {
@@ -790,7 +790,7 @@ export class LeadService {
         leadId,
         'skill_assigned',
         `Skill updated: ${skill.name}`,
-        'admin',
+        'lead_access_manager',
         undefined,
         { skillName: skill.name, updates: updateData }
       );
@@ -832,7 +832,7 @@ export class LeadService {
         leadId,
         'skill_assigned',
         `Skill removed: ${skillName}`,
-        'admin',
+        'lead_access_manager',
         undefined,
         { skillName }
       );
