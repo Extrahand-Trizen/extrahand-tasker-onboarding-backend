@@ -2,7 +2,7 @@
    "schemaVersion": 2,
    "dockerfilePath": "./Dockerfile",
    "buildArguments": {
-      "CACHE_BUST": "no-cache"
+      "CACHE_BUST": "2026-01-15-db-update"
    },
    "expose": {
       "api": {
