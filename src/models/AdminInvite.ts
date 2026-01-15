@@ -5,7 +5,7 @@ export interface IAdminInvite extends Document {
   inviteId: string;
   token: string;
   email: string;
-  role: 'admin' | 'onboarder' | 'qualifier' | 'support' | 'trust' | 'lead_access_manager';
+  role: 'lead_access_manager' | 'onboarder' | 'qualifier' | 'support' | 'trust';
   team?: string;
   department?: string;
   status: 'pending' | 'accepted' | 'expired' | 'revoked';
@@ -57,7 +57,7 @@ const AdminInviteSchema = new Schema<IAdminInvite>(
     },
     role: {
       type: String,
-      enum: ['admin', 'onboarder', 'qualifier', 'support', 'trust', 'lead_access_manager'],
+      enum: ['lead_access_manager', 'onboarder', 'qualifier', 'support', 'trust'],
       required: true,
     },
     team: { type: String, trim: true },

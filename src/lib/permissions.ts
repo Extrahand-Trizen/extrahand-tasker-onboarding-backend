@@ -1,4 +1,4 @@
-export type UserRole = 'qualifier' | 'onboarder' | 'admin' | 'support' | 'lead_access_manager';
+export type UserRole = 'qualifier' | 'onboarder' | 'lead_access_manager' | 'support' | 'trust';
 
 // ✅ LEAD STATUS - CRM/Onboarding concern (ends at approved)
 export type LeadStatus = 
@@ -89,7 +89,7 @@ export const PERMISSIONS: Record<UserRole, Permissions> = {
     canViewAllNotes: true,
     canCommunicate: true
   },
-  admin: {
+  lead_access_manager: {
     canViewLeads: true,
     canCreateLead: true,
     canUpdateLead: true,
@@ -135,22 +135,22 @@ export const PERMISSIONS: Record<UserRole, Permissions> = {
     canViewAllNotes: true,
     canCommunicate: true
   },
-  lead_access_manager: {
-    canViewLeads: true, // Read-only access to view leads
+  trust: {
+    canViewLeads: true,
     canCreateLead: false,
     canUpdateLead: false,
     canDeleteLead: false,
-    canUpdateStatus: [], // Cannot update lead status
-    canViewDocuments: true, // Read-only access to view documents
+    canUpdateStatus: [],
+    canViewDocuments: true,
     canUploadDocuments: false,
     canVerifyDocuments: false,
-    canViewSkills: true, // Read-only access to view skills
+    canViewSkills: true,
     canAssignSkills: false,
     canApprove: false,
     canReject: false,
     canActivate: false,
     canViewAnalytics: false,
-    canViewSettings: true, // Can access admin management to assign roles
+    canViewSettings: false,
     canBulkImport: false,
     canBulkApprove: false,
     canBulkActivate: false,

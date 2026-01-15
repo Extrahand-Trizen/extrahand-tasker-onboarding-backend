@@ -5,9 +5,9 @@ import { requireRole } from '../middleware/roleAuth';
 
 const router = Router();
 
-// All routes require JWT authentication and admin role
+// All routes require JWT authentication and lead_access_manager role
 router.use(adminAuthJWT as any);
-router.use(requireRole('admin') as any);
+router.use(requireRole('lead_access_manager') as any);
 
 // List all users
 router.get('/', UserManagementController.list as any);

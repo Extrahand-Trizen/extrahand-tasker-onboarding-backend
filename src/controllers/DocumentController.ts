@@ -414,7 +414,7 @@ export class DocumentController {
             const adminInfo = {
               userId: adminUid, // Use the validated adminUid from earlier
               userName: req.admin?.email || req.admin?.name || adminUid,
-              role: req.admin?.role || 'admin'
+              role: req.admin?.role || 'lead_access_manager'
             };
             
             await ActivationService.storeVerificationData(firebaseUid, verificationData, adminInfo);

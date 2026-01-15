@@ -45,7 +45,7 @@
       "NODE_ENV": "production",
       "PORT": "4008",
       "LOG_LEVEL": "info",
-      "MONGODB_URI": "YOUR_MONGODB_URI_HERE",
+      "MONGODB_URI": "mongodb+srv://adminUser:admin123@cluster0.f0cebtz.mongodb.net/extrahand?retryWrites=true&w=majority",
       "MONGO_DB": "extrahand",
       "FIREBASE_PROJECT_ID": "YOUR_FIREBASE_PROJECT_ID",
       "FIREBASE_PRIVATE_KEY": "YOUR_FIREBASE_PRIVATE_KEY",

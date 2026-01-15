@@ -131,7 +131,7 @@ export class ApprovalController {
         notes: notes || 'Lead approved',
         changedBy: userId,
         changedByName: userName
-      }, (req.user?.role as UserRole) || 'admin');
+      }, (req.user?.role as UserRole) || 'lead_access_manager');
 
       res.json({
         success: true,
@@ -201,7 +201,7 @@ export class ApprovalController {
             notes: notes || 'Bulk approved',
             changedBy: userId,
             changedByName: userName
-          }, (req.user?.role as UserRole) || 'admin');
+          }, (req.user?.role as UserRole) || 'lead_access_manager');
 
           success.push(leadId);
         } catch (error: any) {

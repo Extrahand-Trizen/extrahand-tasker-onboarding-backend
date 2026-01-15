@@ -6,7 +6,7 @@ import { requireRole } from '../middleware/roleAuth';
 const router = Router();
 
 // Temporarily removing role guard (adminAuth only)
-router.use(adminAuthMiddleware,requireRole('admin'));
+router.use(adminAuthMiddleware,requireRole('lead_access_manager'));
 
 router.get('/', AdminUserController.list);
 router.post('/', AdminUserController.create);
