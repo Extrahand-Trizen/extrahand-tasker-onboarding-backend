@@ -34,5 +34,9 @@ export declare const env: {
     AWS_ACCESS_KEY_ID?: string | undefined;
     AWS_SECRET_ACCESS_KEY?: string | undefined;
     AWS_CLOUDFRONT_DOMAIN?: string | undefined;
+    REDIS_HOST?: string | undefined;
+    REDIS_PORT?: string | undefined;
+    REDIS_PASSWORD?: string | undefined;
+    REDIS_URL?: string | undefined;
 };
 //# sourceMappingURL=env.d.ts.map

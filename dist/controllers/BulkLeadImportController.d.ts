@@ -7,10 +7,15 @@ export declare class BulkLeadImportController {
      */
     static previewBulkImport(req: AdminRequest, res: Response): Promise<void>;
     /**
-     * Bulk import leads from CSV
+     * Bulk import leads from CSV (queued for background processing)
      * POST /api/v1/admin/caos/leads/bulk-import
      */
     static bulkImport(req: AdminRequest, res: Response): Promise<void>;
+    /**
+     * Get job status
+     * GET /api/v1/admin/caos/leads/bulk-import/job/:jobId
+     */
+    static getJobStatus(req: AdminRequest, res: Response): Promise<void>;
     /**
      * Download CSV template
      * GET /api/v1/admin/caos/leads/bulk-import/template?primaryCategory=handyperson&secondaryCategory=Plumbing

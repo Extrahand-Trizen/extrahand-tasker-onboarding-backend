@@ -9,16 +9,17 @@ import { EmailServiceClient } from '../services/EmailServiceClient';
 
 export class UserManagementController {
   /**
-   * List all admin users
+   * List all admin users with pagination, sorting, and stats
    * GET /api/v1/admin/users
    */
   static async list(req: AdminRequest, res: Response) {
     try {
-      const { status, role, search } = req.query;
+      const { status, role, search, page, limit, sort, dir } = req.query;
       
+      // Build query
       const query: any = {};
-      if (status) query.status = status;
-      if (role) query.role = role;
+      if (status && status !== 'all') query.status = status;
+      if (role && role !== 'all') query.role = role;
       if (search) {
         query.$or = [
           { email: { $regex: search, $options: 'i' } },
@@ -26,14 +27,51 @@ export class UserManagementController {
         ];
       }
 
+      // Pagination
+      const pageNum = parseInt(page as string) || 1;
+      const limitNum = parseInt(limit as string) || 25;
+      const skip = (pageNum - 1) * limitNum;
+
+      // Sorting
+      const sortField = (sort as string) || 'createdAt';
+      const sortDir = (dir as string) === 'asc' ? 1 : -1;
+      const sortObj: any = { [sortField]: sortDir };
+
+      // Get total count for stats
+      const total = await AdminUser.countDocuments(query);
+      
+      // Get users with pagination
       const users = await AdminUser.find(query)
         .select('-passwordHash -refreshTokens')
-        .sort({ createdAt: -1 })
+        .sort(sortObj)
+        .skip(skip)
+        .limit(limitNum)
         .lean();
+
+      // Calculate stats
+      const stats = {
+        total,
+        active: await AdminUser.countDocuments({ ...query, status: 'active' }),
+        suspended: await AdminUser.countDocuments({ ...query, status: 'suspended' }),
+        inactive: await AdminUser.countDocuments({ ...query, status: 'inactive' }),
+        newThisMonth: await AdminUser.countDocuments({
+          ...query,
+          createdAt: { $gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1) },
+        }),
+      };
 
       return res.json({
         success: true,
         data: users,
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total,
+          pages: Math.ceil(total / limitNum),
+          hasNext: pageNum * limitNum < total,
+          hasPrev: pageNum > 1,
+        },
+        stats,
       });
     } catch (error: any) {
       logger.error('List users error', { error: error.message });

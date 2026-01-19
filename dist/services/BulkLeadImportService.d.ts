@@ -30,6 +30,9 @@ export interface BulkLeadImportResult {
     }>;
     importedLeadIds: string[];
 }
+export interface ProgressCallback {
+    (progress: number, message: string): void;
+}
 export declare class BulkLeadImportService {
     /**
      * Parse CSV file
@@ -38,7 +41,15 @@ export declare class BulkLeadImportService {
      * Map human-readable skill names to enum values
      */
     static mapSkillToEnum(skill: string): string;
-    static parseCSV(fileBuffer: Buffer, defaultPrimaryCategory?: string, defaultSecondaryCategory?: string): BulkLeadImportRow[];
+    /**
+     * Parse CSV file using streaming parser (memory efficient)
+     * @param fileBuffer - CSV file buffer
+     * @param defaultPrimaryCategory - Default primary category if not in CSV
+     * @param defaultSecondaryCategory - Default secondary category if not in CSV
+     * @param progressCallback - Optional callback for progress updates
+     * @returns Promise resolving to array of parsed rows
+     */
+    static parseCSV(fileBuffer: Buffer, defaultPrimaryCategory?: string, defaultSecondaryCategory?: string, progressCallback?: ProgressCallback): Promise<BulkLeadImportRow[]>;
     /**
      * Validate import row
      * @param row - The row to validate
@@ -85,7 +96,7 @@ export declare class BulkLeadImportService {
      * ✅ Efficient: Uses bulk operations for better performance
      */
     static bulkImportLeads(fileBuffer: Buffer, fileName: string, userId: string, // Changed from adminUid to userId (works for any role)
-    adminName?: string, adminEmail?: string, adminRole?: 'qualifier' | 'onboarder' | 'lead_access_manager', source?: LeadSource, defaultPrimaryCategory?: string, defaultSecondaryCategory?: string): Promise<BulkLeadImportResult>;
+    adminName?: string, adminEmail?: string, adminRole?: 'qualifier' | 'onboarder' | 'lead_access_manager', source?: LeadSource, defaultPrimaryCategory?: string, defaultSecondaryCategory?: string, progressCallback?: ProgressCallback): Promise<BulkLeadImportResult>;
     /**
      * Generate CSV template for lead import
      * If categories are provided, they will be pre-filled in the template (or columns removed)

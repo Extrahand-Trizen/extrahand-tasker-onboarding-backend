@@ -12,24 +12,33 @@ const router = express_1.default.Router();
 const upload = (0, multer_1.default)({
     storage: multer_1.default.memoryStorage(),
     limits: {
-        fileSize: 10 * 1024 * 1024 // 10MB
+        fileSize: 50 * 1024 * 1024, // 50MB - increased for larger CSV files
     },
     fileFilter: (_req, file, cb) => {
-        const allowedTypes = ['text/csv', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'];
-        if (allowedTypes.includes(file.mimetype) || file.originalname.match(/\.(csv|xlsx|xls)$/)) {
+        // Validate file type
+        const allowedTypes = [
+            'text/csv',
+            'application/vnd.ms-excel',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'application/csv',
+        ];
+        const allowedExtensions = /\.(csv|xlsx|xls)$/i;
+        if (allowedTypes.includes(file.mimetype) || allowedExtensions.test(file.originalname)) {
             cb(null, true);
         }
         else {
             cb(new Error('Invalid file type. Only CSV and Excel files are allowed.'));
         }
-    }
+    },
 });
 // All routes require admin authentication
 router.use(adminAuth_1.adminAuthMiddleware);
 // Preview bulk import (dry run - no records created)
 router.post('/preview', (0, roleAuth_1.requirePermission)('canBulkImport'), upload.single('file'), BulkLeadImportController_1.BulkLeadImportController.previewBulkImport);
-// Bulk import leads
+// Bulk import leads (queued for background processing)
 router.post('/', (0, roleAuth_1.requirePermission)('canBulkImport'), upload.single('file'), BulkLeadImportController_1.BulkLeadImportController.bulkImport);
+// Get job status
+router.get('/job/:jobId', (0, roleAuth_1.requirePermission)('canBulkImport'), BulkLeadImportController_1.BulkLeadImportController.getJobStatus);
 // Download template
 router.get('/template', (0, roleAuth_1.requirePermission)('canBulkImport'), BulkLeadImportController_1.BulkLeadImportController.downloadTemplate);
 // Import history

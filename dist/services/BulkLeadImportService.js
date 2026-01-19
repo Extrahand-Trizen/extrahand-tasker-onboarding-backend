@@ -4,7 +4,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.BulkLeadImportService = void 0;
-const sync_1 = require("csv-parse/sync");
+const csv_parse_1 = require("csv-parse");
+const stream_1 = require("stream");
 const mongoose_1 = __importDefault(require("mongoose"));
 const crypto_1 = __importDefault(require("crypto"));
 const Lead_1 = __importDefault(require("../models/Lead"));
@@ -68,115 +69,174 @@ class BulkLeadImportService {
         };
         return skillMap[normalized] || normalized; // Return mapped value or original if not found
     }
-    static parseCSV(fileBuffer, defaultPrimaryCategory, defaultSecondaryCategory) {
-        try {
-            const recordsRaw = (0, sync_1.parse)(fileBuffer.toString(), {
+    /**
+     * Parse CSV file using streaming parser (memory efficient)
+     * @param fileBuffer - CSV file buffer
+     * @param defaultPrimaryCategory - Default primary category if not in CSV
+     * @param defaultSecondaryCategory - Default secondary category if not in CSV
+     * @param progressCallback - Optional callback for progress updates
+     * @returns Promise resolving to array of parsed rows
+     */
+    static async parseCSV(fileBuffer, defaultPrimaryCategory, defaultSecondaryCategory, progressCallback) {
+        return new Promise((resolve, reject) => {
+            const parsedRows = [];
+            let processedRowCount = 0;
+            let totalRowCount = 0;
+            // Create readable stream from buffer
+            const csvStream = stream_1.Readable.from(fileBuffer.toString());
+            // Create CSV parser with streaming
+            const parser = (0, csv_parse_1.parse)({
                 columns: true,
                 skip_empty_lines: true,
                 trim: true,
-                relax_column_count: true, // Allow inconsistent column counts
-                relax_quotes: true, // Be more flexible with quotes
+                relax_column_count: true,
+                relax_quotes: true,
             });
-            // Normalize header keys by trimming whitespace
-            const records = recordsRaw.map((record) => {
-                const normalized = {};
-                Object.keys(record).forEach((key) => {
-                    const trimmedKey = key.trim();
-                    normalized[trimmedKey] = record[key];
+            // Header indicators for filtering
+            const headerIndicators = new Set([
+                'full name',
+                'phone number',
+                'mobile number',
+                'email',
+                'city / area',
+                'city',
+                'state',
+                'address',
+                'pincode',
+                'primary category',
+                'secondary category',
+                'experience level',
+                'years of experience',
+                'working days',
+                'preferred time slot',
+                'source',
+            ].map((s) => s.toLowerCase()));
+            // Process each row as it streams in
+            parser.on('readable', () => {
+                let record;
+                while ((record = parser.read()) !== null) {
+                    totalRowCount++;
+                    // Normalize header keys by trimming whitespace
+                    const normalizedRecord = {};
+                    Object.keys(record).forEach((key) => {
+                        const trimmedKey = key.trim();
+                        normalizedRecord[trimmedKey] = record[key];
+                    });
+                    // Filter out invalid rows
+                    const recordValues = Object.values(normalizedRecord).map((v) => v === undefined || v === null ? '' : String(v).trim());
+                    // Skip empty rows
+                    if (recordValues.every((v) => v === '')) {
+                        continue;
+                    }
+                    // Skip comment rows
+                    if (recordValues[0]?.startsWith('#')) {
+                        continue;
+                    }
+                    // Skip header rows
+                    const looksLikeHeaderRow = recordValues.some((v) => headerIndicators.has(String(v).toLowerCase()));
+                    if (looksLikeHeaderRow) {
+                        continue;
+                    }
+                    // Transform record to BulkLeadImportRow format
+                    const rawPrimaryCategory = normalizedRecord.primaryCategory ||
+                        normalizedRecord['Primary Category'] ||
+                        normalizedRecord.primarySkill ||
+                        normalizedRecord['Primary Skill'] ||
+                        normalizedRecord['Primary Skill (Service Category)'] ||
+                        normalizedRecord['Service Category'] ||
+                        normalizedRecord['Skill'] ||
+                        defaultPrimaryCategory ||
+                        '';
+                    const mappedPrimaryCategory = rawPrimaryCategory
+                        ? BulkLeadImportService.mapSkillToEnum(rawPrimaryCategory)
+                        : '';
+                    const rawSecondaryCategory = normalizedRecord.secondaryCategory ||
+                        normalizedRecord['Secondary Category'] ||
+                        normalizedRecord.secondarySkill ||
+                        normalizedRecord['Secondary Skill'] ||
+                        defaultSecondaryCategory ||
+                        '';
+                    const experienceLevel = (normalizedRecord.experienceLevel ||
+                        normalizedRecord['Experience Level'] ||
+                        normalizedRecord['Experience Level (beginner/intermediate/experienced)'] ||
+                        '').toLowerCase();
+                    const validExperienceLevels = ['beginner', 'intermediate', 'experienced'];
+                    const mappedExperienceLevel = validExperienceLevels.includes(experienceLevel)
+                        ? experienceLevel
+                        : undefined;
+                    const yearsOfExperience = normalizedRecord.yearsOfExperience ||
+                        normalizedRecord['Years of Experience'] ||
+                        normalizedRecord['Years Of Experience']
+                        ? parseInt(normalizedRecord.yearsOfExperience ||
+                            normalizedRecord['Years of Experience'] ||
+                            normalizedRecord['Years Of Experience'] ||
+                            '0', 10)
+                        : undefined;
+                    const parsedRow = {
+                        name: normalizedRecord.name || normalizedRecord['Full Name'] || '',
+                        phone: normalizedRecord.phone ||
+                            normalizedRecord['Phone Number'] ||
+                            normalizedRecord['Mobile Number'] ||
+                            normalizedRecord['Phone'] ||
+                            '',
+                        email: normalizedRecord.email || normalizedRecord['Email'] || '',
+                        city: normalizedRecord.city ||
+                            normalizedRecord['City'] ||
+                            normalizedRecord['City / Area'] ||
+                            normalizedRecord['City (optional)'] ||
+                            '',
+                        state: normalizedRecord.state ||
+                            normalizedRecord['State'] ||
+                            normalizedRecord['State (optional)'] ||
+                            '',
+                        address: normalizedRecord.address || normalizedRecord['Address'] || '',
+                        pincode: normalizedRecord.pincode ||
+                            normalizedRecord['Pincode'] ||
+                            normalizedRecord['Pin Code'] ||
+                            normalizedRecord['PIN'] ||
+                            '',
+                        primaryCategory: mappedPrimaryCategory,
+                        primarySkill: mappedPrimaryCategory,
+                        secondaryCategory: rawSecondaryCategory,
+                        experienceLevel: mappedExperienceLevel,
+                        yearsOfExperience: isNaN(yearsOfExperience)
+                            ? undefined
+                            : yearsOfExperience,
+                        workingDays: normalizedRecord.workingDays || normalizedRecord['Working Days'] || '',
+                        preferredTimeSlot: normalizedRecord.preferredTimeSlot ||
+                            normalizedRecord['Preferred Time Slot'] ||
+                            normalizedRecord['Preferred TimeSlot'] ||
+                            '',
+                        source: (normalizedRecord.source ||
+                            normalizedRecord['Source'] ||
+                            'referral').toLowerCase(),
+                        sourceDetails: normalizedRecord.sourceDetails ||
+                            normalizedRecord['Source Details'] ||
+                            '',
+                    };
+                    parsedRows.push(parsedRow);
+                    processedRowCount++;
+                    // Report progress every 100 rows
+                    if (progressCallback && processedRowCount % 100 === 0) {
+                        const progressPercent = Math.min(95, Math.floor((processedRowCount / Math.max(totalRowCount, 1)) * 100));
+                        progressCallback(progressPercent, `Parsed ${processedRowCount} rows...`);
+                    }
+                }
+            });
+            parser.on('error', (error) => {
+                logger_1.default.error('CSV streaming parser error', { error: error.message });
+                reject(new Error(`Failed to parse CSV: ${error.message}`));
+            });
+            parser.on('end', () => {
+                logger_1.default.info('CSV parsing completed', {
+                    totalRows: totalRowCount,
+                    processedRows: processedRowCount,
                 });
-                return normalized;
+                resolve(parsedRows);
             });
-            // Filter out header rows that were accidentally treated as data rows
-            const cleanedRecords = records.filter((record) => {
-                if (!record)
-                    return false;
-                const values = Object.values(record).map((v) => v === undefined || v === null ? "" : String(v).trim());
-                // Skip if all values are empty
-                if (values.every((v) => v === ""))
-                    return false;
-                // Skip if the first cell is a comment (starts with '#')
-                if (values[0]?.startsWith("#"))
-                    return false;
-                // Skip header rows (column name indicators)
-                const headerIndicators = new Set([
-                    "full name",
-                    "phone number",
-                    "mobile number",
-                    "email",
-                    "city / area",
-                    "city",
-                    "state",
-                    "address",
-                    "pincode",
-                    "primary category",
-                    "secondary category",
-                    "experience level",
-                    "years of experience",
-                    "working days",
-                    "preferred time slot",
-                    "source",
-                ].map((s) => s.toLowerCase()));
-                const looksLikeHeaderRow = values.some((v) => headerIndicators.has(v.toLowerCase()));
-                if (looksLikeHeaderRow)
-                    return false;
-                return true;
-            });
-            return cleanedRecords.map((record) => {
-                // Get primary category/skill from CSV or use default provided
-                const rawPrimaryCategory = record.primaryCategory
-                    || record['Primary Category']
-                    || record.primarySkill
-                    || record['Primary Skill']
-                    || record['Primary Skill (Service Category)']
-                    || record['Service Category']
-                    || record['Skill']
-                    || defaultPrimaryCategory
-                    || '';
-                // Map human-readable skill to enum value
-                const mappedPrimaryCategory = rawPrimaryCategory ? BulkLeadImportService.mapSkillToEnum(rawPrimaryCategory) : '';
-                // Get secondary category from CSV or use default provided
-                const rawSecondaryCategory = record.secondaryCategory
-                    || record['Secondary Category']
-                    || record.secondarySkill
-                    || record['Secondary Skill']
-                    || defaultSecondaryCategory
-                    || '';
-                // Parse experience level
-                const experienceLevel = (record.experienceLevel || record['Experience Level'] || record['Experience Level (beginner/intermediate/experienced)'] || '').toLowerCase();
-                const validExperienceLevels = ['beginner', 'intermediate', 'experienced'];
-                const mappedExperienceLevel = validExperienceLevels.includes(experienceLevel)
-                    ? experienceLevel
-                    : undefined;
-                // Parse years of experience (optional)
-                const yearsOfExperience = record.yearsOfExperience
-                    || record['Years of Experience']
-                    || record['Years Of Experience']
-                    ? parseInt(record.yearsOfExperience || record['Years of Experience'] || record['Years Of Experience'] || '0', 10)
-                    : undefined;
-                return {
-                    name: record.name || record['Full Name'] || '',
-                    phone: record.phone || record['Phone Number'] || record['Mobile Number'] || record['Phone'] || '',
-                    email: record.email || record['Email'] || '',
-                    city: record.city || record['City'] || record['City / Area'] || record['City (optional)'] || '',
-                    state: record.state || record['State'] || record['State (optional)'] || '',
-                    address: record.address || record['Address'] || '',
-                    pincode: record.pincode || record['Pincode'] || record['Pin Code'] || record['PIN'] || '',
-                    primaryCategory: mappedPrimaryCategory,
-                    primarySkill: mappedPrimaryCategory, // For backward compatibility
-                    secondaryCategory: rawSecondaryCategory,
-                    experienceLevel: mappedExperienceLevel,
-                    yearsOfExperience: isNaN(yearsOfExperience) ? undefined : yearsOfExperience,
-                    workingDays: record.workingDays || record['Working Days'] || '',
-                    preferredTimeSlot: record.preferredTimeSlot || record['Preferred Time Slot'] || record['Preferred TimeSlot'] || '',
-                    source: (record.source || record['Source'] || 'referral').toLowerCase(),
-                    sourceDetails: record.sourceDetails || record['Source Details'] || '',
-                };
-            });
-        }
-        catch (error) {
-            logger_1.default.error('CSV parsing error', { error: error.message });
-            throw new Error(`Failed to parse CSV: ${error.message}`);
-        }
+            // Pipe CSV stream to parser
+            csvStream.pipe(parser);
+        });
     }
     /**
      * Validate import row
@@ -269,7 +329,7 @@ class BulkLeadImportService {
      */
     static async previewBulkImport(fileBuffer, fileName, defaultPrimaryCategory, defaultSecondaryCategory) {
         // 1. Parse CSV
-        const rows = this.parseCSV(fileBuffer, defaultPrimaryCategory, defaultSecondaryCategory);
+        const rows = await this.parseCSV(fileBuffer, defaultPrimaryCategory, defaultSecondaryCategory);
         // 2. Bulk duplicate check against database
         const allPhones = rows.map((r) => r.phone).filter(Boolean);
         logger_1.default.info(`[Preview] Performing bulk duplicate check for ${allPhones.length} phone numbers`);
@@ -348,7 +408,7 @@ class BulkLeadImportService {
      * ✅ Efficient: Uses bulk operations for better performance
      */
     static async bulkImportLeads(fileBuffer, fileName, userId, // Changed from adminUid to userId (works for any role)
-    adminName, adminEmail, adminRole, source, defaultPrimaryCategory, defaultSecondaryCategory) {
+    adminName, adminEmail, adminRole, source, defaultPrimaryCategory, defaultSecondaryCategory, progressCallback) {
         const session = await mongoose_1.default.startSession();
         session.startTransaction();
         let importRecord = null;
@@ -415,8 +475,20 @@ class BulkLeadImportService {
                     };
                 }
             }
-            // STEP 3: Parse CSV
-            const rows = this.parseCSV(fileBuffer, defaultPrimaryCategory, defaultSecondaryCategory);
+            // STEP 3: Parse CSV with streaming (memory efficient)
+            if (progressCallback) {
+                progressCallback(10, 'Reading and parsing CSV file...');
+            }
+            const rows = await this.parseCSV(fileBuffer, defaultPrimaryCategory, defaultSecondaryCategory, (progress, message) => {
+                // Map parsing progress (10-30% of total)
+                const mappedProgress = 10 + Math.floor((progress / 100) * 20);
+                if (progressCallback) {
+                    progressCallback(mappedProgress, message);
+                }
+            });
+            if (progressCallback) {
+                progressCallback(30, `Parsed ${rows.length} rows. Validating data...`);
+            }
             // STEP 4: Create or get import record atomically (prevent duplicate processing)
             const importId = `IMPORT-${Date.now()}-${(0, uuid_1.v4)().substring(0, 8).toUpperCase()}`;
             // ✅ If previous import exists and all leads are inactive, delete it first to allow re-import
@@ -483,6 +555,9 @@ class BulkLeadImportService {
             }
             const errors = [];
             // STEP 5: Bulk duplicate check - Check ALL phones at once (single MongoDB query)
+            if (progressCallback) {
+                progressCallback(40, 'Checking for duplicate leads in database...');
+            }
             const allPhones = rows.map((r) => r.phone).filter(Boolean);
             const existingLeadsByPhoneMap = await DuplicateCheckService_1.DuplicateCheckService.checkPhonesBulk(allPhones);
             logger_1.default.info('Performing bulk duplicate check', {
@@ -490,11 +565,20 @@ class BulkLeadImportService {
                 phoneCount: allPhones.length,
                 userId
             });
+            if (progressCallback) {
+                progressCallback(50, 'Processing and validating rows...');
+            }
             // STEP 6: Track in-file duplicates and prepare bulk insert documents
             const seenPhonesInFile = new Set();
             const leadsToInsert = [];
             const normalizedPhones = [];
+            const totalRowsToProcess = rows.length;
             for (let i = 0; i < rows.length; i++) {
+                // Update progress during row processing (50-70% of total)
+                if (progressCallback && i > 0 && i % 50 === 0) {
+                    const rowProgress = 50 + Math.floor((i / totalRowsToProcess) * 20);
+                    progressCallback(rowProgress, `Processing row ${i + 1} of ${totalRowsToProcess}...`);
+                }
                 const row = rows[i];
                 const rowNumber = i + 2; // +2 because CSV has header and 0-indexed
                 // Validate row
@@ -600,6 +684,9 @@ class BulkLeadImportService {
                 });
             }
             // STEP 7: Bulk insert leads (atomic, efficient)
+            if (progressCallback) {
+                progressCallback(70, `Preparing to insert ${leadsToInsert.length} leads into database...`);
+            }
             let importedLeadIds = [];
             if (leadsToInsert.length > 0) {
                 // Log before insertion for debugging
@@ -647,6 +734,9 @@ class BulkLeadImportService {
                             leadsToInsertLength: leadsToInsert.length
                         });
                         importedLeadIds = leadsToInsert.map(lead => lead.leadId).filter(Boolean);
+                    }
+                    if (progressCallback) {
+                        progressCallback(90, `Successfully inserted ${importedLeadIds.length} leads. Finalizing...`);
                     }
                     logger_1.default.info('Bulk insert completed', {
                         importId,
@@ -699,6 +789,9 @@ class BulkLeadImportService {
                 }
             }
             // STEP 8: Update import record atomically
+            if (progressCallback) {
+                progressCallback(95, 'Saving import results...');
+            }
             const finalStatus = errors.length === rows.length ? 'failed' : 'completed';
             await BulkImport_1.default.findOneAndUpdate({ importId }, {
                 $set: {
@@ -716,6 +809,9 @@ class BulkLeadImportService {
                 importedLeadIdsCount: importedLeadIds.length,
                 importedLeadIds: importedLeadIds.slice(0, 3)
             });
+            if (progressCallback) {
+                progressCallback(100, `Import completed! ${importedLeadIds.length} leads imported successfully.`);
+            }
             // End session after commit
             await session.endSession();
             // Verify leads were actually saved (for debugging)

@@ -8,16 +8,24 @@ const router = express.Router();
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 10 * 1024 * 1024 // 10MB
+    fileSize: 50 * 1024 * 1024, // 50MB - increased for larger CSV files
   },
   fileFilter: (_req, file, cb) => {
-    const allowedTypes = ['text/csv', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'];
-    if (allowedTypes.includes(file.mimetype) || file.originalname.match(/\.(csv|xlsx|xls)$/)) {
+    // Validate file type
+    const allowedTypes = [
+      'text/csv',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/csv',
+    ];
+    const allowedExtensions = /\.(csv|xlsx|xls)$/i;
+    
+    if (allowedTypes.includes(file.mimetype) || allowedExtensions.test(file.originalname)) {
       cb(null, true);
     } else {
       cb(new Error('Invalid file type. Only CSV and Excel files are allowed.'));
     }
-  }
+  },
 });
 
 // All routes require admin authentication
@@ -31,12 +39,19 @@ router.post(
   BulkLeadImportController.previewBulkImport
 );
 
-// Bulk import leads
+// Bulk import leads (queued for background processing)
 router.post(
   '/',
   requirePermission('canBulkImport'),
   upload.single('file'),
   BulkLeadImportController.bulkImport
+);
+
+// Get job status
+router.get(
+  '/job/:jobId',
+  requirePermission('canBulkImport'),
+  BulkLeadImportController.getJobStatus
 );
 
 // Download template

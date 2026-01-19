@@ -64,6 +64,11 @@ const envSchema = zod_1.z.object({
     AWS_SECRET_ACCESS_KEY: zod_1.z.string().optional(),
     AWS_S3_BUCKET_NAME: zod_1.z.string().default('extrahand-onboarding-documents'),
     AWS_CLOUDFRONT_DOMAIN: zod_1.z.string().optional(),
+    // Redis Configuration (for BullMQ job queue)
+    REDIS_HOST: zod_1.z.string().optional(),
+    REDIS_PORT: zod_1.z.string().optional(),
+    REDIS_PASSWORD: zod_1.z.string().optional(),
+    REDIS_URL: zod_1.z.string().url().optional(),
 });
 exports.env = envSchema.parse(process.env);
 //# sourceMappingURL=env.js.map

@@ -41,6 +41,9 @@ const BulkLeadImportService_1 = require("../services/BulkLeadImportService");
 const logger_1 = __importDefault(require("../config/logger"));
 const BulkImport_1 = __importDefault(require("../models/BulkImport"));
 const Lead_1 = __importDefault(require("../models/Lead"));
+const csvQueue_1 = require("../queues/csvQueue");
+const promises_1 = __importDefault(require("fs/promises"));
+const path_1 = __importDefault(require("path"));
 class BulkLeadImportController {
     /**
      * Preview bulk import (validation + duplicate check, no records created)
@@ -83,7 +86,7 @@ class BulkLeadImportController {
         }
     }
     /**
-     * Bulk import leads from CSV
+     * Bulk import leads from CSV (queued for background processing)
      * POST /api/v1/admin/caos/leads/bulk-import
      */
     static async bulkImport(req, res) {
@@ -103,6 +106,24 @@ class BulkLeadImportController {
                 });
                 return;
             }
+            // Validate file size (50MB max)
+            const maxFileSize = 50 * 1024 * 1024; // 50MB
+            if (file.size > maxFileSize) {
+                res.status(400).json({
+                    success: false,
+                    error: 'File too large',
+                    message: `File size (${(file.size / 1024 / 1024).toFixed(2)}MB) exceeds maximum allowed size of 50MB`,
+                });
+                return;
+            }
+            // Validate file is not empty
+            if (file.size === 0) {
+                res.status(400).json({
+                    success: false,
+                    error: 'File is empty',
+                });
+                return;
+            }
             const { source, primaryCategory, secondaryCategory } = req.body; // Optional: override for all leads
             // Get userId (support both Firebase uid and JWT userId)
             const userId = req.admin?.uid || req.admin?.userId;
@@ -115,12 +136,81 @@ class BulkLeadImportController {
             }
             // Get user role for tracking
             const adminRole = req.admin?.role;
-            const result = await BulkLeadImportService_1.BulkLeadImportService.bulkImportLeads(file.buffer, file.originalname, userId, req.admin?.name, req.admin?.email, adminRole, source, primaryCategory, secondaryCategory);
-            res.json({
-                success: true,
-                data: result,
-                message: `Imported ${result.successCount} leads successfully`,
-            });
+            // Store file temporarily
+            const tempDir = path_1.default.join(process.cwd(), 'temp');
+            await promises_1.default.mkdir(tempDir, { recursive: true });
+            const tempFilePath = path_1.default.join(tempDir, `csv-${Date.now()}-${userId}-${file.originalname}`);
+            await promises_1.default.writeFile(tempFilePath, file.buffer);
+            // Try to use queue if available, otherwise process synchronously
+            try {
+                const queue = csvQueue_1.csvQueue.get();
+                logger_1.default.info('CSV file stored temporarily, queuing job', {
+                    tempFilePath,
+                    fileName: file.originalname,
+                    fileSize: file.buffer.length,
+                    userId,
+                });
+                // Queue job for background processing
+                const job = await queue.add('process-csv', {
+                    filePath: tempFilePath,
+                    fileName: file.originalname,
+                    userId,
+                    adminName: req.admin?.name,
+                    adminEmail: req.admin?.email,
+                    adminRole,
+                    source,
+                    primaryCategory,
+                    secondaryCategory,
+                }, {
+                    jobId: `csv-${Date.now()}-${userId}`, // Unique job ID
+                });
+                logger_1.default.info('CSV job queued successfully', {
+                    jobId: job.id,
+                    userId,
+                    fileName: file.originalname,
+                });
+                // Return immediately with job ID
+                res.json({
+                    success: true,
+                    jobId: job.id,
+                    status: 'queued',
+                    message: 'CSV processing started. Use jobId to check progress.',
+                });
+                return;
+            }
+            catch (queueError) {
+                // Queue not available - fall back to synchronous processing
+                logger_1.default.warn('CSV queue not available, processing synchronously', {
+                    error: queueError.message,
+                    fileName: file.originalname,
+                    userId,
+                });
+                // Process synchronously (original behavior)
+                const result = await BulkLeadImportService_1.BulkLeadImportService.bulkImportLeads(file.buffer, file.originalname, userId, req.admin?.name, req.admin?.email, adminRole, source, primaryCategory, secondaryCategory);
+                // Clean up temp file
+                try {
+                    await promises_1.default.unlink(tempFilePath);
+                }
+                catch (cleanupError) {
+                    logger_1.default.warn('Failed to cleanup temp file:', {
+                        filePath: tempFilePath,
+                        error: cleanupError.message,
+                    });
+                }
+                // Return result immediately
+                res.json({
+                    success: true,
+                    importId: result.importId,
+                    totalRows: result.totalRows,
+                    successCount: result.successCount,
+                    failedCount: result.failedCount,
+                    errors: result.errors.slice(0, 10), // Limit errors in response
+                    importedLeadIds: result.importedLeadIds.slice(0, 10), // Limit IDs in response
+                    message: `Imported ${result.successCount} leads successfully${result.failedCount > 0 ? `, ${result.failedCount} failed` : ''}`,
+                    note: 'Processed synchronously (Redis queue not available)',
+                });
+                return;
+            }
         }
         catch (error) {
             logger_1.default.error('Error in bulkImport controller', {
@@ -129,7 +219,70 @@ class BulkLeadImportController {
             });
             res.status(500).json({
                 success: false,
-                error: 'Failed to import leads',
+                error: 'Failed to queue CSV import',
+                message: error.message,
+            });
+        }
+    }
+    /**
+     * Get job status
+     * GET /api/v1/admin/caos/leads/bulk-import/job/:jobId
+     */
+    static async getJobStatus(req, res) {
+        try {
+            if (!req.admin) {
+                res.status(401).json({
+                    success: false,
+                    error: 'Authentication required',
+                });
+                return;
+            }
+            const { jobId } = req.params;
+            if (!jobId) {
+                res.status(400).json({
+                    success: false,
+                    error: 'Job ID is required',
+                });
+                return;
+            }
+            const job = await csvQueue_1.csvQueue.getJob(jobId);
+            if (!job) {
+                res.status(404).json({
+                    success: false,
+                    error: 'Job not found',
+                });
+                return;
+            }
+            const state = await job.getState();
+            const progress = typeof job.progress === 'number' ? job.progress : 0;
+            const result = job.returnvalue;
+            const failedReason = job.failedReason;
+            // Get job data for context
+            const jobData = job.data;
+            res.json({
+                success: true,
+                data: {
+                    jobId: job.id,
+                    status: state,
+                    progress,
+                    result,
+                    failedReason,
+                    fileName: jobData.fileName,
+                    createdAt: new Date(job.timestamp).toISOString(),
+                    processedAt: job.processedOn ? new Date(job.processedOn).toISOString() : null,
+                    finishedAt: job.finishedOn ? new Date(job.finishedOn).toISOString() : null,
+                },
+            });
+        }
+        catch (error) {
+            logger_1.default.error('Error getting job status', {
+                error: error.message,
+                stack: error.stack,
+                jobId: req.params.jobId,
+            });
+            res.status(500).json({
+                success: false,
+                error: 'Failed to get job status',
                 message: error.message,
             });
         }

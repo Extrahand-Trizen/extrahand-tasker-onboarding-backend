@@ -67,6 +67,12 @@ const envSchema = z.object({
   AWS_SECRET_ACCESS_KEY: z.string().optional(),
   AWS_S3_BUCKET_NAME: z.string().default('extrahand-onboarding-documents'),
   AWS_CLOUDFRONT_DOMAIN: z.string().optional(),
+  
+  // Redis Configuration (for BullMQ job queue)
+  REDIS_HOST: z.string().optional(),
+  REDIS_PORT: z.string().optional(),
+  REDIS_PASSWORD: z.string().optional(),
+  REDIS_URL: z.string().url().optional(),
 });
 
 export const env = envSchema.parse(process.env);

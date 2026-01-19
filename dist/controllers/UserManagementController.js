@@ -12,16 +12,17 @@ const env_1 = require("../config/env");
 const EmailServiceClient_1 = require("../services/EmailServiceClient");
 class UserManagementController {
     /**
-     * List all admin users
+     * List all admin users with pagination, sorting, and stats
      * GET /api/v1/admin/users
      */
     static async list(req, res) {
         try {
-            const { status, role, search } = req.query;
+            const { status, role, search, page, limit, sort, dir } = req.query;
+            // Build query
             const query = {};
-            if (status)
+            if (status && status !== 'all')
                 query.status = status;
-            if (role)
+            if (role && role !== 'all')
                 query.role = role;
             if (search) {
                 query.$or = [
@@ -29,13 +30,46 @@ class UserManagementController {
                     { name: { $regex: search, $options: 'i' } },
                 ];
             }
+            // Pagination
+            const pageNum = parseInt(page) || 1;
+            const limitNum = parseInt(limit) || 25;
+            const skip = (pageNum - 1) * limitNum;
+            // Sorting
+            const sortField = sort || 'createdAt';
+            const sortDir = dir === 'asc' ? 1 : -1;
+            const sortObj = { [sortField]: sortDir };
+            // Get total count for stats
+            const total = await AdminUser_1.default.countDocuments(query);
+            // Get users with pagination
             const users = await AdminUser_1.default.find(query)
                 .select('-passwordHash -refreshTokens')
-                .sort({ createdAt: -1 })
+                .sort(sortObj)
+                .skip(skip)
+                .limit(limitNum)
                 .lean();
+            // Calculate stats
+            const stats = {
+                total,
+                active: await AdminUser_1.default.countDocuments({ ...query, status: 'active' }),
+                suspended: await AdminUser_1.default.countDocuments({ ...query, status: 'suspended' }),
+                inactive: await AdminUser_1.default.countDocuments({ ...query, status: 'inactive' }),
+                newThisMonth: await AdminUser_1.default.countDocuments({
+                    ...query,
+                    createdAt: { $gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1) },
+                }),
+            };
             return res.json({
                 success: true,
                 data: users,
+                pagination: {
+                    page: pageNum,
+                    limit: limitNum,
+                    total,
+                    pages: Math.ceil(total / limitNum),
+                    hasNext: pageNum * limitNum < total,
+                    hasPrev: pageNum > 1,
+                },
+                stats,
             });
         }
         catch (error) {
