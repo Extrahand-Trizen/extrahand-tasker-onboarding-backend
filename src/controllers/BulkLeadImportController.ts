@@ -7,6 +7,7 @@ import Lead from "../models/Lead";
 import { csvQueue } from "../queues/csvQueue";
 import fs from "fs/promises";
 import path from "path";
+import os from "os";
 
 export class BulkLeadImportController {
   /**
@@ -123,8 +124,9 @@ export class BulkLeadImportController {
         | "lead_access_manager"
         | undefined;
 
-      // Store file temporarily
-      const tempDir = path.join(process.cwd(), "temp");
+      // Store file temporarily - use system temp directory for better permissions
+      // In production (Docker), process.cwd() might be /app which isn't writable
+      const tempDir = process.env.TEMP_DIR || path.join(os.tmpdir(), 'extrahand-csv-imports');
       await fs.mkdir(tempDir, { recursive: true });
 
       const tempFilePath = path.join(
