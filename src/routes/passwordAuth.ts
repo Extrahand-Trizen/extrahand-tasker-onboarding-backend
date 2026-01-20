@@ -8,6 +8,8 @@ const router = Router();
 router.post('/login', PasswordAuthController.login);
 router.post('/set-password', PasswordAuthController.setPassword);
 router.post('/refresh', PasswordAuthController.refreshToken);
+router.get('/verify-reset-token', PasswordAuthController.verifyResetToken);
+router.post('/reset-password', PasswordAuthController.resetPassword);
 
 // Protected routes (require JWT authentication)
 router.get('/me', adminAuthJWT as any, PasswordAuthController.getCurrentUser as any);

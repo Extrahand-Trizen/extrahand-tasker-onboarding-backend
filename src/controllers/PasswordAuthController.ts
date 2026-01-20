@@ -387,4 +387,156 @@ export class PasswordAuthController {
       });
     }
   }
+
+  /**
+   * Verify password reset token
+   * GET /api/v1/auth/verify-reset-token?token=XXX
+   */
+  static async verifyResetToken(req: Request, res: Response) {
+    try {
+      const { token } = req.query;
+
+      if (!token || typeof token !== 'string') {
+        return res.status(400).json({
+          success: false,
+          error: 'Reset token is required'
+        });
+      }
+
+      // Import PasswordResetToken model
+      const PasswordResetToken = (await import('../models/PasswordResetToken')).default;
+
+      // Find token
+      const resetToken = await PasswordResetToken.findOne({
+        token,
+        used: false
+      });
+
+      if (!resetToken) {
+        return res.status(404).json({
+          success: false,
+          error: 'Invalid or expired reset token'
+        });
+      }
+
+      // Check if expired
+      if (resetToken.expiresAt < new Date()) {
+        return res.status(400).json({
+          success: false,
+          error: 'Reset token has expired. Please request a new password reset.'
+        });
+      }
+
+      // Return masked email for display
+      const maskedEmail = resetToken.email.replace(
+        /^(.{2})(.*)(@.*)$/,
+        (_, start, middle, end) => start + '*'.repeat(Math.min(middle.length, 5)) + end
+      );
+
+      logger.info('Reset token verified', {
+        tokenId: resetToken._id,
+        email: maskedEmail
+      });
+
+      return res.json({
+        success: true,
+        data: {
+          email: maskedEmail,
+          expiresAt: resetToken.expiresAt
+        }
+      });
+    } catch (error: any) {
+      logger.error('Verify reset token error', { error: error.message });
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to verify reset token'
+      });
+    }
+  }
+
+  /**
+   * Reset password using token
+   * POST /api/v1/auth/reset-password
+   */
+  static async resetPassword(req: Request, res: Response) {
+    try {
+      const { token, password } = req.body;
+
+      if (!token || !password) {
+        return res.status(400).json({
+          success: false,
+          error: 'Token and password are required'
+        });
+      }
+
+      // Validate password strength
+      if (password.length < 8) {
+        return res.status(400).json({
+          success: false,
+          error: 'Password must be at least 8 characters'
+        });
+      }
+
+      // Import PasswordResetToken model
+      const PasswordResetToken = (await import('../models/PasswordResetToken')).default;
+
+      // Find and validate token
+      const resetToken = await PasswordResetToken.findOne({
+        token,
+        used: false
+      });
+
+      if (!resetToken) {
+        return res.status(404).json({
+          success: false,
+          error: 'Invalid or expired reset token'
+        });
+      }
+
+      // Check if expired
+      if (resetToken.expiresAt < new Date()) {
+        return res.status(400).json({
+          success: false,
+          error: 'Reset token has expired. Please request a new password reset.'
+        });
+      }
+
+      // Find user
+      const user = await AdminUser.findOne({ userId: resetToken.userId });
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          error: 'User not found'
+        });
+      }
+
+      // Hash new password
+      const passwordHash = await bcrypt.hash(password, 10);
+
+      // Update user's password
+      user.passwordHash = passwordHash;
+      await user.save();
+
+      // Mark token as used
+      resetToken.used = true;
+      resetToken.usedAt = new Date();
+      await resetToken.save();
+
+      logger.info('Password reset successful', {
+        userId: user.userId,
+        email: user.email
+      });
+
+      return res.json({
+        success: true,
+        message: 'Password reset successful. You can now login with your new password.'
+      });
+    } catch (error: any) {
+      logger.error('Reset password error', { error: error.message });
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to reset password'
+      });
+    }
+  }
 }
