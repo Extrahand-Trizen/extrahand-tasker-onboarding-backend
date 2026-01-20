@@ -187,5 +187,107 @@ export class BulkOperationsController {
       });
     }
   }
+
+  /**
+   * Bulk delete leads
+   * POST /api/v1/onboarding/leads/bulk-delete
+   */
+  static async bulkDeleteLeads(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      if (!req.admin) {
+        res.status(401).json({
+          success: false,
+          error: 'Authentication required',
+        });
+        return;
+      }
+
+      const { leadIds } = req.body;
+
+      if (!Array.isArray(leadIds) || leadIds.length === 0) {
+        res.status(400).json({
+          success: false,
+          error: 'leadIds array is required and must not be empty',
+        });
+        return;
+      }
+
+      // Limit bulk delete to prevent abuse
+      if (leadIds.length > 100) {
+        res.status(400).json({
+          success: false,
+          error: 'Cannot delete more than 100 leads at once',
+        });
+        return;
+      }
+
+      const adminUid = req.admin?.uid || req.admin?.userId;
+      const adminName = req.admin?.name || req.admin?.email || adminUid || 'Unknown Admin';
+
+      if (!adminUid) {
+        res.status(401).json({
+          success: false,
+          error: 'Admin UID not found',
+        });
+        return;
+      }
+
+      logger.info('Bulk delete leads initiated', {
+        leadIds,
+        count: leadIds.length,
+        deletedBy: adminUid,
+        deletedByName: adminName,
+      });
+
+      const results = {
+        success: [] as string[],
+        failed: [] as Array<{ leadId: string; error: string }>,
+      };
+
+      // Delete leads one by one (to log each deletion)
+      for (const leadId of leadIds) {
+        try {
+          await LeadService.deleteLead(leadId, adminUid, adminName);
+          results.success.push(leadId);
+        } catch (error: any) {
+          logger.error('Failed to delete lead in bulk operation', {
+            leadId,
+            error: error.message,
+          });
+          results.failed.push({
+            leadId,
+            error: error.message || 'Failed to delete lead',
+          });
+        }
+      }
+
+      logger.info('Bulk delete leads completed', {
+        successCount: results.success.length,
+        failedCount: results.failed.length,
+        deletedBy: adminUid,
+      });
+
+      res.json({
+        success: true,
+        message: `Successfully deleted ${results.success.length} lead(s)`,
+        data: {
+          deletedCount: results.success.length,
+          failedCount: results.failed.length,
+          deletedLeadIds: results.success,
+          failedLeads: results.failed,
+        },
+      });
+    } catch (error: any) {
+      logger.error('Error in bulkDeleteLeads controller', {
+        error: error.message,
+        stack: error.stack,
+      });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to bulk delete leads',
+        message: error.message,
+      });
+    }
+  }
 }
 

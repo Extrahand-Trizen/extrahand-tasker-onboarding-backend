@@ -62,6 +62,13 @@ router.put(
   LeadController.updateLead
 );
 
+// Delete lead
+router.delete(
+  '/:leadId',
+  requirePermission('canDeleteLead'),
+  LeadController.deleteLead
+);
+
 // Update lead status
 router.put(
   '/:leadId/status',
@@ -94,6 +101,12 @@ router.post(
   '/bulk-assign-skills',
   requirePermission('canAssignSkills'),
   BulkOperationsController.bulkAssignSkills
+);
+
+router.post(
+  '/bulk-delete',
+  requirePermission('canDeleteLead'),
+  BulkOperationsController.bulkDeleteLeads
 );
 
 // Document management

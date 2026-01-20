@@ -27,9 +27,12 @@ router.put('/:userId/status', UserManagementController.updateStatus as any);
 // Password reset
 router.post('/:userId/reset-password', UserManagementController.resetPassword as any);
 
-// Session management
+// Session management (more specific routes first)
 router.get('/:userId/sessions', UserManagementController.getSessions as any);
 router.delete('/:userId/sessions', UserManagementController.revokeAllSessions as any);
 router.delete('/:userId/sessions/:sessionIndex', UserManagementController.revokeSession as any);
+
+// Delete user (less specific route - must come after more specific routes)
+router.delete('/:userId', UserManagementController.deleteUser as any);
 
 export default router;

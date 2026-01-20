@@ -548,6 +548,54 @@ export class LeadController {
       });
     }
   }
+
+  /**
+   * Delete a lead
+   * DELETE /api/v1/admin/caos/leads/:leadId
+   */
+  static async deleteLead(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      if (!req.admin) {
+        res.status(401).json({
+          success: false,
+          error: 'Authentication required'
+        });
+        return;
+      }
+
+      const { leadId } = req.params;
+      const userId = getUserId(req);
+      const userName = req.admin.name || req.admin.email || userId;
+
+      // Check if lead exists
+      const lead = await LeadService.getLeadById(leadId);
+      if (!lead) {
+        res.status(404).json({
+          success: false,
+          error: 'Lead not found'
+        });
+        return;
+      }
+
+      // Delete the lead
+      await LeadService.deleteLead(leadId, userId || 'system', userName);
+
+      res.json({
+        success: true,
+        message: 'Lead deleted successfully'
+      });
+    } catch (error: any) {
+      logger.error('Error in deleteLead controller', {
+        error: error.message,
+        leadId: req.params.leadId
+      });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to delete lead',
+        message: error.message
+      });
+    }
+  }
 }
 
 

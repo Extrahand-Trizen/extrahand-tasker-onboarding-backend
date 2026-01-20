@@ -1000,6 +1000,52 @@ export class LeadService {
   }
 
   /**
+   * Delete a lead
+   */
+  static async deleteLead(leadId: string, deletedBy: string, deletedByName?: string): Promise<void> {
+    try {
+      const lead = await Lead.findOne({ leadId });
+      
+      if (!lead) {
+        throw new Error('Lead not found');
+      }
+
+      // Log deletion activity before deleting
+      await this.logActivity(
+        leadId,
+        'deletion',
+        'Lead deleted',
+        deletedBy,
+        deletedByName,
+        {
+          leadName: lead.name,
+          leadPhone: lead.phone,
+          leadCity: lead.city,
+          status: lead.status,
+          accountStatus: lead.accountStatus
+        }
+      );
+
+      // Delete the lead
+      await Lead.deleteOne({ leadId });
+
+      logger.info('Lead deleted successfully', {
+        leadId,
+        deletedBy,
+        deletedByName,
+        leadName: lead.name
+      });
+    } catch (error: any) {
+      logger.error('Error deleting lead', {
+        error: error.message,
+        leadId,
+        deletedBy
+      });
+      throw error;
+    }
+  }
+
+  /**
    * Log activity
    */
   static async logActivity(

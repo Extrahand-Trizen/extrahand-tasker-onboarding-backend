@@ -577,4 +577,64 @@ export class UserManagementController {
       });
     }
   }
+
+  /**
+   * Delete admin user
+   * DELETE /api/v1/admin/users/:userId
+   */
+  static async deleteUser(req: AdminRequest, res: Response) {
+    try {
+      const { userId } = req.params;
+      const actorId = req.admin?.userId || 'system';
+      const actorName = req.admin?.name || req.admin?.email || actorId;
+
+      const user = await AdminUser.findOne({ userId });
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          error: 'User not found',
+        });
+      }
+
+      // Prevent self-deletion
+      if (user.userId === actorId) {
+        return res.status(400).json({
+          success: false,
+          error: 'You cannot delete your own account',
+        });
+      }
+
+      // Log deletion before deleting
+      logger.info('Admin user deletion initiated', {
+        deletedUserId: user.userId,
+        deletedUserEmail: user.email,
+        deletedUserName: user.name,
+        deletedBy: actorId,
+        deletedByName: actorName,
+      });
+
+      // Delete the user
+      await AdminUser.deleteOne({ userId });
+
+      logger.info('Admin user deleted successfully', {
+        deletedUserId: user.userId,
+        deletedUserEmail: user.email,
+        deletedBy: actorId,
+      });
+
+      return res.json({
+        success: true,
+        message: 'User deleted successfully',
+      });
+    } catch (error: any) {
+      logger.error('Delete user error', {
+        error: error.message,
+        userId: req.params.userId,
+      });
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to delete user',
+      });
+    }
+  }
 }
