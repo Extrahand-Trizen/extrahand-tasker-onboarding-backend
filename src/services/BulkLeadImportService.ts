@@ -42,6 +42,7 @@ export interface BulkLeadImportResult {
     error: string;
   }>;
   importedLeadIds: string[];
+  updatedLeadIds?: string[]; // Leads that had skills added (different category)
 }
 
 export interface ProgressCallback {
@@ -734,11 +735,14 @@ export class BulkLeadImportService {
       primaryCategory: string;
       secondaryCategory: string;
       experienceLevel?: string;
-      status: "valid" | "invalid";
+      status: "valid" | "invalid" | "warning";
       errors: string[];
       isDuplicateInFile: boolean;
       isDuplicateInDb: boolean;
+      isDifferentCategory?: boolean;
       duplicateLeadId?: string;
+      existingPrimaryCategory?: string;
+      existingSecondaryCategory?: string;
     }>;
     summary: {
       total: number;
@@ -746,6 +750,7 @@ export class BulkLeadImportService {
       invalid: number;
       duplicatesInFile: number;
       duplicatesInDb: number;
+      differentCategory: number;
     };
   }> {
     // 1. Parse File (CSV or Excel)
@@ -756,15 +761,15 @@ export class BulkLeadImportService {
       defaultSecondaryCategory,
     );
 
-    // 2. Bulk duplicate check against database
+    // 2. Bulk duplicate check against database (with categories)
     const allPhones = rows.map((r) => r.phone).filter(Boolean);
     logger.info(
       `[Preview] Performing bulk duplicate check for ${allPhones.length} phone numbers`,
     );
     const existingLeadsByPhoneMap =
-      await DuplicateCheckService.checkPhonesBulk(allPhones);
+      await DuplicateCheckService.checkPhonesBulkWithCategories(allPhones);
     logger.info(
-      `[Preview] Duplicate check completed. Found ${existingLeadsByPhoneMap.size} existing leads`,
+      `[Preview] Duplicate check completed. Found ${existingLeadsByPhoneMap.size} phones with existing leads`,
     );
 
     // 3. Track in-file duplicates
@@ -784,11 +789,37 @@ export class BulkLeadImportService {
         seenPhonesInFile.add(normalizedPhone);
       }
 
-      // Check database duplicate
-      const existingLead = normalizedPhone
-        ? existingLeadsByPhoneMap.get(normalizedPhone)
-        : undefined;
-      const isDuplicateInDb = !!existingLead;
+      // Check database duplicate - consider categories
+      const primaryCategory = row.primaryCategory || row.primarySkill || defaultPrimaryCategory || '';
+      const secondaryCategory = row.secondaryCategory || defaultSecondaryCategory || '';
+      
+      let existingLead: any = undefined;
+      let isDuplicateInDb = false;
+      let isDifferentCategory = false;
+
+      if (normalizedPhone) {
+        const existingLeads = existingLeadsByPhoneMap.get(normalizedPhone) || [];
+        
+        // Check if any existing lead has the same category
+        const sameCategoryLead = existingLeads.find((lead: any) => {
+          const leadPrimary = lead.primaryCategory || lead.primarySkill || '';
+          const leadSecondary = lead.secondaryCategory || lead.secondarySkill || '';
+          return leadPrimary === primaryCategory && 
+                 (leadSecondary === secondaryCategory || (!leadSecondary && !secondaryCategory));
+        });
+
+        if (sameCategoryLead) {
+          // Exact duplicate - same phone and same category
+          existingLead = sameCategoryLead;
+          isDuplicateInDb = true;
+          isDifferentCategory = false;
+        } else if (existingLeads.length > 0) {
+          // Same phone but different category - this is allowed
+          existingLead = existingLeads[0]; // Use first one for reference
+          isDuplicateInDb = false;
+          isDifferentCategory = true;
+        }
+      }
 
       // Validate row (pass default categories for validation)
       const validation = this.validateRow(
@@ -803,13 +834,14 @@ export class BulkLeadImportService {
         rowErrors.push(validation.error);
       }
 
-      // Add duplicate errors
+      // Add duplicate errors (only for actual duplicates, not different categories)
       if (isDuplicateInFile) {
-        rowErrors.push("Duplicate phone number within uploaded file");
+        rowErrors.push("This phone number appears multiple times in your file");
       }
       if (isDuplicateInDb && existingLead) {
-        rowErrors.push(`Duplicate in system: ${existingLead.leadId}`);
+        rowErrors.push(`This person with this category already exists (Lead ID: ${existingLead.leadId})`);
       }
+      // Note: isDifferentCategory case doesn't add an error - it's allowed
 
       return {
         rowNumber,
@@ -818,16 +850,22 @@ export class BulkLeadImportService {
         email: row.email,
         city: row.city || "Unknown",
         state: row.state || "",
-        primaryCategory: row.primaryCategory || row.primarySkill || "other",
-        secondaryCategory: row.secondaryCategory || "",
+        primaryCategory: primaryCategory || '',
+        secondaryCategory: secondaryCategory || "",
         experienceLevel: row.experienceLevel,
-        status: (rowErrors.length === 0 ? "valid" : "invalid") as
+        status: (rowErrors.length === 0 
+          ? (isDifferentCategory ? "warning" : "valid")
+          : "invalid") as
           | "valid"
-          | "invalid",
+          | "invalid"
+          | "warning",
         errors: rowErrors,
         isDuplicateInFile,
         isDuplicateInDb,
+        isDifferentCategory, // New field
         duplicateLeadId: existingLead?.leadId,
+        existingPrimaryCategory: isDifferentCategory && existingLead ? (existingLead.primaryCategory || existingLead.primarySkill || '') : undefined,
+        existingSecondaryCategory: isDifferentCategory && existingLead ? (existingLead.secondaryCategory || existingLead.secondarySkill || '') : undefined,
       };
     });
 
@@ -838,6 +876,7 @@ export class BulkLeadImportService {
       invalid: previewRows.filter((r) => r.status === "invalid").length,
       duplicatesInFile: previewRows.filter((r) => r.isDuplicateInFile).length,
       duplicatesInDb: previewRows.filter((r) => r.isDuplicateInDb).length,
+      differentCategory: previewRows.filter((r) => r.isDifferentCategory).length,
     };
 
     logger.info("Bulk lead import preview completed", {
@@ -1075,9 +1114,9 @@ export class BulkLeadImportService {
 
       const allPhones = rows.map((r) => r.phone).filter(Boolean);
       const existingLeadsByPhoneMap =
-        await DuplicateCheckService.checkPhonesBulk(allPhones);
+        await DuplicateCheckService.checkPhonesBulkWithCategories(allPhones);
 
-      logger.info("Performing bulk duplicate check", {
+      logger.info("Performing bulk duplicate check with categories", {
         importId,
         phoneCount: allPhones.length,
         userId,
@@ -1090,6 +1129,18 @@ export class BulkLeadImportService {
       // STEP 6: Track in-file duplicates and prepare bulk insert documents
       const seenPhonesInFile = new Set<string>();
       const leadsToInsert: any[] = [];
+      const leadsToUpdate: Array<{
+        leadId: string;
+        existingLead: any;
+        newSkill: {
+          name: string;
+          category: string;
+          level: string;
+          toolsAvailable: boolean;
+          assignedBy: string;
+          assignedAt: Date;
+        };
+      }> = [];
       const normalizedPhones: string[] = [];
       const totalRowsToProcess = rows.length;
 
@@ -1129,34 +1180,43 @@ export class BulkLeadImportService {
           errors.push({
             row: rowNumber,
             phone: row.phone,
-            error: "Duplicate phone number within uploaded file",
+            error: "This phone number appears multiple times in your file",
           });
           continue;
         }
         seenPhonesInFile.add(normalizedPhone);
 
-        // Check for duplicate in database
-        const existingLead = existingLeadsByPhoneMap.get(normalizedPhone);
-        if (existingLead) {
+        // Check for duplicate in database - consider categories
+        const primaryCategory = row.primaryCategory || row.primarySkill || defaultPrimaryCategory || '';
+        const secondaryCategory = row.secondaryCategory || defaultSecondaryCategory || '';
+        
+        const existingLeads = normalizedPhone
+          ? existingLeadsByPhoneMap.get(normalizedPhone) || []
+          : [];
+
+        // Check if any existing lead has the same category
+        const sameCategoryLead = existingLeads.find((lead: any) => {
+          const leadPrimary = lead.primaryCategory || lead.primarySkill || '';
+          const leadSecondary = lead.secondaryCategory || lead.secondarySkill || '';
+          return leadPrimary === primaryCategory && 
+                 (leadSecondary === secondaryCategory || (!leadSecondary && !secondaryCategory));
+        });
+
+        if (sameCategoryLead) {
+          // Exact duplicate - same phone and same category
           errors.push({
             row: rowNumber,
             phone: normalizedPhone,
-            error: `Duplicate lead found: ${existingLead.leadId}`,
+            error: `This person with this category already exists (Lead ID: ${sameCategoryLead.leadId})`,
           });
           continue;
         }
-
-        // Use provided source or row source
-        const leadSource = source || row.source || "referral";
-
-        // Prepare lead document for bulk insert
-        const leadId = LeadService.generateLeadId();
-        normalizedPhones.push(normalizedPhone);
 
         // Map primary skill category to human-readable name (same as LeadService)
         const primarySkillCategory = (
           row.primaryCategory ||
           row.primarySkill ||
+          defaultPrimaryCategory ||
           ""
         ).trim();
         const primarySkillNameMap: Record<string, string> = {
@@ -1176,6 +1236,77 @@ export class BulkLeadImportService {
         };
         const primarySkillName =
           primarySkillNameMap[primarySkillCategory] || primarySkillCategory;
+
+        // Check if lead exists with different category - add skill to existing lead
+        if (existingLeads.length > 0) {
+          const existingLead = existingLeads[0]; // Use first existing lead
+          
+          // Normalize categories for comparison (case-insensitive, trim whitespace)
+          const normalizedNewCategory = primarySkillCategory.toLowerCase().trim();
+          const normalizedNewName = primarySkillName.toLowerCase().trim();
+          
+          // Check if this skill already exists in the lead's skills array
+          // Compare both category and name (case-insensitive)
+          const skillAlreadyExists = existingLead.skills?.some((skill: any) => {
+            const existingCategory = (skill.category || '').toLowerCase().trim();
+            const existingName = (skill.name || '').toLowerCase().trim();
+            return existingCategory === normalizedNewCategory || 
+                   existingName === normalizedNewName ||
+                   existingCategory === normalizedNewName ||
+                   existingName === normalizedNewCategory;
+          });
+
+          if (!skillAlreadyExists) {
+            // Use experience level from CSV directly (supports beginner, intermediate, experienced)
+            const experienceLevel = row.experienceLevel || "beginner";
+            
+            logger.info("Adding new skill to existing lead", {
+              leadId: existingLead.leadId,
+              phone: normalizedPhone,
+              existingCategory: existingLead.primaryCategory || existingLead.primarySkill,
+              newCategory: primarySkillCategory,
+              existingSkillsCount: existingLead.skills?.length || 0,
+              userId
+            });
+            
+            // Add new skill to existing lead
+            leadsToUpdate.push({
+              leadId: existingLead.leadId,
+              existingLead: existingLead,
+              newSkill: {
+                name: primarySkillName,
+                category: primarySkillCategory,
+                level: experienceLevel as "beginner" | "intermediate" | "experienced",
+                toolsAvailable: false,
+                assignedBy: userId,
+                assignedAt: new Date(),
+              },
+            });
+            continue; // Skip creating new lead
+          } else {
+            // Skill already exists, skip
+            logger.info("Skill already exists for lead, skipping", {
+              leadId: existingLead.leadId,
+              phone: normalizedPhone,
+              category: primarySkillCategory,
+              userId
+            });
+            errors.push({
+              row: rowNumber,
+              phone: normalizedPhone,
+              error: `This skill already exists for this lead (Lead ID: ${existingLead.leadId})`,
+            });
+            continue;
+          }
+        }
+
+        // No existing lead - create new one
+        // Use provided source or row source
+        const leadSource = source || row.source || "referral";
+
+        // Prepare lead document for bulk insert
+        const leadId = LeadService.generateLeadId();
+        normalizedPhones.push(normalizedPhone);
 
         leadsToInsert.push({
           leadId,
@@ -1213,7 +1344,7 @@ export class BulkLeadImportService {
             {
               name: primarySkillName,
               category: primarySkillCategory,
-              level: "experienced",
+              level: (row.experienceLevel || "beginner") as "beginner" | "intermediate" | "experienced",
               toolsAvailable: false,
               assignedBy: userId,
               assignedAt: new Date(),
@@ -1375,6 +1506,253 @@ export class BulkLeadImportService {
         }
       }
 
+      // STEP 7.5: Update existing leads with new skills (different category)
+      let updatedLeadIds: string[] = [];
+      
+      if (leadsToUpdate.length > 0) {
+        if (progressCallback) {
+          progressCallback(
+            85,
+            `Updating ${leadsToUpdate.length} existing leads with new skills...`,
+          );
+        }
+
+        logger.info("Updating existing leads with new skills", {
+          importId,
+          count: leadsToUpdate.length,
+          userId,
+        });
+
+        // OPTIMIZATION: Batch fetch all leads in a single query instead of O(n) queries
+        const leadIdsToUpdate = leadsToUpdate.map(u => u.leadId);
+        const existingLeadsMap = new Map<string, any>();
+        
+        // Single query to fetch all leads that need updating
+        const existingLeads = await Lead.find({
+          leadId: { $in: leadIdsToUpdate }
+        })
+          .select('leadId skills primaryCategory primarySkill')
+          .lean()
+          .session(session);
+
+        // Create a map for O(1) lookup
+        existingLeads.forEach(lead => {
+          existingLeadsMap.set(lead.leadId, lead);
+        });
+
+        // Prepare bulk write operations
+        const bulkWriteOps: any[] = [];
+        const leadsToLogActivity: Array<{ leadId: string; skill: any }> = [];
+
+        for (const updateData of leadsToUpdate) {
+          try {
+            const existingLead = existingLeadsMap.get(updateData.leadId);
+            
+            if (existingLead) {
+              // Normalize categories for comparison (case-insensitive, trim whitespace)
+              const normalizedNewCategory = (updateData.newSkill.category || '').toLowerCase().trim();
+              const normalizedNewName = (updateData.newSkill.name || '').toLowerCase().trim();
+              
+              // Check if this skill already exists in the lead's skills array
+              const skillExists = existingLead.skills?.some((skill: any) => {
+                const existingCategory = (skill.category || '').toLowerCase().trim();
+                const existingName = (skill.name || '').toLowerCase().trim();
+                const matches = existingCategory === normalizedNewCategory || 
+                       existingName === normalizedNewName ||
+                       existingCategory === normalizedNewName ||
+                       existingName === normalizedNewCategory;
+                
+                if (matches) {
+                  logger.info("Skill match found", {
+                    importId,
+                    leadId: updateData.leadId,
+                    existingCategory,
+                    existingName,
+                    newCategory: normalizedNewCategory,
+                    newName: normalizedNewName,
+                    userId
+                  });
+                }
+                
+                return matches;
+              });
+
+              if (!skillExists) {
+                logger.info("Preparing to add skill to existing lead", {
+                  importId,
+                  leadId: updateData.leadId,
+                  phone: updateData.existingLead.phone,
+                  newSkill: updateData.newSkill,
+                  existingSkills: existingLead.skills?.map((s: any) => ({
+                    name: s.name,
+                    category: s.category
+                  })) || [],
+                  existingSkillsCount: existingLead.skills?.length || 0,
+                  userId
+                });
+                
+                // Add update operation to bulk write array
+                // Ensure skills array exists and add the new skill
+                // Handle cases where skills might be null/undefined or not an array
+                const existingSkills = existingLead.skills && Array.isArray(existingLead.skills) 
+                  ? existingLead.skills 
+                  : [];
+                
+                // Add the new skill to the array
+                const updatedSkills = [...existingSkills, updateData.newSkill];
+                
+                bulkWriteOps.push({
+                  updateOne: {
+                    filter: { leadId: updateData.leadId },
+                    update: {
+                      $set: {
+                        skills: updatedSkills,
+                        updatedAt: new Date(),
+                      },
+                    },
+                  },
+                });
+
+                leadsToLogActivity.push({
+                  leadId: updateData.leadId,
+                  skill: updateData.newSkill
+                });
+              } else {
+                logger.info("Skill already exists, skipping", {
+                  importId,
+                  leadId: updateData.leadId,
+                  skillCategory: updateData.newSkill.category,
+                  userId
+                });
+              }
+            } else {
+              logger.warn("Lead not found for skill update", {
+                importId,
+                leadId: updateData.leadId,
+                userId
+              });
+            }
+          } catch (updateError: any) {
+            logger.error("Failed to prepare skill update", {
+              importId,
+              leadId: updateData.leadId,
+              error: updateError.message,
+              stack: updateError.stack,
+              userId,
+            });
+            errors.push({
+              row: 0,
+              phone: updateData.existingLead.phone,
+              error: `Failed to add skill to existing lead: ${updateError.message}`,
+            });
+          }
+        }
+
+        // Execute all updates in a single bulk write operation
+        if (bulkWriteOps.length > 0) {
+          try {
+            const bulkWriteResult = await Lead.bulkWrite(bulkWriteOps, { 
+              session,
+              ordered: false // Continue on errors
+            });
+            
+            // Type assertion for writeErrors (exists at runtime but not in type definition)
+            const writeErrors = (bulkWriteResult as any).writeErrors as Array<{ index: number; code: number; errmsg: string }> | undefined;
+            
+            logger.info("Bulk write completed for skill updates", {
+              importId,
+              attempted: bulkWriteOps.length,
+              modified: bulkWriteResult.modifiedCount,
+              matched: bulkWriteResult.matchedCount,
+              userId,
+              writeErrors: writeErrors?.length || 0
+            });
+
+            // Handle write errors if any
+            if (writeErrors && writeErrors.length > 0) {
+              logger.error("Some skill updates failed in bulk write", {
+                importId,
+                failedCount: writeErrors.length,
+                errors: writeErrors.map((err: any) => ({
+                  index: err.index,
+                  code: err.code,
+                  message: err.errmsg
+                })),
+                userId
+              });
+            }
+
+            // Extract successfully updated lead IDs - match by index
+            // Only include leads whose operations didn't have errors
+            const failedIndices = new Set<number>();
+            if (writeErrors) {
+              writeErrors.forEach((err: any) => {
+                failedIndices.add(err.index);
+              });
+            }
+
+            // Get all successful lead IDs (those not in failedIndices)
+            updatedLeadIds = leadsToLogActivity
+              .filter((_, index) => !failedIndices.has(index))
+              .map(item => item.leadId);
+
+            // Log activities for all successfully updated leads (in parallel)
+            if (updatedLeadIds.length > 0) {
+              await Promise.all(
+                leadsToLogActivity
+                  .filter((_, index) => !failedIndices.has(index))
+                  .map(item =>
+                    LeadService.logActivity(
+                      item.leadId,
+                      'skill_added',
+                      `New skill added via bulk import: ${item.skill.name} (${item.skill.category})`,
+                      userId,
+                      adminName
+                    ).catch(err => {
+                      logger.error("Failed to log activity", {
+                        importId,
+                        leadId: item.leadId,
+                        error: err.message,
+                        userId
+                      });
+                    })
+                  )
+              );
+            }
+
+            logger.info("Successfully updated leads with new skills", {
+              importId,
+              updatedCount: updatedLeadIds.length,
+              attempted: bulkWriteOps.length,
+              failed: failedIndices.size,
+              userId
+            });
+          } catch (bulkWriteError: any) {
+            logger.error("Bulk write failed for skill updates", {
+              importId,
+              error: bulkWriteError.message,
+              stack: bulkWriteError.stack,
+              userId,
+            });
+            // Add errors for all failed updates
+            leadsToUpdate.forEach(updateData => {
+              errors.push({
+                row: 0,
+                phone: updateData.existingLead.phone,
+                error: `Failed to add skill to existing lead: ${bulkWriteError.message}`,
+              });
+            });
+          }
+        }
+
+        logger.info("Completed updating existing leads with new skills", {
+          importId,
+          attempted: leadsToUpdate.length,
+          successful: updatedLeadIds.length,
+          userId,
+        });
+      }
+
       // STEP 8: Update import record atomically
       if (progressCallback) {
         progressCallback(95, "Saving import results...");
@@ -1383,15 +1761,18 @@ export class BulkLeadImportService {
       const finalStatus =
         errors.length === rows.length ? "failed" : "completed";
 
+      // Total success count includes both new leads and updated leads
+      const totalSuccessCount = importedLeadIds.length + updatedLeadIds.length;
+
       await BulkImport.findOneAndUpdate(
         { importId },
         {
           $set: {
-            successCount: importedLeadIds.length,
+            successCount: totalSuccessCount,
             failedCount:
               errors.length + (leadsToInsert.length - importedLeadIds.length),
             status: finalStatus,
-            importedUserIds: importedLeadIds,
+            importedUserIds: [...importedLeadIds, ...updatedLeadIds],
             errors: errors as any,
             completedAt: new Date(),
           },
@@ -1409,7 +1790,7 @@ export class BulkLeadImportService {
       if (progressCallback) {
         progressCallback(
           100,
-          `Import completed! ${importedLeadIds.length} leads imported successfully.`,
+          `Import completed! ${importedLeadIds.length} new leads created, ${updatedLeadIds.length} existing leads updated with new skills.`,
         );
       }
 
@@ -1501,10 +1882,11 @@ export class BulkLeadImportService {
       return {
         importId,
         totalRows: rows.length,
-        successCount: importedLeadIds.length,
+        successCount: totalSuccessCount,
         failedCount: errors.length,
         errors,
         importedLeadIds,
+        updatedLeadIds,
       };
     } catch (error: any) {
       await session.abortTransaction();
@@ -1623,11 +2005,6 @@ export class BulkLeadImportService {
 
     // Add note at the top if categories are pre-selected
     let csvContent = "";
-    // if (primaryCategory && secondaryCategory) {
-    //   csvContent += `# Template for ${primaryCategory} - ${secondaryCategory}\n`;
-    //   csvContent += `# Categories are pre-selected and will be applied to all rows automatically\n`;
-    //   csvContent += `# You don't need to include category columns in your CSV\n`;
-    // }
     csvContent += `${escapedHeaders}\n${escapedRow}`;
 
     return csvContent;
@@ -1726,6 +2103,286 @@ export class BulkLeadImportService {
         total,
         totalPages: Math.ceil(total / limit),
       },
+    };
+  }
+
+  /**
+   * Get comprehensive import analytics
+   */
+  static async getImportAnalytics(): Promise<{
+    uploadsByUser: Array<{ userId: string; userName: string; userRole: string; totalUploads: number; totalLeads: number; successRate: number; avgLeadsPerUpload: number }>;
+    uniqueVsDuplicate: { uniqueLeads: number; duplicateLeads: number; updatedLeads: number };
+    statusDistribution: Array<{ status: string; count: number }>;
+    roleBreakdown: Array<{ role: string; totalUploads: number; totalLeads: number; successRate: number }>;
+    uploadsOverTime: Array<{ date: string; uploads: number; leads: number }>;
+    summaryMetrics: { totalImports: number; totalLeadsImported: number; totalUniqueLeads: number; totalDuplicates: number; avgSuccessRate: number; totalUploaders: number };
+    topUploaders: Array<{ userId: string; userName: string; totalLeads: number; successRate: number }>;
+    qualityMetrics: { avgDuplicateRate: number; avgSuccessRate: number; avgRowsPerUpload: number; largestUpload: number };
+  }> {
+    // 1. Uploads by User - Aggregation
+    const uploadsByUserAgg = await BulkImport.aggregate([
+      {
+        $match: { status: { $in: ['completed', 'failed', 'partial'] } }
+      },
+      {
+        $group: {
+          _id: '$createdBy',
+          userName: { $first: '$createdByName' },
+          userRole: { $first: '$createdByRole' },
+          totalUploads: { $sum: 1 },
+          totalLeads: { $sum: '$successCount' },
+          totalRows: { $sum: '$totalRows' },
+          totalFailed: { $sum: '$failedCount' }
+        }
+      },
+      {
+        $project: {
+          userId: '$_id',
+          userName: { $ifNull: ['$userName', 'Unknown User'] },
+          userRole: { $ifNull: ['$userRole', 'unknown'] },
+          totalUploads: 1,
+          totalLeads: 1,
+          successRate: {
+            $cond: [
+              { $eq: ['$totalRows', 0] },
+              0,
+              { $multiply: [{ $divide: ['$totalLeads', '$totalRows'] }, 100] }
+            ]
+          },
+          avgLeadsPerUpload: {
+            $cond: [
+              { $eq: ['$totalUploads', 0] },
+              0,
+              { $divide: ['$totalLeads', '$totalUploads'] }
+            ]
+          }
+        }
+      },
+      { $sort: { totalLeads: -1 } }
+    ]);
+
+    // 2. Unique vs Duplicate Breakdown
+    const uniqueDuplicateAgg = await BulkImport.aggregate([
+      {
+        $match: { status: { $in: ['completed', 'partial'] } }
+      },
+      {
+        $group: {
+          _id: null,
+          uniqueLeads: { $sum: { $size: { $ifNull: ['$importedUserIds', []] } } },
+          updatedLeads: { $sum: { $size: { $ifNull: ['$updatedUserIds', []] } } },
+          totalFailed: { $sum: '$failedCount' }
+        }
+      }
+    ]);
+
+    const uniqueVsDuplicate = uniqueDuplicateAgg.length > 0
+      ? {
+          uniqueLeads: uniqueDuplicateAgg[0].uniqueLeads || 0,
+          duplicateLeads: uniqueDuplicateAgg[0].totalFailed || 0,
+          updatedLeads: uniqueDuplicateAgg[0].updatedLeads || 0
+        }
+      : { uniqueLeads: 0, duplicateLeads: 0, updatedLeads: 0 };
+
+    // 3. Status Distribution
+    const statusDistributionAgg = await BulkImport.aggregate([
+      {
+        $group: {
+          _id: '$status',
+          count: { $sum: 1 }
+        }
+      },
+      {
+        $project: {
+          status: '$_id',
+          count: 1,
+          _id: 0
+        }
+      },
+      { $sort: { count: -1 } }
+    ]);
+
+    // 4. Role-Based Performance
+    const roleBreakdownAgg = await BulkImport.aggregate([
+      {
+        $match: { status: { $in: ['completed', 'failed', 'partial'] } }
+      },
+      {
+        $group: {
+          _id: '$createdByRole',
+          totalUploads: { $sum: 1 },
+          totalLeads: { $sum: '$successCount' },
+          totalRows: { $sum: '$totalRows' }
+        }
+      },
+      {
+        $project: {
+          role: { $ifNull: ['$_id', 'unknown'] },
+          totalUploads: 1,
+          totalLeads: 1,
+          successRate: {
+            $cond: [
+              { $eq: ['$totalRows', 0] },
+              0,
+              { $multiply: [{ $divide: ['$totalLeads', '$totalRows'] }, 100] }
+            ]
+          },
+          _id: 0
+        }
+      },
+      { $sort: { totalLeads: -1 } }
+    ]);
+
+    // 5. Uploads Over Time (Last 30 days, grouped by date)
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    const uploadsOverTimeAgg = await BulkImport.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: thirtyDaysAgo }
+        }
+      },
+      {
+        $group: {
+          _id: {
+            $dateToString: { format: '%Y-%m-%d', date: '$createdAt' }
+          },
+          uploads: { $sum: 1 },
+          leads: { $sum: '$successCount' }
+        }
+      },
+      {
+        $project: {
+          date: '$_id',
+          uploads: 1,
+          leads: 1,
+          _id: 0
+        }
+      },
+      { $sort: { date: 1 } }
+    ]);
+
+    // 6. Summary Metrics
+    const summaryAgg = await BulkImport.aggregate([
+      {
+        $group: {
+          _id: null,
+          totalImports: { $sum: 1 },
+          totalLeadsImported: { $sum: '$successCount' },
+          totalRows: { $sum: '$totalRows' },
+          totalFailed: { $sum: '$failedCount' },
+          uniqueUploaders: { $addToSet: '$createdBy' },
+          totalUniqueLeads: { $sum: { $size: { $ifNull: ['$importedUserIds', []] } } },
+          totalUpdated: { $sum: { $size: { $ifNull: ['$updatedUserIds', []] } } }
+        }
+      },
+      {
+        $project: {
+          totalImports: 1,
+          totalLeadsImported: 1,
+          totalUniqueLeads: 1,
+          totalDuplicates: '$totalFailed',
+          avgSuccessRate: {
+            $cond: [
+              { $eq: ['$totalRows', 0] },
+              0,
+              { $multiply: [{ $divide: ['$totalLeadsImported', '$totalRows'] }, 100] }
+            ]
+          },
+          totalUploaders: { $size: '$uniqueUploaders' }
+        }
+      }
+    ]);
+
+    const summaryMetrics = summaryAgg.length > 0
+      ? {
+          totalImports: summaryAgg[0].totalImports || 0,
+          totalLeadsImported: summaryAgg[0].totalLeadsImported || 0,
+          totalUniqueLeads: summaryAgg[0].totalUniqueLeads || 0,
+          totalDuplicates: summaryAgg[0].totalDuplicates || 0,
+          avgSuccessRate: Math.round((summaryAgg[0].avgSuccessRate || 0) * 100) / 100,
+          totalUploaders: summaryAgg[0].totalUploaders || 0
+        }
+      : { totalImports: 0, totalLeadsImported: 0, totalUniqueLeads: 0, totalDuplicates: 0, avgSuccessRate: 0, totalUploaders: 0 };
+
+    // 7. Top Uploaders (by volume and success rate)
+    const topUploaders = uploadsByUserAgg.slice(0, 5).map(u => ({
+      userId: u.userId,
+      userName: u.userName,
+      totalLeads: u.totalLeads,
+      successRate: Math.round(u.successRate * 100) / 100
+    }));
+
+    // 8. Quality Metrics
+    const qualityAgg = await BulkImport.aggregate([
+      {
+        $match: { status: { $in: ['completed', 'failed', 'partial'] } }
+      },
+      {
+        $group: {
+          _id: null,
+          totalRows: { $sum: '$totalRows' },
+          totalSuccess: { $sum: '$successCount' },
+          totalFailed: { $sum: '$failedCount' },
+          totalUploads: { $sum: 1 },
+          maxRows: { $max: '$totalRows' }
+        }
+      },
+      {
+        $project: {
+          avgDuplicateRate: {
+            $cond: [
+              { $eq: ['$totalRows', 0] },
+              0,
+              { $multiply: [{ $divide: ['$totalFailed', '$totalRows'] }, 100] }
+            ]
+          },
+          avgSuccessRate: {
+            $cond: [
+              { $eq: ['$totalRows', 0] },
+              0,
+              { $multiply: [{ $divide: ['$totalSuccess', '$totalRows'] }, 100] }
+            ]
+          },
+          avgRowsPerUpload: {
+            $cond: [
+              { $eq: ['$totalUploads', 0] },
+              0,
+              { $divide: ['$totalRows', '$totalUploads'] }
+            ]
+          },
+          largestUpload: '$maxRows'
+        }
+      }
+    ]);
+
+    const qualityMetrics = qualityAgg.length > 0
+      ? {
+          avgDuplicateRate: Math.round((qualityAgg[0].avgDuplicateRate || 0) * 100) / 100,
+          avgSuccessRate: Math.round((qualityAgg[0].avgSuccessRate || 0) * 100) / 100,
+          avgRowsPerUpload: Math.round(qualityAgg[0].avgRowsPerUpload || 0),
+          largestUpload: qualityAgg[0].largestUpload || 0
+        }
+      : { avgDuplicateRate: 0, avgSuccessRate: 0, avgRowsPerUpload: 0, largestUpload: 0 };
+
+    return {
+      uploadsByUser: uploadsByUserAgg.map(u => ({
+        userId: u.userId,
+        userName: u.userName,
+        userRole: u.userRole,
+        totalUploads: u.totalUploads,
+        totalLeads: u.totalLeads,
+        successRate: Math.round(u.successRate * 100) / 100,
+        avgLeadsPerUpload: Math.round(u.avgLeadsPerUpload * 100) / 100
+      })),
+      uniqueVsDuplicate,
+      statusDistribution: statusDistributionAgg,
+      roleBreakdown: roleBreakdownAgg,
+      uploadsOverTime: uploadsOverTimeAgg,
+      summaryMetrics,
+      topUploaders,
+      qualityMetrics
     };
   }
 

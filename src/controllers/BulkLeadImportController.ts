@@ -461,6 +461,54 @@ export class BulkLeadImportController {
   }
 
   /**
+   * Get import analytics
+   * GET /api/v1/admin/caos/leads/bulk-import/analytics
+   */
+  static async getImportAnalytics(
+    req: AdminRequest,
+    res: Response,
+  ): Promise<void> {
+    try {
+      if (!req.admin) {
+        res.status(401).json({
+          success: false,
+          error: "Authentication required",
+        });
+        return;
+      }
+
+      const userRole = req.admin?.role;
+
+      // Only Lead Access Managers can view analytics
+      if (userRole !== "lead_access_manager") {
+        res.status(403).json({
+          success: false,
+          error: "Permission denied",
+          message: "Import analytics is only accessible to Lead Access Managers",
+        });
+        return;
+      }
+
+      const analytics = await BulkLeadImportService.getImportAnalytics();
+
+      res.json({
+        success: true,
+        data: analytics,
+      });
+    } catch (error: any) {
+      logger.error("Error in getImportAnalytics controller", {
+        error: error.message,
+        stack: error.stack,
+      });
+      res.status(500).json({
+        success: false,
+        error: "Failed to fetch import analytics",
+        message: error.message,
+      });
+    }
+  }
+
+  /**
    * Get import details
    * GET /api/v1/admin/caos/leads/bulk-import/:importId
    */

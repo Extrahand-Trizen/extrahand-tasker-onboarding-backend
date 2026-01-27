@@ -68,6 +68,13 @@ router.get(
   BulkLeadImportController.getImportHistory
 );
 
+// Import analytics (must come before :importId route)
+router.get(
+  '/analytics',
+  requirePermission('canViewLeads'),
+  BulkLeadImportController.getImportAnalytics
+);
+
 // Get imported leads for an import (must come before :importId route)
 router.get(
   '/:importId/leads',

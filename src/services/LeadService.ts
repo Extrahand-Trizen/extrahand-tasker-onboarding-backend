@@ -90,30 +90,38 @@ export class LeadService {
       // Normalize phone
       const normalizedPhone = DuplicateCheckService.normalizePhone(data.phone);
 
-      // Check for duplicates
+      // Support both new (primaryCategory) and legacy (primarySkill) field names
+      const primarySkillCategory = (data.primaryCategory || data.primarySkill || '').trim();
+      const secondaryCategoryValue = (data.secondaryCategory || data.secondarySkill || '').trim();
+
+      // Check for duplicates (considering category)
       const duplicateCheck = options?.skipNameCityDuplicate
-        ? await DuplicateCheckService.checkPhoneDuplicate(normalizedPhone)
-        : await DuplicateCheckService.checkDuplicate(
+        ? await DuplicateCheckService.checkPhoneCategoryDuplicate(
             normalizedPhone,
+            primarySkillCategory,
+            secondaryCategoryValue
+          )
+        : await DuplicateCheckService.checkDuplicateWithCategory(
+            normalizedPhone,
+            primarySkillCategory,
+            secondaryCategoryValue,
             data.name,
             data.city
           );
 
-      if (duplicateCheck.isDuplicate && duplicateCheck.existingLead) {
+      if (duplicateCheck.isDuplicate && duplicateCheck.sameCategory) {
         throw new Error(
-          `Duplicate lead found: ${duplicateCheck.existingLead.leadId} (${duplicateCheck.matchType})`
+          `This person with this category already exists: ${duplicateCheck.existingLead?.leadId} (${duplicateCheck.matchType})`
         );
       }
+      // If sameCategory is false, allow it (different category for same person)
 
       // Decide initial status (restricted set)
       const initialStatus: LeadStatus = data.status && ['lead_added', 'contacted', 'interested'].includes(data.status)
         ? data.status
         : 'lead_added';
 
-      // Support both new (primaryCategory) and legacy (primarySkill) field names
-      const primarySkillCategory = (data.primaryCategory || data.primarySkill || '').trim();
-      const secondaryCategoryValue = (data.secondaryCategory || data.secondarySkill || '').trim();
-      
+      // Validate categories (already extracted above)
       if (!primarySkillCategory) {
         throw new Error('Primary category is required');
       }
@@ -177,7 +185,7 @@ export class LeadService {
         skills: [{
           name: primarySkillName,
           category: primarySkillCategory,
-          level: 'experienced',
+          level: (data.experienceLevel || 'beginner') as 'beginner' | 'intermediate' | 'experienced',
           toolsAvailable: false,
           assignedBy: data.addedBy,
           assignedAt: new Date()
@@ -270,6 +278,68 @@ export class LeadService {
   /**
    * Search and filter leads
    */
+  /**
+   * Get unique users who have added leads (for filter dropdown)
+   * Returns array of { userId, name } for users who have added at least one lead
+   */
+  static async getLeadCreators(): Promise<Array<{ userId: string; name: string }>> {
+    try {
+      // Use aggregation to get distinct addedBy values with their names
+      const creators = await Lead.aggregate([
+        {
+          $match: {
+            addedBy: { $exists: true, $ne: null }
+          }
+        },
+        {
+          $group: {
+            _id: '$addedBy',
+            // Get the most recent non-null name
+            names: { $push: '$addedByName' }
+          }
+        },
+        {
+          $project: {
+            userId: '$_id',
+            name: {
+              $let: {
+                vars: {
+                  filteredNames: {
+                    $filter: {
+                      input: '$names',
+                      as: 'name',
+                      cond: { $ne: ['$$name', null] }
+                    }
+                  }
+                },
+                in: {
+                  $cond: {
+                    if: { $gt: [{ $size: '$$filteredNames' }, 0] },
+                    then: { $arrayElemAt: ['$$filteredNames', -1] }, // Get last non-null name
+                    else: 'Unknown'
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          $sort: { name: 1 } // Sort alphabetically by name
+        }
+      ]);
+
+      return creators.map(c => ({
+        userId: c.userId,
+        name: c.name || 'Unknown'
+      }));
+    } catch (error: any) {
+      logger.error('Error getting lead creators', {
+        error: error.message
+      });
+      throw error;
+    }
+  }
+
   static async searchLeads(filters: SearchFilters): Promise<{
     leads: ILead[];
     total: number;

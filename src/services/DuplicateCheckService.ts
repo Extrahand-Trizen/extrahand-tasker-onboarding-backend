@@ -5,6 +5,7 @@ export interface DuplicateCheckResult {
   isDuplicate: boolean;
   existingLead?: ILead;
   matchType?: 'phone' | 'name_city';
+  sameCategory?: boolean; // New field: true if duplicate has same category
 }
 
 export class DuplicateCheckService {
@@ -158,6 +159,169 @@ export class DuplicateCheckService {
       return duplicatePhoneToLeadMap;
     } catch (error: any) {
       logger.error('Bulk duplicate check error', {
+        error: error.message,
+        phoneCount: phoneNumbers.length
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Check if a phone number already exists with the same category
+   */
+  static async checkPhoneCategoryDuplicate(
+    phone: string, 
+    primaryCategory: string, 
+    secondaryCategory?: string
+  ): Promise<DuplicateCheckResult> {
+    try {
+      const normalizedPhone = this.normalizePhone(phone);
+      
+      // Build query for exact category match
+      const query: any = {
+        phone: normalizedPhone,
+        primaryCategory: primaryCategory,
+        status: { $nin: ['rejected', 'inactive'] }
+      };
+
+      // If secondary category is provided, match it; otherwise check for missing or empty
+      if (secondaryCategory && secondaryCategory.trim()) {
+        query.secondaryCategory = secondaryCategory.trim();
+      } else {
+        query.$or = [
+          { secondaryCategory: { $exists: false } },
+          { secondaryCategory: '' },
+          { secondaryCategory: null }
+        ];
+      }
+      
+      const existingLead = await Lead.findOne(query).lean();
+
+      if (existingLead) {
+        logger.info('Duplicate phone+category found', {
+          phone: normalizedPhone,
+          primaryCategory,
+          secondaryCategory,
+          existingLeadId: existingLead.leadId
+        });
+        return {
+          isDuplicate: true,
+          existingLead: existingLead as unknown as ILead,
+          matchType: 'phone',
+          sameCategory: true
+        };
+      }
+
+      return { isDuplicate: false, sameCategory: false };
+    } catch (error: any) {
+      logger.error('Phone+category duplicate check error', {
+        error: error.message,
+        phone,
+        primaryCategory
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Check duplicate considering category (allows same person with different categories)
+   */
+  static async checkDuplicateWithCategory(
+    phone: string, 
+    primaryCategory: string,
+    secondaryCategory?: string,
+    name?: string, 
+    city?: string
+  ): Promise<DuplicateCheckResult> {
+    // First check if same phone + same category exists
+    const phoneCategoryCheck = await this.checkPhoneCategoryDuplicate(
+      phone, 
+      primaryCategory, 
+      secondaryCategory
+    );
+    
+    if (phoneCategoryCheck.isDuplicate) {
+      return phoneCategoryCheck;
+    }
+
+    // If different category, check if phone exists with different category
+    const normalizedPhone = this.normalizePhone(phone);
+    const existingLeadDifferentCategory = await Lead.findOne({
+      phone: normalizedPhone,
+      status: { $nin: ['rejected', 'inactive'] }
+    }).lean();
+
+    if (existingLeadDifferentCategory) {
+      // Same phone but different category - this is allowed, but we return info
+      logger.info('Same phone with different category found', {
+        phone: normalizedPhone,
+        existingLeadId: existingLeadDifferentCategory.leadId,
+        existingCategory: existingLeadDifferentCategory.primaryCategory,
+        newCategory: primaryCategory
+      });
+      return {
+        isDuplicate: false, // Not a duplicate because category is different
+        existingLead: existingLeadDifferentCategory as unknown as ILead,
+        matchType: 'phone',
+        sameCategory: false
+      };
+    }
+
+    // Check name+city if provided
+    if (name && city) {
+      const nameCityCheck = await this.checkNameCityDuplicate(name, city);
+      if (nameCityCheck.isDuplicate) {
+        return { ...nameCityCheck, sameCategory: false };
+      }
+    }
+
+    return { isDuplicate: false, sameCategory: false };
+  }
+
+  /**
+   * Bulk check for duplicate phones with categories (optimized - single query)
+   * Returns a map of normalized phone -> existing leads array for O(1) lookup
+   */
+  static async checkPhonesBulkWithCategories(
+    phoneNumbers: string[], 
+    categories?: Map<string, { primary: string; secondary?: string }>
+  ): Promise<Map<string, ILead[]>> {
+    try {
+      if (phoneNumbers.length === 0) {
+        return new Map();
+      }
+
+      // Normalize all phone numbers
+      const normalizedPhones = phoneNumbers.map(phone => this.normalizePhone(phone));
+      const uniqueNormalizedPhones = [...new Set(normalizedPhones)];
+      
+      // Single MongoDB query to find all existing leads with these phone numbers
+      // Include skills array to check for existing skills during bulk import
+      const existingLeads = await Lead.find({
+        phone: { $in: uniqueNormalizedPhones },
+        status: { $nin: ['rejected', 'inactive'] }
+      })
+      .select('leadId phone name primaryCategory primarySkill secondaryCategory secondarySkill skills')
+      .lean();
+
+      // Create a map for O(1) lookup: normalizedPhone -> existingLeads[]
+      const phoneToLeadsMap = new Map<string, ILead[]>();
+      existingLeads.forEach(lead => {
+        const phone = lead.phone;
+        if (!phoneToLeadsMap.has(phone)) {
+          phoneToLeadsMap.set(phone, []);
+        }
+        phoneToLeadsMap.get(phone)!.push(lead as unknown as ILead);
+      });
+
+      logger.info('Bulk duplicate check with categories completed', {
+        checkedPhones: uniqueNormalizedPhones.length,
+        foundLeads: phoneToLeadsMap.size
+      });
+
+      return phoneToLeadsMap;
+    } catch (error: any) {
+      logger.error('Bulk duplicate check with categories error', {
         error: error.message,
         phoneCount: phoneNumbers.length
       });

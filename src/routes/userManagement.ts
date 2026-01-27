@@ -5,34 +5,34 @@ import { requireRole } from '../middleware/roleAuth';
 
 const router = Router();
 
-// All routes require JWT authentication and lead_access_manager role
+// All routes require JWT authentication
 router.use(adminAuthJWT as any);
-router.use(requireRole('lead_access_manager') as any);
 
-// List all users
-router.get('/', UserManagementController.list as any);
+// List all users - requires lead_access_manager
+router.get('/', requireRole('lead_access_manager') as any, UserManagementController.list as any);
 
-// Get user by ID
-router.get('/:userId', UserManagementController.getById as any);
+// Get user by ID - requires lead_access_manager
+router.get('/:userId', requireRole('lead_access_manager') as any, UserManagementController.getById as any);
 
-// Update user
-router.put('/:userId', UserManagementController.update as any);
+// Update user - requires lead_access_manager
+router.put('/:userId', requireRole('lead_access_manager') as any, UserManagementController.update as any);
 
-// Update role
-router.put('/:userId/role', UserManagementController.updateRole as any);
+// Update role - requires lead_access_manager
+router.put('/:userId/role', requireRole('lead_access_manager') as any, UserManagementController.updateRole as any);
 
-// Update status
-router.put('/:userId/status', UserManagementController.updateStatus as any);
+// Update status - requires lead_access_manager
+router.put('/:userId/status', requireRole('lead_access_manager') as any, UserManagementController.updateStatus as any);
 
-// Password reset
-router.post('/:userId/reset-password', UserManagementController.resetPassword as any);
+// Password reset - requires lead_access_manager
+router.post('/:userId/reset-password', requireRole('lead_access_manager') as any, UserManagementController.resetPassword as any);
 
-// Session management (more specific routes first)
-router.get('/:userId/sessions', UserManagementController.getSessions as any);
-router.delete('/:userId/sessions', UserManagementController.revokeAllSessions as any);
-router.delete('/:userId/sessions/:sessionIndex', UserManagementController.revokeSession as any);
+// Session management (more specific routes first) - requires lead_access_manager
+router.get('/:userId/sessions', requireRole('lead_access_manager') as any, UserManagementController.getSessions as any);
+router.delete('/:userId/sessions', requireRole('lead_access_manager') as any, UserManagementController.revokeAllSessions as any);
+router.delete('/:userId/sessions/:sessionIndex', requireRole('lead_access_manager') as any, UserManagementController.revokeSession as any);
 
 // Delete user (less specific route - must come after more specific routes)
-router.delete('/:userId', UserManagementController.deleteUser as any);
+// Only lead_access_manager can delete users
+router.delete('/:userId', requireRole('lead_access_manager') as any, UserManagementController.deleteUser as any);
 
 export default router;

@@ -209,6 +209,38 @@ export class LeadController {
   }
 
   /**
+   * Get unique users who have added leads (for filter dropdown)
+   * GET /api/v1/admin/caos/leads/creators
+   */
+  static async getLeadCreators(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      if (!req.admin) {
+        res.status(401).json({
+          success: false,
+          error: 'Authentication required'
+        });
+        return;
+      }
+
+      const creators = await LeadService.getLeadCreators();
+
+      res.json({
+        success: true,
+        data: creators
+      });
+    } catch (error: any) {
+      logger.error('Error in getLeadCreators controller', {
+        error: error.message
+      });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to get lead creators',
+        message: error.message
+      });
+    }
+  }
+
+  /**
    * Search and filter leads
    * GET /api/v1/admin/caos/leads
    * ✅ ISOLATION: Qualifiers only see leads they added

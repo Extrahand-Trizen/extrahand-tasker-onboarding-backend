@@ -297,7 +297,7 @@ const LeadSchema = new Schema<ILead>({
     category: String,
     level: {
       type: String,
-      enum: ['beginner', 'experienced']
+      enum: ['beginner','intermediate', 'experienced']
     },
     toolsAvailable: Boolean,
     assignedBy: String,

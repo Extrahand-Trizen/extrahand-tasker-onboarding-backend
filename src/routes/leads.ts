@@ -20,6 +20,13 @@ router.post(
   LeadController.createLead
 );
 
+// Get unique users who have added leads (for filter dropdown)
+router.get(
+  '/creators',
+  requirePermission('canViewLeads'),
+  LeadController.getLeadCreators
+);
+
 // Search and filter leads
 router.get(
   '/',
