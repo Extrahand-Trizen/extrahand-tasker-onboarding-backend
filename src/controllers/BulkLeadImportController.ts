@@ -223,6 +223,7 @@ export class BulkLeadImportController {
           failedCount: result.failedCount,
           errors: result.errors.slice(0, 10), // Limit errors in response
           importedLeadIds: result.importedLeadIds.slice(0, 10), // Limit IDs in response
+          updatedLeadIds: result.updatedLeadIds?.slice(0, 10) || [], // Limit IDs in response
         },
         message: `Imported ${result.successCount} leads successfully${result.failedCount > 0 ? `, ${result.failedCount} failed` : ""}`,
         note: "Processed synchronously (Queue disabled)",
