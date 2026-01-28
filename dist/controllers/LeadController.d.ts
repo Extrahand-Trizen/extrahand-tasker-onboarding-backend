@@ -13,6 +13,11 @@ export declare class LeadController {
      */
     static getLead(req: AdminRequest, res: Response): Promise<void>;
     /**
+     * Get unique users who have added leads (for filter dropdown)
+     * GET /api/v1/onboarding/leads/creators
+     */
+    static getLeadCreators(req: AdminRequest, res: Response): Promise<void>;
+    /**
      * Search and filter leads
      * GET /api/v1/admin/caos/leads
      * ✅ ISOLATION: Qualifiers only see leads they added
@@ -44,5 +49,10 @@ export declare class LeadController {
      * GET /api/v1/admin/caos/leads/:leadId/history
      */
     static getStatusHistory(req: AdminRequest, res: Response): Promise<void>;
+    /**
+     * Delete a lead
+     * DELETE /api/v1/admin/caos/leads/:leadId
+     */
+    static deleteLead(req: AdminRequest, res: Response): Promise<void>;
 }
 //# sourceMappingURL=LeadController.d.ts.map

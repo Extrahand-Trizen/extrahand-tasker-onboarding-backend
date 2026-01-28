@@ -13,7 +13,8 @@ import path from "path";
 
 export interface BulkLeadImportRow {
   name: string;
-  phone: string;
+  phone?: string;
+  landline?: string;
   email?: string;
   city: string;
   state: string; // Required for bulk import
@@ -143,6 +144,9 @@ export class BulkLeadImportService {
         [
           "full name",
           "phone number",
+          "phone number (optional)",
+          "landline number",
+          "landline number (optional)",
           "mobile number",
           "email",
           "city / area",
@@ -258,8 +262,17 @@ export class BulkLeadImportService {
             phone:
               normalizedRecord.phone ||
               normalizedRecord["Phone Number"] ||
+              normalizedRecord["Phone Number (Optional)"] ||
               normalizedRecord["Mobile Number"] ||
               normalizedRecord["Phone"] ||
+              "",
+            landline:
+              normalizedRecord.landline ||
+              normalizedRecord["Landline Number"] ||
+              normalizedRecord["Landline Number (Optional)"] ||
+              normalizedRecord["Landline"] ||
+              normalizedRecord["Tel"] ||
+              normalizedRecord["Telephone"] ||
               "",
             email: normalizedRecord.email || normalizedRecord["Email"] || "",
             city:
@@ -467,8 +480,17 @@ export class BulkLeadImportService {
             phone:
               normalizedRecord.phone ||
               normalizedRecord["Phone Number"] ||
+              normalizedRecord["Phone Number (Optional)"] ||
               normalizedRecord["Mobile Number"] ||
               normalizedRecord["Phone"] ||
+              "",
+            landline:
+              normalizedRecord.landline ||
+              normalizedRecord["Landline Number"] ||
+              normalizedRecord["Landline Number (Optional)"] ||
+              normalizedRecord["Landline"] ||
+              normalizedRecord["Tel"] ||
+              normalizedRecord["Telephone"] ||
               "",
             email: normalizedRecord.email || normalizedRecord["Email"] || "",
             city:
@@ -581,16 +603,40 @@ export class BulkLeadImportService {
       };
     }
 
-    // Normalize phone - handle +91-XXXXXXXXXX or just XXXXXXXXXX
-    const phoneDigits = row.phone.replace(/\D/g, ""); // Remove all non-digits
-    const last10Digits = phoneDigits.slice(-10); // Get last 10 digits
+    // Validate at least one contact number (phone or landline) is provided
+    const phone = row.phone?.trim() || "";
+    const landline = row.landline?.trim() || "";
 
-    if (!row.phone || !/^[6-9]\d{9}$/.test(last10Digits)) {
+    if (!phone && !landline) {
       return {
         valid: false,
-        error:
-          "Invalid phone number (10 digits, starting with 6-9). Can be +91-XXXXXXXXXX or just XXXXXXXXXX",
+        error: "At least one contact number (Phone or Landline) is required",
       };
+    }
+
+    // Validate phone if provided
+    if (phone) {
+      const phoneDigits = phone.replace(/\D/g, ""); // Remove all non-digits
+      const last10Digits = phoneDigits.slice(-10); // Get last 10 digits
+
+      if (!/^[6-9]\d{9}$/.test(last10Digits)) {
+        return {
+          valid: false,
+          error:
+            "Invalid phone number (10 digits, starting with 6-9). Can be +91-XXXXXXXXXX or just XXXXXXXXXX",
+        };
+      }
+    }
+
+    // Validate landline if provided
+    if (landline) {
+      const landlineDigits = landline.replace(/\D/g, ""); // Remove all non-digits
+      if (landlineDigits.length < 6 || landlineDigits.length > 15) {
+        return {
+          valid: false,
+          error: "Invalid landline number (6-15 digits required)",
+        };
+      }
     }
 
     if (!row.city || row.city.trim().length < 2) {
@@ -725,25 +771,26 @@ export class BulkLeadImportService {
     defaultPrimaryCategory?: string,
     defaultSecondaryCategory?: string,
   ): Promise<{
-    rows: Array<{
-      rowNumber: number;
-      name: string;
-      phone: string;
-      email?: string;
-      city: string;
-      state: string;
-      primaryCategory: string;
-      secondaryCategory: string;
-      experienceLevel?: string;
-      status: "valid" | "invalid" | "warning";
-      errors: string[];
-      isDuplicateInFile: boolean;
-      isDuplicateInDb: boolean;
-      isDifferentCategory?: boolean;
-      duplicateLeadId?: string;
-      existingPrimaryCategory?: string;
-      existingSecondaryCategory?: string;
-    }>;
+      rows: Array<{
+        rowNumber: number;
+        name: string;
+        phone: string;
+        landline?: string;
+        email?: string;
+        city: string;
+        state: string;
+        primaryCategory: string;
+        secondaryCategory: string;
+        experienceLevel?: string;
+        status: "valid" | "invalid" | "warning";
+        errors: string[];
+        isDuplicateInFile: boolean;
+        isDuplicateInDb: boolean;
+        isDifferentCategory?: boolean;
+        duplicateLeadId?: string;
+        existingPrimaryCategory?: string;
+        existingSecondaryCategory?: string;
+      }>;
     summary: {
       total: number;
       valid: number;
@@ -761,35 +808,48 @@ export class BulkLeadImportService {
       defaultSecondaryCategory,
     );
 
-    // 2. Bulk duplicate check against database (with categories)
-    const allPhones = rows.map((r) => r.phone).filter(Boolean);
-    logger.info(
-      `[Preview] Performing bulk duplicate check for ${allPhones.length} phone numbers`,
-    );
-    const existingLeadsByPhoneMap =
-      await DuplicateCheckService.checkPhonesBulkWithCategories(allPhones);
-    logger.info(
-      `[Preview] Duplicate check completed. Found ${existingLeadsByPhoneMap.size} phones with existing leads`,
-    );
+      // 2. Bulk duplicate check against database (with categories) - Check both phones and landlines
+      const allPhones = rows.map((r) => r.phone).filter((p): p is string => Boolean(p));
+      const allLandlines = rows.map((r) => r.landline).filter((l): l is string => Boolean(l));
+      const allContacts: string[] = [...allPhones, ...allLandlines];
+      logger.info(
+        `[Preview] Performing bulk duplicate check for ${allPhones.length} phone numbers and ${allLandlines.length} landline numbers`,
+      );
+      const existingLeadsByPhoneMap =
+        await DuplicateCheckService.checkPhonesBulkWithCategories(allContacts);
+      logger.info(
+        `[Preview] Duplicate check completed. Found ${existingLeadsByPhoneMap.size} contacts with existing leads`,
+      );
 
-    // 3. Track in-file duplicates
-    const seenPhonesInFile = new Set<string>();
+      // 3. Track in-file duplicates (both phone and landline)
+      const seenPhonesInFile = new Set<string>();
+      const seenLandlinesInFile = new Set<string>();
 
-    // 4. Build preview rows
-    const previewRows = rows.map((row, index) => {
-      const rowNumber = index + 2; // +2 for header row and 0-index
-      const normalizedPhone = row.phone
-        ? DuplicateCheckService.normalizePhone(row.phone)
-        : "";
+      // 4. Build preview rows
+      const previewRows = rows.map((row, index) => {
+        const rowNumber = index + 2; // +2 for header row and 0-index
+        const normalizedPhone = row.phone
+          ? DuplicateCheckService.normalizePhone(row.phone)
+          : "";
+        const normalizedLandline = row.landline
+          ? DuplicateCheckService.normalizeLandline(row.landline)
+          : "";
 
-      // Check in-file duplicate
-      const isDuplicateInFile =
+      // Check in-file duplicate (both phone and landline)
+      const isDuplicateInFilePhone =
         normalizedPhone !== "" && seenPhonesInFile.has(normalizedPhone);
-      if (!isDuplicateInFile && normalizedPhone) {
-        seenPhonesInFile.add(normalizedPhone);
+      const isDuplicateInFileLandline =
+        normalizedLandline !== "" && seenLandlinesInFile.has(normalizedLandline);
+      const isDuplicateInFile = isDuplicateInFilePhone || isDuplicateInFileLandline;
+      
+      if (!isDuplicateInFilePhone && normalizedPhone) {
+        seenPhonesInFile.add  (normalizedPhone);
+      }
+      if (!isDuplicateInFileLandline && normalizedLandline) {
+        seenLandlinesInFile.add(normalizedLandline);
       }
 
-      // Check database duplicate - consider categories
+      // Check database duplicate - consider categories (check both phone and landline)
       const primaryCategory = row.primaryCategory || row.primarySkill || defaultPrimaryCategory || '';
       const secondaryCategory = row.secondaryCategory || defaultSecondaryCategory || '';
       
@@ -797,9 +857,22 @@ export class BulkLeadImportService {
       let isDuplicateInDb = false;
       let isDifferentCategory = false;
 
-      if (normalizedPhone) {
-        const existingLeads = existingLeadsByPhoneMap.get(normalizedPhone) || [];
-        
+      // Check both phone and landline in the existing leads map
+      const existingLeadsByPhone = normalizedPhone
+        ? existingLeadsByPhoneMap.get(normalizedPhone) || []
+        : [];
+      const existingLeadsByLandline = normalizedLandline
+        ? existingLeadsByPhoneMap.get(normalizedLandline) || []
+        : [];
+      
+      // Combine and deduplicate leads
+      const existingLeadsMap = new Map();
+      [...existingLeadsByPhone, ...existingLeadsByLandline].forEach(lead => {
+        existingLeadsMap.set(lead.leadId, lead);
+      });
+      const existingLeads = Array.from(existingLeadsMap.values());
+
+      if (existingLeads.length > 0) {
         // Check if any existing lead has the same category
         const sameCategoryLead = existingLeads.find((lead: any) => {
           const leadPrimary = lead.primaryCategory || lead.primarySkill || '';
@@ -809,12 +882,12 @@ export class BulkLeadImportService {
         });
 
         if (sameCategoryLead) {
-          // Exact duplicate - same phone and same category
+          // Exact duplicate - same contact and same category
           existingLead = sameCategoryLead;
           isDuplicateInDb = true;
           isDifferentCategory = false;
-        } else if (existingLeads.length > 0) {
-          // Same phone but different category - this is allowed
+        } else {
+          // Same contact but different category - this is allowed
           existingLead = existingLeads[0]; // Use first one for reference
           isDuplicateInDb = false;
           isDifferentCategory = true;
@@ -835,8 +908,11 @@ export class BulkLeadImportService {
       }
 
       // Add duplicate errors (only for actual duplicates, not different categories)
-      if (isDuplicateInFile) {
+      if (isDuplicateInFilePhone) {
         rowErrors.push("This phone number appears multiple times in your file");
+      }
+      if (isDuplicateInFileLandline) {
+        rowErrors.push("This landline number appears multiple times in your file");
       }
       if (isDuplicateInDb && existingLead) {
         rowErrors.push(`This person with this category already exists (Lead ID: ${existingLead.leadId})`);
@@ -847,6 +923,7 @@ export class BulkLeadImportService {
         rowNumber,
         name: row.name || "Unknown",
         phone: row.phone || "",
+        landline: row.landline || "",
         email: row.email,
         city: row.city || "Unknown",
         state: row.state || "",
@@ -860,7 +937,7 @@ export class BulkLeadImportService {
           | "invalid"
           | "warning",
         errors: rowErrors,
-        isDuplicateInFile,
+        isDuplicateInFile: isDuplicateInFilePhone || isDuplicateInFileLandline,
         isDuplicateInDb,
         isDifferentCategory, // New field
         duplicateLeadId: existingLead?.leadId,
@@ -1107,18 +1184,23 @@ export class BulkLeadImportService {
       };
       const errors: ImportError[] = [];
 
-      // STEP 5: Bulk duplicate check - Check ALL phones at once (single MongoDB query)
+      // STEP 5: Bulk duplicate check - Check ALL phones and landlines at once (single MongoDB query)
       if (progressCallback) {
         progressCallback(40, "Checking for duplicate leads in database...");
       }
 
-      const allPhones = rows.map((r) => r.phone).filter(Boolean);
+      const allPhones = rows.map((r) => r.phone).filter((p): p is string => Boolean(p));
+      const allLandlines = rows.map((r) => r.landline).filter((l): l is string => Boolean(l));
+      const allContacts: string[] = [...allPhones, ...allLandlines];
+      
       const existingLeadsByPhoneMap =
-        await DuplicateCheckService.checkPhonesBulkWithCategories(allPhones);
+        await DuplicateCheckService.checkPhonesBulkWithCategories(allContacts);
 
       logger.info("Performing bulk duplicate check with categories", {
         importId,
         phoneCount: allPhones.length,
+        landlineCount: allLandlines.length,
+        totalContacts: allContacts.length,
         userId,
       });
 
@@ -1128,6 +1210,7 @@ export class BulkLeadImportService {
 
       // STEP 6: Track in-file duplicates and prepare bulk insert documents
       const seenPhonesInFile = new Set<string>();
+      const seenLandlinesInFile = new Set<string>();
       const leadsToInsert: any[] = [];
       const leadsToUpdate: Array<{
         leadId: string;
@@ -1172,27 +1255,48 @@ export class BulkLeadImportService {
           continue;
         }
 
-        // Normalize phone
-        const normalizedPhone = DuplicateCheckService.normalizePhone(row.phone);
+        // Normalize phone and landline
+        const normalizedPhone = row.phone ? DuplicateCheckService.normalizePhone(row.phone) : null;
+        const normalizedLandline = row.landline ? DuplicateCheckService.normalizeLandline(row.landline) : null;
 
-        // Check for duplicate within this file
-        if (seenPhonesInFile.has(normalizedPhone)) {
+        // Check for duplicate within this file (check both phone and landline)
+        if (normalizedPhone && seenPhonesInFile.has(normalizedPhone)) {
           errors.push({
             row: rowNumber,
-            phone: row.phone,
+            phone: row.phone || row.landline || '',
             error: "This phone number appears multiple times in your file",
           });
           continue;
         }
-        seenPhonesInFile.add(normalizedPhone);
+        if (normalizedLandline && seenLandlinesInFile.has(normalizedLandline)) {
+          errors.push({
+            row: rowNumber,
+            phone: row.phone || row.landline || '',
+            error: "This landline number appears multiple times in your file",
+          });
+          continue;
+        }
+        if (normalizedPhone) seenPhonesInFile.add(normalizedPhone);
+        if (normalizedLandline) seenLandlinesInFile.add(normalizedLandline);
 
         // Check for duplicate in database - consider categories
         const primaryCategory = row.primaryCategory || row.primarySkill || defaultPrimaryCategory || '';
         const secondaryCategory = row.secondaryCategory || defaultSecondaryCategory || '';
         
-        const existingLeads = normalizedPhone
+        // Check both phone and landline in the existing leads map
+        const existingLeadsByPhone = normalizedPhone
           ? existingLeadsByPhoneMap.get(normalizedPhone) || []
           : [];
+        const existingLeadsByLandline = normalizedLandline
+          ? existingLeadsByPhoneMap.get(normalizedLandline) || []
+          : [];
+        
+        // Combine and deduplicate leads
+        const existingLeadsMap = new Map();
+        [...existingLeadsByPhone, ...existingLeadsByLandline].forEach(lead => {
+          existingLeadsMap.set(lead.leadId, lead);
+        });
+        const existingLeads = Array.from(existingLeadsMap.values());
 
         // Check if any existing lead has the same category
         const sameCategoryLead = existingLeads.find((lead: any) => {
@@ -1203,10 +1307,10 @@ export class BulkLeadImportService {
         });
 
         if (sameCategoryLead) {
-          // Exact duplicate - same phone and same category
+          // Exact duplicate - same contact (phone or landline) and same category
           errors.push({
             row: rowNumber,
-            phone: normalizedPhone,
+            phone: row.phone || row.landline || '',
             error: `This person with this category already exists (Lead ID: ${sameCategoryLead.leadId})`,
           });
           continue;
@@ -1287,13 +1391,13 @@ export class BulkLeadImportService {
             // Skill already exists, skip
             logger.info("Skill already exists for lead, skipping", {
               leadId: existingLead.leadId,
-              phone: normalizedPhone,
+              phone: normalizedPhone || normalizedLandline || '',
               category: primarySkillCategory,
               userId
             });
             errors.push({
               row: rowNumber,
-              phone: normalizedPhone,
+              phone: row.phone || row.landline || '',
               error: `This skill already exists for this lead (Lead ID: ${existingLead.leadId})`,
             });
             continue;
@@ -1306,12 +1410,18 @@ export class BulkLeadImportService {
 
         // Prepare lead document for bulk insert
         const leadId = LeadService.generateLeadId();
-        normalizedPhones.push(normalizedPhone);
+        // Track normalized contacts for logging (use phone if available, otherwise landline)
+        if (normalizedPhone) {
+          normalizedPhones.push(normalizedPhone);
+        } else if (normalizedLandline) {
+          normalizedPhones.push(normalizedLandline);
+        }
 
         leadsToInsert.push({
           leadId,
           name: row.name.trim(),
-          phone: normalizedPhone,
+          phone: normalizedPhone || undefined,
+          landline: normalizedLandline || undefined,
           email: row.email?.trim(),
           city: row.city.trim(),
           state: row.state.trim(),
@@ -1949,7 +2059,8 @@ export class BulkLeadImportService {
 
     const headers = [
       "Full Name",
-      "Phone Number",
+      "Phone Number (Optional)",
+      "Landline Number (Optional)",
       "Email (optional)",
       "City / Area",
       "State (optional)",
@@ -1970,6 +2081,7 @@ export class BulkLeadImportService {
     const exampleRow = [
       "John Doe",
       "9876543210",
+      "01123456789",
       "john@example.com",
       "Delhi",
       "Delhi",
@@ -1988,15 +2100,16 @@ export class BulkLeadImportService {
     ];
 
     // Properly escape and quote values
-    // Quote phone number (index 1) and pincode (index 6) to prevent Excel from converting to scientific notation
+    // Quote phone number (index 1), landline (index 2), and pincode to prevent Excel from converting to scientific notation
     const escapedHeaders = headers.map(escapeCSV).join(",");
     const escapedRow = exampleRow
       .map((val, idx) => {
-        // Quote phone numbers and pincodes to prevent Excel auto-formatting
-        // Adjust indices: phone is always index 1, pincode index depends on whether categories are included
+        // Quote phone numbers, landline, and pincodes to prevent Excel auto-formatting
+        // Adjust indices: phone is index 1, landline is index 2, pincode index depends on whether categories are included
         const phoneIndex = 1;
-        const pincodeIndex = includeCategoryColumns ? 6 : 6; // Pincode is always 6th column (after name, phone, email, city, state, address)
-        if (idx === phoneIndex || idx === pincodeIndex) {
+        const landlineIndex = 2;
+        const pincodeIndex = includeCategoryColumns ? 7 : 7; // Pincode is now 7th column (after name, phone, landline, email, city, state, address)
+        if (idx === phoneIndex || idx === landlineIndex || idx === pincodeIndex) {
           return `"${val}"`;
         }
         return escapeCSV(val);

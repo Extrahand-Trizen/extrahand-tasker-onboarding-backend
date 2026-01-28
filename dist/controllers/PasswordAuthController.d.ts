@@ -26,5 +26,15 @@ export declare class PasswordAuthController {
      * POST /api/v1/auth/logout
      */
     static logout(req: AdminRequest, res: Response): Promise<Response<any, Record<string, any>>>;
+    /**
+     * Verify password reset token
+     * GET /api/v1/auth/verify-reset-token?token=XXX
+     */
+    static verifyResetToken(req: Request, res: Response): Promise<Response<any, Record<string, any>>>;
+    /**
+     * Reset password using token
+     * POST /api/v1/auth/reset-password
+     */
+    static resetPassword(req: Request, res: Response): Promise<Response<any, Record<string, any>>>;
 }
 //# sourceMappingURL=PasswordAuthController.d.ts.map

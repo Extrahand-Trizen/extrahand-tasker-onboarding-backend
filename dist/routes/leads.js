@@ -16,6 +16,8 @@ router.use(adminAuth_1.adminAuthMiddleware);
 router.post('/', (0, roleAuth_1.requirePermission)('canCreateLead'), LeadController_1.LeadController.createLead);
 // Search and filter leads
 router.get('/', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.searchLeads);
+// Get unique users who have added leads (for filter dropdown)
+router.get('/creators', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getLeadCreators);
 // Check for duplicates
 router.post('/duplicate-check', (0, roleAuth_1.requirePermission)('canCreateLead'), LeadController_1.LeadController.checkDuplicate);
 // Verification queue (must be before /:leadId to avoid route conflict)
@@ -36,6 +38,11 @@ router.post('/:leadId/notes', (0, roleAuth_1.requirePermission)('canAddNotes'), 
 // Bulk operations
 router.post('/bulk-status', (0, roleAuth_1.requirePermission)('canUpdateLead'), BulkOperationsController_1.BulkOperationsController.bulkStatusChange);
 router.post('/bulk-assign-skills', (0, roleAuth_1.requirePermission)('canAssignSkills'), BulkOperationsController_1.BulkOperationsController.bulkAssignSkills);
+router.post('/bulk-delete', (0, roleAuth_1.requirePermission)('canUpdateLead'), // Using canUpdateLead permission for delete
+BulkOperationsController_1.BulkOperationsController.bulkDeleteLeads);
+// Delete single lead
+router.delete('/:leadId', (0, roleAuth_1.requirePermission)('canUpdateLead'), // Using canUpdateLead permission for delete
+LeadController_1.LeadController.deleteLead);
 // Document management
 router.post('/:leadId/documents', (0, roleAuth_1.requirePermission)('canUploadDocuments'), DocumentController_1.DocumentController.uploadDocument);
 // Aadhaar verification (API-based)

@@ -70,7 +70,8 @@ export interface IActivationData {
 export interface ILead extends Document {
     leadId: string;
     name: string;
-    phone: string;
+    phone?: string;
+    landline?: string;
     email?: string;
     city: string;
     state?: string;

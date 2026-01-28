@@ -1,4 +1,4 @@
-import { Queue, Job } from 'bullmq';
+import { Queue, Job } from "bullmq";
 declare function getCsvQueue(): Queue;
 export declare const csvQueue: {
     get: typeof getCsvQueue;

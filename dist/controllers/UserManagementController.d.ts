@@ -46,5 +46,10 @@ export declare class UserManagementController {
      * DELETE /api/v1/admin/users/:userId/sessions
      */
     static revokeAllSessions(req: AdminRequest, res: Response): Promise<Response<any, Record<string, any>>>;
+    /**
+     * Delete a user (soft delete by setting status to inactive)
+     * DELETE /api/v1/admin/users/:userId
+     */
+    static deleteUser(req: AdminRequest, res: Response): Promise<Response<any, Record<string, any>>>;
 }
 //# sourceMappingURL=UserManagementController.d.ts.map

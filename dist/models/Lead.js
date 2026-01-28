@@ -48,7 +48,14 @@ const LeadSchema = new mongoose_1.Schema({
     },
     phone: {
         type: String,
-        required: true,
+        required: false,
+        trim: true,
+        index: true,
+        sparse: true
+    },
+    landline: {
+        type: String,
+        required: false,
         trim: true,
         index: true,
         sparse: true
@@ -166,12 +173,21 @@ const LeadSchema = new mongoose_1.Schema({
         trim: true,
         index: true
     },
+    primaryCategory: {
+        type: String,
+        trim: true,
+        index: true
+    },
+    secondaryCategory: {
+        type: String,
+        trim: true
+    },
     skills: [{
             name: { type: String, required: true },
             category: String,
             level: {
                 type: String,
-                enum: ['beginner', 'experienced']
+                enum: ['beginner', 'intermediate', 'experienced']
             },
             toolsAvailable: Boolean,
             assignedBy: String,
@@ -268,6 +284,13 @@ const LeadSchema = new mongoose_1.Schema({
     }
 }, {
     timestamps: true
+});
+// Pre-save hook to ensure at least one contact number (phone or landline) exists
+LeadSchema.pre('save', function (next) {
+    if (!this.phone && !this.landline) {
+        return next(new Error('At least one contact number (phone or landline) is required'));
+    }
+    next();
 });
 // Compound indexes for common queries
 LeadSchema.index({ status: 1, createdAt: -1 });

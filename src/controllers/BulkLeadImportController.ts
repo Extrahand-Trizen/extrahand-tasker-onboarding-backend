@@ -7,7 +7,6 @@ import Lead from "../models/Lead";
 import { csvQueue } from "../queues/csvQueue";
 import fs from "fs/promises";
 import path from "path";
-import os from "os";
 
 export class BulkLeadImportController {
   /**
@@ -124,9 +123,8 @@ export class BulkLeadImportController {
         | "lead_access_manager"
         | undefined;
 
-      // Store file temporarily - use system temp directory for better permissions
-      // In production (Docker), process.cwd() might be /app which isn't writable
-      const tempDir = process.env.TEMP_DIR || path.join(os.tmpdir(), 'extrahand-csv-imports');
+      // Store file temporarily
+      const tempDir = path.join(process.cwd(), "temp");
       await fs.mkdir(tempDir, { recursive: true });
 
       const tempFilePath = path.join(
@@ -223,7 +221,6 @@ export class BulkLeadImportController {
           failedCount: result.failedCount,
           errors: result.errors.slice(0, 10), // Limit errors in response
           importedLeadIds: result.importedLeadIds.slice(0, 10), // Limit IDs in response
-          updatedLeadIds: result.updatedLeadIds?.slice(0, 10) || [], // Limit IDs in response
         },
         message: `Imported ${result.successCount} leads successfully${result.failedCount > 0 ? `, ${result.failedCount} failed` : ""}`,
         note: "Processed synchronously (Queue disabled)",
@@ -462,8 +459,8 @@ export class BulkLeadImportController {
   }
 
   /**
-   * Get import analytics
-   * GET /api/v1/admin/caos/leads/bulk-import/analytics
+   * Get comprehensive import analytics
+   * GET /api/v1/onboarding/leads/bulk-import/analytics
    */
   static async getImportAnalytics(
     req: AdminRequest,
@@ -478,18 +475,6 @@ export class BulkLeadImportController {
         return;
       }
 
-      const userRole = req.admin?.role;
-
-      // Only Lead Access Managers can view analytics
-      if (userRole !== "lead_access_manager") {
-        res.status(403).json({
-          success: false,
-          error: "Permission denied",
-          message: "Import analytics is only accessible to Lead Access Managers",
-        });
-        return;
-      }
-
       const analytics = await BulkLeadImportService.getImportAnalytics();
 
       res.json({
@@ -499,7 +484,6 @@ export class BulkLeadImportController {
     } catch (error: any) {
       logger.error("Error in getImportAnalytics controller", {
         error: error.message,
-        stack: error.stack,
       });
       res.status(500).json({
         success: false,

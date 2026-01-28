@@ -11,5 +11,10 @@ export declare class BulkOperationsController {
      * POST /api/v1/admin/caos/leads/bulk-assign-skills
      */
     static bulkAssignSkills(req: AdminRequest, res: Response): Promise<void>;
+    /**
+     * Bulk delete leads
+     * POST /api/v1/admin/caos/leads/bulk-delete
+     */
+    static bulkDeleteLeads(req: AdminRequest, res: Response): Promise<void>;
 }
 //# sourceMappingURL=BulkOperationsController.d.ts.map

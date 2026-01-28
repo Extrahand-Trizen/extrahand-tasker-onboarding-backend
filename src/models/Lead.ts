@@ -99,7 +99,8 @@ export interface IActivationData {
 export interface ILead extends Document {
   leadId: string;
   name: string;
-  phone: string;
+  phone?: string;
+  landline?: string;
   email?: string;
   city: string;
   state?: string;
@@ -174,7 +175,14 @@ const LeadSchema = new Schema<ILead>({
   },
   phone: {
     type: String,
-    required: true,
+    required: false,
+    trim: true,
+    index: true,
+    sparse: true
+  },
+  landline: {
+    type: String,
+    required: false,
     trim: true,
     index: true,
     sparse: true
@@ -292,6 +300,15 @@ const LeadSchema = new Schema<ILead>({
     trim: true,
     index: true
   },
+  primaryCategory: {
+    type: String,
+    trim: true,
+    index: true
+  },
+  secondaryCategory: {
+    type: String,
+    trim: true
+  },
   skills: [{
     name: { type: String, required: true },
     category: String,
@@ -394,6 +411,14 @@ const LeadSchema = new Schema<ILead>({
   }
 }, {
   timestamps: true
+});
+
+// Pre-save hook to ensure at least one contact number (phone or landline) exists
+LeadSchema.pre('save', function(next) {
+  if (!this.phone && !this.landline) {
+    return next(new Error('At least one contact number (phone or landline) is required'));
+  }
+  next();
 });
 
 // Compound indexes for common queries

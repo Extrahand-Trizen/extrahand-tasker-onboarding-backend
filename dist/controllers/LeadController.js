@@ -48,17 +48,26 @@ class LeadController {
                 });
                 return;
             }
-            const { name, phone, email, city, state, address, pincode, primaryCategory, primarySkill, // Legacy support
+            const { name, phone, landline, email, city, state, address, pincode, primaryCategory, primarySkill, // Legacy support
             secondaryCategory, secondarySkill, // Legacy support
             experienceLevel, workingDays, preferredTimeSlot, source, sourceDetails } = req.body;
             // Validation - support both new and legacy field names
             const primaryCategoryValue = primaryCategory || primarySkill;
             const secondaryCategoryValue = secondaryCategory || secondarySkill;
-            if (!name || !phone || !city || !primaryCategoryValue || !source) {
+            // Validate at least one contact number is provided
+            if (!phone?.trim() && !landline?.trim()) {
                 res.status(400).json({
                     success: false,
                     error: 'Missing required fields',
-                    message: 'Name, phone, city, primary category, and source are required'
+                    message: 'At least one contact number (phone or landline) is required'
+                });
+                return;
+            }
+            if (!name || !city || !primaryCategoryValue || !source) {
+                res.status(400).json({
+                    success: false,
+                    error: 'Missing required fields',
+                    message: 'Name, city, primary category, and source are required'
                 });
                 return;
             }
@@ -80,7 +89,8 @@ class LeadController {
             }
             const leadData = {
                 name,
-                phone,
+                phone: phone?.trim() || undefined,
+                landline: landline?.trim() || undefined,
                 email,
                 city,
                 state,
@@ -175,6 +185,36 @@ class LeadController {
             res.status(500).json({
                 success: false,
                 error: 'Failed to get lead',
+                message: error.message
+            });
+        }
+    }
+    /**
+     * Get unique users who have added leads (for filter dropdown)
+     * GET /api/v1/onboarding/leads/creators
+     */
+    static async getLeadCreators(req, res) {
+        try {
+            if (!req.admin) {
+                res.status(401).json({
+                    success: false,
+                    error: 'Authentication required'
+                });
+                return;
+            }
+            const creators = await LeadService_1.LeadService.getLeadCreators();
+            res.json({
+                success: true,
+                data: creators
+            });
+        }
+        catch (error) {
+            logger_1.default.error('Error in getLeadCreators controller', {
+                error: error.message
+            });
+            res.status(500).json({
+                success: false,
+                error: 'Failed to get lead creators',
                 message: error.message
             });
         }
@@ -415,15 +455,16 @@ class LeadController {
      */
     static async checkDuplicate(req, res) {
         try {
-            const { phone, name, city } = req.body;
-            if (!phone) {
+            const { phone, landline, name, city } = req.body;
+            // At least one contact number must be provided
+            if (!phone?.trim() && !landline?.trim()) {
                 res.status(400).json({
                     success: false,
-                    error: 'Phone number is required'
+                    error: 'At least one contact number (phone or landline) is required'
                 });
                 return;
             }
-            const result = await DuplicateCheckService_1.DuplicateCheckService.checkDuplicate(phone, name, city);
+            const result = await DuplicateCheckService_1.DuplicateCheckService.checkDuplicate(phone?.trim() || undefined, landline?.trim() || undefined, name, city);
             res.json({
                 success: true,
                 data: result
@@ -471,6 +512,58 @@ class LeadController {
             res.status(500).json({
                 success: false,
                 error: 'Failed to get status history',
+                message: error.message
+            });
+        }
+    }
+    /**
+     * Delete a lead
+     * DELETE /api/v1/admin/caos/leads/:leadId
+     */
+    static async deleteLead(req, res) {
+        try {
+            if (!req.admin) {
+                res.status(401).json({
+                    success: false,
+                    error: 'Authentication required'
+                });
+                return;
+            }
+            const { leadId } = req.params;
+            const userId = getUserId(req);
+            const userName = req.admin.name;
+            // Check if user can access this lead
+            const existingLead = await LeadService_1.LeadService.getLeadById(leadId);
+            if (!existingLead) {
+                res.status(404).json({
+                    success: false,
+                    error: 'Lead not found'
+                });
+                return;
+            }
+            // Check access permissions
+            if (!canAccessLead(req, existingLead.addedBy)) {
+                res.status(403).json({
+                    success: false,
+                    error: 'Forbidden',
+                    message: 'You can only delete leads that you have added.'
+                });
+                return;
+            }
+            await LeadService_1.LeadService.deleteLead(leadId, userId || '', userName);
+            res.json({
+                success: true,
+                message: 'Lead deleted successfully'
+            });
+        }
+        catch (error) {
+            logger_1.default.error('Error in deleteLead controller', {
+                error: error.message,
+                leadId: req.params.leadId
+            });
+            res.status(500).json({
+                success: false,
+                error: 'Failed to delete lead',
                 message: error.message
             });
         }

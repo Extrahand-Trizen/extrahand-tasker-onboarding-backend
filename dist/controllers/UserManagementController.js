@@ -523,6 +523,50 @@ class UserManagementController {
             });
         }
     }
+    /**
+     * Delete a user (soft delete by setting status to inactive)
+     * DELETE /api/v1/admin/users/:userId
+     */
+    static async deleteUser(req, res) {
+        try {
+            const { userId } = req.params;
+            const actorId = req.admin?.userId || 'system';
+            const user = await AdminUser_1.default.findOne({ userId });
+            if (!user) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'User not found',
+                });
+            }
+            // Prevent self-deletion
+            if (user.userId === actorId) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Cannot delete your own account',
+                });
+            }
+            // Soft delete by setting status to inactive
+            user.status = 'inactive';
+            user.refreshTokens = []; // Revoke all sessions
+            await user.save();
+            logger_1.default.info('User deleted (soft delete)', {
+                userId: user.userId,
+                email: user.email,
+                deletedBy: actorId,
+            });
+            return res.json({
+                success: true,
+                message: 'User deleted successfully',
+            });
+        }
+        catch (error) {
+            logger_1.default.error('Delete user error', { error: error.message });
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to delete user',
+            });
+        }
+    }
 }
 exports.UserManagementController = UserManagementController;
 //# sourceMappingURL=UserManagementController.js.map

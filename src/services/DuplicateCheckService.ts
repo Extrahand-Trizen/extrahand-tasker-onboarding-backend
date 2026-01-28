@@ -17,19 +17,38 @@ export class DuplicateCheckService {
       // Normalize phone number (remove spaces, dashes, country code)
       const normalizedPhone = this.normalizePhone(phone);
       
-      const existingLead = await Lead.findOne({
+      // Check in phone field
+      const existingLeadByPhone = await Lead.findOne({
         phone: normalizedPhone,
         status: { $nin: ['rejected', 'inactive'] } // ✅ Don't match rejected or inactive (deleted) leads
       }).lean();
 
-      if (existingLead) {
+      if (existingLeadByPhone) {
         logger.info('Duplicate phone found', {
           phone: normalizedPhone,
-          existingLeadId: existingLead.leadId
+          existingLeadId: existingLeadByPhone.leadId
         });
         return {
           isDuplicate: true,
-          existingLead: existingLead as unknown as ILead,
+          existingLead: existingLeadByPhone as unknown as ILead,
+          matchType: 'phone'
+        };
+      }
+
+      // Also check in landline field (cross-field duplicate check)
+      const existingLeadByLandline = await Lead.findOne({
+        landline: normalizedPhone,
+        status: { $nin: ['rejected', 'inactive'] }
+      }).lean();
+
+      if (existingLeadByLandline) {
+        logger.info('Duplicate phone found in landline field', {
+          phone: normalizedPhone,
+          existingLeadId: existingLeadByLandline.leadId
+        });
+        return {
+          isDuplicate: true,
+          existingLead: existingLeadByLandline as unknown as ILead,
           matchType: 'phone'
         };
       }
@@ -39,6 +58,60 @@ export class DuplicateCheckService {
       logger.error('Duplicate check error', {
         error: error.message,
         phone
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Check if a landline number already exists in leads
+   */
+  static async checkLandlineDuplicate(landline: string): Promise<DuplicateCheckResult> {
+    try {
+      // Normalize landline number
+      const normalizedLandline = this.normalizeLandline(landline);
+      
+      // Check in landline field
+      const existingLeadByLandline = await Lead.findOne({
+        landline: normalizedLandline,
+        status: { $nin: ['rejected', 'inactive'] }
+      }).lean();
+
+      if (existingLeadByLandline) {
+        logger.info('Duplicate landline found', {
+          landline: normalizedLandline,
+          existingLeadId: existingLeadByLandline.leadId
+        });
+        return {
+          isDuplicate: true,
+          existingLead: existingLeadByLandline as unknown as ILead,
+          matchType: 'phone' // Using 'phone' for consistency
+        };
+      }
+
+      // Also check in phone field (cross-field duplicate check)
+      const existingLeadByPhone = await Lead.findOne({
+        phone: normalizedLandline,
+        status: { $nin: ['rejected', 'inactive'] }
+      }).lean();
+
+      if (existingLeadByPhone) {
+        logger.info('Duplicate landline found in phone field', {
+          landline: normalizedLandline,
+          existingLeadId: existingLeadByPhone.leadId
+        });
+        return {
+          isDuplicate: true,
+          existingLead: existingLeadByPhone as unknown as ILead,
+          matchType: 'phone'
+        };
+      }
+
+      return { isDuplicate: false };
+    } catch (error: any) {
+      logger.error('Landline duplicate check error', {
+        error: error.message,
+        landline
       });
       throw error;
     }
@@ -85,13 +158,28 @@ export class DuplicateCheckService {
   }
 
   /**
-   * Comprehensive duplicate check
+   * Comprehensive duplicate check (supports both phone and landline)
    */
-  static async checkDuplicate(phone: string, name?: string, city?: string): Promise<DuplicateCheckResult> {
-    // First check phone (most reliable)
-    const phoneCheck = await this.checkPhoneDuplicate(phone);
-    if (phoneCheck.isDuplicate) {
-      return phoneCheck;
+  static async checkDuplicate(
+    phone?: string, 
+    landline?: string, 
+    name?: string, 
+    city?: string
+  ): Promise<DuplicateCheckResult> {
+    // First check phone if provided (most reliable)
+    if (phone) {
+      const phoneCheck = await this.checkPhoneDuplicate(phone);
+      if (phoneCheck.isDuplicate) {
+        return phoneCheck;
+      }
+    }
+
+    // Then check landline if provided
+    if (landline) {
+      const landlineCheck = await this.checkLandlineDuplicate(landline);
+      if (landlineCheck.isDuplicate) {
+        return landlineCheck;
+      }
     }
 
     // Then check name+city if provided
@@ -126,6 +214,14 @@ export class DuplicateCheckService {
   }
 
   /**
+   * Normalize landline number
+   */
+  static normalizeLandline(landline: string): string {
+    // Remove all non-digit characters
+    return landline.replace(/\D/g, '');
+  }
+
+  /**
    * Bulk check for duplicate phones (optimized - single query)
    * Returns a map of normalized phone -> existing lead for O(1) lookup
    */
@@ -148,7 +244,10 @@ export class DuplicateCheckService {
       // Create a map for O(1) lookup: normalizedPhone -> existingLead
       const duplicatePhoneToLeadMap = new Map<string, ILead>();
       existingLeads.forEach(lead => {
-        duplicatePhoneToLeadMap.set(lead.phone, lead as unknown as ILead);
+        const phone = lead.phone;
+        if (phone) {
+          duplicatePhoneToLeadMap.set(phone, lead as unknown as ILead);
+        }
       });
 
       logger.info('Bulk duplicate check completed', {
@@ -167,46 +266,67 @@ export class DuplicateCheckService {
   }
 
   /**
-   * Check if a phone number already exists with the same category
+   * Check if a phone number or landline already exists with the same category
    */
   static async checkPhoneCategoryDuplicate(
-    phone: string, 
+    contact: string, 
     primaryCategory: string, 
     secondaryCategory?: string
   ): Promise<DuplicateCheckResult> {
     try {
-      const normalizedPhone = this.normalizePhone(phone);
+      const normalizedContact = this.normalizePhone(contact); // Try phone normalization first
       
-      // Build query for exact category match
-      const query: any = {
-        phone: normalizedPhone,
+      // Build query for exact category match - check both phone and landline fields
+      const categoryQuery: any = {
         primaryCategory: primaryCategory,
         status: { $nin: ['rejected', 'inactive'] }
       };
 
       // If secondary category is provided, match it; otherwise check for missing or empty
       if (secondaryCategory && secondaryCategory.trim()) {
-        query.secondaryCategory = secondaryCategory.trim();
+        categoryQuery.secondaryCategory = secondaryCategory.trim();
       } else {
-        query.$or = [
+        categoryQuery.$or = [
           { secondaryCategory: { $exists: false } },
           { secondaryCategory: '' },
           { secondaryCategory: null }
         ];
       }
-      
-      const existingLead = await Lead.findOne(query).lean();
 
-      if (existingLead) {
-        logger.info('Duplicate phone+category found', {
-          phone: normalizedPhone,
+      // Check in phone field
+      const queryPhone = { ...categoryQuery, phone: normalizedContact };
+      const existingLeadByPhone = await Lead.findOne(queryPhone).lean();
+
+      if (existingLeadByPhone) {
+        logger.info('Duplicate contact+category found (phone field)', {
+          contact: normalizedContact,
           primaryCategory,
           secondaryCategory,
-          existingLeadId: existingLead.leadId
+          existingLeadId: existingLeadByPhone.leadId
         });
         return {
           isDuplicate: true,
-          existingLead: existingLead as unknown as ILead,
+          existingLead: existingLeadByPhone as unknown as ILead,
+          matchType: 'phone',
+          sameCategory: true
+        };
+      }
+
+      // Also check in landline field
+      const normalizedLandline = this.normalizeLandline(contact);
+      const queryLandline = { ...categoryQuery, landline: normalizedLandline };
+      const existingLeadByLandline = await Lead.findOne(queryLandline).lean();
+
+      if (existingLeadByLandline) {
+        logger.info('Duplicate contact+category found (landline field)', {
+          contact: normalizedLandline,
+          primaryCategory,
+          secondaryCategory,
+          existingLeadId: existingLeadByLandline.leadId
+        });
+        return {
+          isDuplicate: true,
+          existingLead: existingLeadByLandline as unknown as ILead,
           matchType: 'phone',
           sameCategory: true
         };
@@ -214,9 +334,9 @@ export class DuplicateCheckService {
 
       return { isDuplicate: false, sameCategory: false };
     } catch (error: any) {
-      logger.error('Phone+category duplicate check error', {
+      logger.error('Contact+category duplicate check error', {
         error: error.message,
-        phone,
+        contact,
         primaryCategory
       });
       throw error;
@@ -225,36 +345,42 @@ export class DuplicateCheckService {
 
   /**
    * Check duplicate considering category (allows same person with different categories)
+   * Supports both phone and landline
    */
   static async checkDuplicateWithCategory(
-    phone: string, 
+    contact: string, 
     primaryCategory: string,
     secondaryCategory?: string,
     name?: string, 
     city?: string
   ): Promise<DuplicateCheckResult> {
-    // First check if same phone + same category exists
-    const phoneCategoryCheck = await this.checkPhoneCategoryDuplicate(
-      phone, 
+    // First check if same contact + same category exists
+    const contactCategoryCheck = await this.checkPhoneCategoryDuplicate(
+      contact, 
       primaryCategory, 
       secondaryCategory
     );
     
-    if (phoneCategoryCheck.isDuplicate) {
-      return phoneCategoryCheck;
+    if (contactCategoryCheck.isDuplicate) {
+      return contactCategoryCheck;
     }
 
-    // If different category, check if phone exists with different category
-    const normalizedPhone = this.normalizePhone(phone);
+    // If different category, check if contact exists with different category (check both phone and landline fields)
+    const normalizedContact = this.normalizePhone(contact);
+    const normalizedLandline = this.normalizeLandline(contact);
+    
     const existingLeadDifferentCategory = await Lead.findOne({
-      phone: normalizedPhone,
+      $or: [
+        { phone: normalizedContact },
+        { landline: normalizedLandline }
+      ],
       status: { $nin: ['rejected', 'inactive'] }
     }).lean();
 
     if (existingLeadDifferentCategory) {
       // Same phone but different category - this is allowed, but we return info
       logger.info('Same phone with different category found', {
-        phone: normalizedPhone,
+        phone: normalizedContact,
         existingLeadId: existingLeadDifferentCategory.leadId,
         existingCategory: existingLeadDifferentCategory.primaryCategory,
         newCategory: primaryCategory
@@ -283,47 +409,64 @@ export class DuplicateCheckService {
    * Returns a map of normalized phone -> existing leads array for O(1) lookup
    */
   static async checkPhonesBulkWithCategories(
-    phoneNumbers: string[], 
+    contacts: string[], 
     categories?: Map<string, { primary: string; secondary?: string }>
   ): Promise<Map<string, ILead[]>> {
     try {
-      if (phoneNumbers.length === 0) {
+      if (contacts.length === 0) {
         return new Map();
       }
 
-      // Normalize all phone numbers
-      const normalizedPhones = phoneNumbers.map(phone => this.normalizePhone(phone));
-      const uniqueNormalizedPhones = [...new Set(normalizedPhones)];
+      // Normalize all contacts (try phone normalization first, then landline)
+      const normalizedContacts = contacts.map(contact => {
+        // Try phone normalization first (for 10-digit numbers)
+        const phoneNormalized = this.normalizePhone(contact);
+        // Also try landline normalization
+        const landlineNormalized = this.normalizeLandline(contact);
+        return { phoneNormalized, landlineNormalized, original: contact };
+      });
       
-      // Single MongoDB query to find all existing leads with these phone numbers
-      // Include skills array to check for existing skills during bulk import
+      const uniqueNormalizedPhones = [...new Set(normalizedContacts.map(c => c.phoneNormalized))];
+      const uniqueNormalizedLandlines = [...new Set(normalizedContacts.map(c => c.landlineNormalized))];
+      
+      // Single MongoDB query to find all existing leads with these contacts (check both phone and landline fields)
       const existingLeads = await Lead.find({
-        phone: { $in: uniqueNormalizedPhones },
+        $or: [
+          { phone: { $in: uniqueNormalizedPhones } },
+          { landline: { $in: uniqueNormalizedLandlines } }
+        ],
         status: { $nin: ['rejected', 'inactive'] }
-      })
-      .select('leadId phone name primaryCategory primarySkill secondaryCategory secondarySkill skills')
-      .lean();
+      }).lean();
 
-      // Create a map for O(1) lookup: normalizedPhone -> existingLeads[]
-      const phoneToLeadsMap = new Map<string, ILead[]>();
+      // Create a map for O(1) lookup: normalizedContact -> existingLeads[]
+      const contactToLeadsMap = new Map<string, ILead[]>();
       existingLeads.forEach(lead => {
-        const phone = lead.phone;
-        if (!phoneToLeadsMap.has(phone)) {
-          phoneToLeadsMap.set(phone, []);
+        // Add to map using phone if present
+        if (lead.phone) {
+          if (!contactToLeadsMap.has(lead.phone)) {
+            contactToLeadsMap.set(lead.phone, []);
+          }
+          contactToLeadsMap.get(lead.phone)!.push(lead as unknown as ILead);
         }
-        phoneToLeadsMap.get(phone)!.push(lead as unknown as ILead);
+        // Add to map using landline if present
+        if (lead.landline) {
+          if (!contactToLeadsMap.has(lead.landline)) {
+            contactToLeadsMap.set(lead.landline, []);
+          }
+          contactToLeadsMap.get(lead.landline)!.push(lead as unknown as ILead);
+        }
       });
 
       logger.info('Bulk duplicate check with categories completed', {
-        checkedPhones: uniqueNormalizedPhones.length,
-        foundLeads: phoneToLeadsMap.size
+        checkedContacts: contacts.length,
+        foundLeads: contactToLeadsMap.size
       });
 
-      return phoneToLeadsMap;
+      return contactToLeadsMap;
     } catch (error: any) {
       logger.error('Bulk duplicate check with categories error', {
         error: error.message,
-        phoneCount: phoneNumbers.length
+        contactCount: contacts.length
       });
       throw error;
     }

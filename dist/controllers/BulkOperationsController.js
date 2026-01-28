@@ -171,6 +171,90 @@ class BulkOperationsController {
             });
         }
     }
+    /**
+     * Bulk delete leads
+     * POST /api/v1/admin/caos/leads/bulk-delete
+     */
+    static async bulkDeleteLeads(req, res) {
+        try {
+            if (!req.admin) {
+                res.status(401).json({
+                    success: false,
+                    error: 'Authentication required',
+                });
+                return;
+            }
+            const { leadIds } = req.body;
+            if (!Array.isArray(leadIds) || leadIds.length === 0) {
+                res.status(400).json({
+                    success: false,
+                    error: 'leadIds array is required',
+                });
+                return;
+            }
+            const adminUid = req.admin?.uid || req.admin?.userId;
+            if (!adminUid) {
+                res.status(401).json({
+                    success: false,
+                    error: 'Admin UID not found',
+                });
+                return;
+            }
+            const results = {
+                success: 0,
+                failed: 0,
+                errors: [],
+            };
+            for (const leadId of leadIds) {
+                try {
+                    // Check if user can access this lead before deleting
+                    const existingLead = await LeadService_1.LeadService.getLeadById(leadId);
+                    if (!existingLead) {
+                        results.failed++;
+                        results.errors.push({
+                            leadId,
+                            error: 'Lead not found',
+                        });
+                        continue;
+                    }
+                    // Check access - only allow deleting leads added by current user (unless lead_access_manager)
+                    const role = (req.admin.role || 'qualifier');
+                    if (role !== 'lead_access_manager' && existingLead.addedBy !== adminUid) {
+                        results.failed++;
+                        results.errors.push({
+                            leadId,
+                            error: 'You can only delete leads that you have added',
+                        });
+                        continue;
+                    }
+                    await LeadService_1.LeadService.deleteLead(leadId, adminUid, req.admin?.name);
+                    results.success++;
+                }
+                catch (error) {
+                    results.failed++;
+                    results.errors.push({
+                        leadId,
+                        error: error.message || 'Failed to delete lead',
+                    });
+                }
+            }
+            res.json({
+                success: true,
+                data: results,
+                message: `Deleted ${results.success} leads successfully`,
+            });
+        }
+        catch (error) {
+            logger_1.default.error('Error in bulkDeleteLeads controller', {
+                error: error.message,
+            });
+            res.status(500).json({
+                success: false,
+                error: 'Failed to delete leads',
+                message: error.message,
+            });
+        }
+    }
 }
 exports.BulkOperationsController = BulkOperationsController;
 //# sourceMappingURL=BulkOperationsController.js.map

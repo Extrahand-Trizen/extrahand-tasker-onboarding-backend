@@ -43,6 +43,8 @@ router.get('/job/:jobId', (0, roleAuth_1.requirePermission)('canBulkImport'), Bu
 router.get('/template', (0, roleAuth_1.requirePermission)('canBulkImport'), BulkLeadImportController_1.BulkLeadImportController.downloadTemplate);
 // Import history
 router.get('/history', (0, roleAuth_1.requirePermission)('canViewLeads'), BulkLeadImportController_1.BulkLeadImportController.getImportHistory);
+// Import analytics (must come before :importId route)
+router.get('/analytics', (0, roleAuth_1.requirePermission)('canViewLeads'), BulkLeadImportController_1.BulkLeadImportController.getImportAnalytics);
 // Get imported leads for an import (must come before :importId route)
 router.get('/:importId/leads', (0, roleAuth_1.requirePermission)('canViewLeads'), BulkLeadImportController_1.BulkLeadImportController.getImportedLeads);
 // Export UIDs from import (must come before :importId route)

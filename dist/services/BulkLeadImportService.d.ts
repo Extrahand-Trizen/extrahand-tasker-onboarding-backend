@@ -1,8 +1,9 @@
-import { LeadSource } from '../models/Lead';
-import { IBulkImport } from '../models/BulkImport';
+import { LeadSource } from "../models/Lead";
+import { IBulkImport } from "../models/BulkImport";
 export interface BulkLeadImportRow {
     name: string;
-    phone: string;
+    phone?: string;
+    landline?: string;
     email?: string;
     city: string;
     state: string;
@@ -11,7 +12,7 @@ export interface BulkLeadImportRow {
     primaryCategory?: string;
     primarySkill?: string;
     secondaryCategory?: string;
-    experienceLevel?: 'beginner' | 'intermediate' | 'experienced';
+    experienceLevel?: "beginner" | "intermediate" | "experienced";
     yearsOfExperience?: number;
     workingDays?: string;
     preferredTimeSlot?: string;
@@ -29,6 +30,7 @@ export interface BulkLeadImportResult {
         error: string;
     }>;
     importedLeadIds: string[];
+    updatedLeadIds?: string[];
 }
 export interface ProgressCallback {
     (progress: number, message: string): void;
@@ -51,6 +53,14 @@ export declare class BulkLeadImportService {
      */
     static parseCSV(fileBuffer: Buffer, defaultPrimaryCategory?: string, defaultSecondaryCategory?: string, progressCallback?: ProgressCallback): Promise<BulkLeadImportRow[]>;
     /**
+     * Parse Excel file (.xls, .xlsx)
+     */
+    static parseExcel(fileBuffer: Buffer, defaultPrimaryCategory?: string, defaultSecondaryCategory?: string, progressCallback?: ProgressCallback): Promise<BulkLeadImportRow[]>;
+    /**
+     * Parse file based on extension (CSV or Excel)
+     */
+    static parseFile(fileBuffer: Buffer, fileName: string, defaultPrimaryCategory?: string, defaultSecondaryCategory?: string, progressCallback?: ProgressCallback): Promise<BulkLeadImportRow[]>;
+    /**
      * Validate import row
      * @param row - The row to validate
      * @param rowNumber - Row number for error reporting
@@ -69,17 +79,21 @@ export declare class BulkLeadImportService {
             rowNumber: number;
             name: string;
             phone: string;
+            landline?: string;
             email?: string;
             city: string;
             state: string;
             primaryCategory: string;
             secondaryCategory: string;
             experienceLevel?: string;
-            status: "valid" | "invalid";
+            status: "valid" | "invalid" | "warning";
             errors: string[];
             isDuplicateInFile: boolean;
             isDuplicateInDb: boolean;
+            isDifferentCategory?: boolean;
             duplicateLeadId?: string;
+            existingPrimaryCategory?: string;
+            existingSecondaryCategory?: string;
         }>;
         summary: {
             total: number;
@@ -87,6 +101,7 @@ export declare class BulkLeadImportService {
             invalid: number;
             duplicatesInFile: number;
             duplicatesInDb: number;
+            differentCategory: number;
         };
     }>;
     /**
@@ -96,7 +111,7 @@ export declare class BulkLeadImportService {
      * ✅ Efficient: Uses bulk operations for better performance
      */
     static bulkImportLeads(fileBuffer: Buffer, fileName: string, userId: string, // Changed from adminUid to userId (works for any role)
-    adminName?: string, adminEmail?: string, adminRole?: 'qualifier' | 'onboarder' | 'lead_access_manager', source?: LeadSource, defaultPrimaryCategory?: string, defaultSecondaryCategory?: string, progressCallback?: ProgressCallback): Promise<BulkLeadImportResult>;
+    adminName?: string, adminEmail?: string, adminRole?: "qualifier" | "onboarder" | "lead_access_manager", source?: LeadSource, defaultPrimaryCategory?: string, defaultSecondaryCategory?: string, progressCallback?: ProgressCallback): Promise<BulkLeadImportResult>;
     /**
      * Generate CSV template for lead import
      * If categories are provided, they will be pre-filled in the template (or columns removed)
@@ -109,12 +124,12 @@ export declare class BulkLeadImportService {
      */
     static getImportHistory(filters?: {
         userId?: string;
-        role?: 'qualifier' | 'onboarder' | 'lead_access_manager';
+        role?: "qualifier" | "onboarder" | "lead_access_manager";
         createdByEmail?: string;
         createdByName?: string;
         from?: Date;
         to?: Date;
-        status?: 'pending' | 'processing' | 'completed' | 'failed';
+        status?: "pending" | "processing" | "completed" | "failed";
         page?: number;
         limit?: number;
     }): Promise<{
@@ -124,6 +139,60 @@ export declare class BulkLeadImportService {
             limit: number;
             total: number;
             totalPages: number;
+        };
+    }>;
+    /**
+     * Get comprehensive import analytics
+     */
+    static getImportAnalytics(): Promise<{
+        uploadsByUser: Array<{
+            userId: string;
+            userName: string;
+            userRole: string;
+            totalUploads: number;
+            totalLeads: number;
+            successRate: number;
+            avgLeadsPerUpload: number;
+        }>;
+        uniqueVsDuplicate: {
+            uniqueLeads: number;
+            duplicateLeads: number;
+            updatedLeads: number;
+        };
+        statusDistribution: Array<{
+            status: string;
+            count: number;
+        }>;
+        roleBreakdown: Array<{
+            role: string;
+            totalUploads: number;
+            totalLeads: number;
+            successRate: number;
+        }>;
+        uploadsOverTime: Array<{
+            date: string;
+            uploads: number;
+            leads: number;
+        }>;
+        summaryMetrics: {
+            totalImports: number;
+            totalLeadsImported: number;
+            totalUniqueLeads: number;
+            totalDuplicates: number;
+            avgSuccessRate: number;
+            totalUploaders: number;
+        };
+        topUploaders: Array<{
+            userId: string;
+            userName: string;
+            totalLeads: number;
+            successRate: number;
+        }>;
+        qualityMetrics: {
+            avgDuplicateRate: number;
+            avgSuccessRate: number;
+            avgRowsPerUpload: number;
+            largestUpload: number;
         };
     }>;
     /**

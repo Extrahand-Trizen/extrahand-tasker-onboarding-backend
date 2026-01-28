@@ -55,6 +55,7 @@ export class LeadController {
       const {
         name,
         phone,
+        landline,
         email,
         city,
         state,
@@ -75,11 +76,21 @@ export class LeadController {
       const primaryCategoryValue = primaryCategory || primarySkill;
       const secondaryCategoryValue = secondaryCategory || secondarySkill;
       
-      if (!name || !phone || !city || !primaryCategoryValue || !source) {
+      // Validate at least one contact number is provided
+      if (!phone?.trim() && !landline?.trim()) {
         res.status(400).json({
           success: false,
           error: 'Missing required fields',
-          message: 'Name, phone, city, primary category, and source are required'
+          message: 'At least one contact number (phone or landline) is required'
+        });
+        return;
+      }
+      
+      if (!name || !city || !primaryCategoryValue || !source) {
+        res.status(400).json({
+          success: false,
+          error: 'Missing required fields',
+          message: 'Name, city, primary category, and source are required'
         });
         return;
       }
@@ -104,7 +115,8 @@ export class LeadController {
 
       const leadData: CreateLeadData = {
         name,
-        phone,
+        phone: phone?.trim() || undefined,
+        landline: landline?.trim() || undefined,
         email,
         city,
         state,
@@ -210,7 +222,7 @@ export class LeadController {
 
   /**
    * Get unique users who have added leads (for filter dropdown)
-   * GET /api/v1/admin/caos/leads/creators
+   * GET /api/v1/onboarding/leads/creators
    */
   static async getLeadCreators(req: AdminRequest, res: Response): Promise<void> {
     try {
@@ -515,17 +527,23 @@ export class LeadController {
    */
   static async checkDuplicate(req: AdminRequest, res: Response): Promise<void> {
     try {
-      const { phone, name, city } = req.body;
+      const { phone, landline, name, city } = req.body;
 
-      if (!phone) {
+      // At least one contact number must be provided
+      if (!phone?.trim() && !landline?.trim()) {
         res.status(400).json({
           success: false,
-          error: 'Phone number is required'
+          error: 'At least one contact number (phone or landline) is required'
         });
         return;
       }
 
-      const result = await DuplicateCheckService.checkDuplicate(phone, name, city);
+      const result = await DuplicateCheckService.checkDuplicate(
+        phone?.trim() || undefined,
+        landline?.trim() || undefined,
+        name,
+        city
+      );
 
       res.json({
         success: true,
@@ -597,11 +615,11 @@ export class LeadController {
 
       const { leadId } = req.params;
       const userId = getUserId(req);
-      const userName = req.admin.name || req.admin.email || userId;
+      const userName = req.admin.name;
 
-      // Check if lead exists
-      const lead = await LeadService.getLeadById(leadId);
-      if (!lead) {
+      // Check if user can access this lead
+      const existingLead = await LeadService.getLeadById(leadId);
+      if (!existingLead) {
         res.status(404).json({
           success: false,
           error: 'Lead not found'
@@ -609,8 +627,17 @@ export class LeadController {
         return;
       }
 
-      // Delete the lead
-      await LeadService.deleteLead(leadId, userId || 'system', userName);
+      // Check access permissions
+      if (!canAccessLead(req, existingLead.addedBy)) {
+        res.status(403).json({
+          success: false,
+          error: 'Forbidden',
+          message: 'You can only delete leads that you have added.'
+        });
+        return;
+      }
+
+      await LeadService.deleteLead(leadId, userId || '', userName);
 
       res.json({
         success: true,

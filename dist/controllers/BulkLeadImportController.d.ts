@@ -1,5 +1,5 @@
-import { Response } from 'express';
-import { AdminRequest } from '../middleware/adminAuth';
+import { Response } from "express";
+import { AdminRequest } from "../middleware/adminAuth";
 export declare class BulkLeadImportController {
     /**
      * Preview bulk import (validation + duplicate check, no records created)
@@ -28,6 +28,11 @@ export declare class BulkLeadImportController {
      * GET /api/v1/admin/caos/leads/bulk-import/history
      */
     static getImportHistory(req: AdminRequest, res: Response): Promise<void>;
+    /**
+     * Get comprehensive import analytics
+     * GET /api/v1/onboarding/leads/bulk-import/analytics
+     */
+    static getImportAnalytics(req: AdminRequest, res: Response): Promise<void>;
     /**
      * Get import details
      * GET /api/v1/admin/caos/leads/bulk-import/:importId

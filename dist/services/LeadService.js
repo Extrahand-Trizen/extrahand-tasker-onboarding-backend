@@ -23,22 +23,53 @@ class LeadService {
      */
     static async createLead(data, options) {
         try {
-            // Normalize phone
-            const normalizedPhone = DuplicateCheckService_1.DuplicateCheckService.normalizePhone(data.phone);
-            // Check for duplicates
-            const duplicateCheck = options?.skipNameCityDuplicate
-                ? await DuplicateCheckService_1.DuplicateCheckService.checkPhoneDuplicate(normalizedPhone)
-                : await DuplicateCheckService_1.DuplicateCheckService.checkDuplicate(normalizedPhone, data.name, data.city);
-            if (duplicateCheck.isDuplicate && duplicateCheck.existingLead) {
-                throw new Error(`Duplicate lead found: ${duplicateCheck.existingLead.leadId} (${duplicateCheck.matchType})`);
+            // Ensure at least one contact number is provided
+            if (!data.phone?.trim() && !data.landline?.trim()) {
+                throw new Error('At least one contact number (phone or landline) is required');
             }
+            // Normalize phone and landline
+            const normalizedPhone = data.phone ? DuplicateCheckService_1.DuplicateCheckService.normalizePhone(data.phone) : null;
+            const normalizedLandline = data.landline ? DuplicateCheckService_1.DuplicateCheckService.normalizeLandline(data.landline) : null;
+            // Support both new (primaryCategory) and legacy (primarySkill) field names
+            const primarySkillCategory = (data.primaryCategory || data.primarySkill || '').trim();
+            const secondaryCategoryValue = (data.secondaryCategory || data.secondarySkill || '').trim();
+            // Check for duplicates (considering category) - check both phone and landline
+            let duplicateCheck;
+            if (options?.skipNameCityDuplicate) {
+                // Check phone duplicates if phone provided
+                if (normalizedPhone) {
+                    duplicateCheck = await DuplicateCheckService_1.DuplicateCheckService.checkPhoneCategoryDuplicate(normalizedPhone, primarySkillCategory, secondaryCategoryValue);
+                    if (duplicateCheck.isDuplicate && duplicateCheck.sameCategory) {
+                        // Found duplicate, return it
+                    }
+                    else if (normalizedLandline) {
+                        // Also check landline
+                        const landlineCheck = await DuplicateCheckService_1.DuplicateCheckService.checkPhoneCategoryDuplicate(normalizedLandline, primarySkillCategory, secondaryCategoryValue);
+                        if (landlineCheck.isDuplicate && landlineCheck.sameCategory) {
+                            duplicateCheck = landlineCheck;
+                        }
+                    }
+                }
+                else if (normalizedLandline) {
+                    duplicateCheck = await DuplicateCheckService_1.DuplicateCheckService.checkPhoneCategoryDuplicate(normalizedLandline, primarySkillCategory, secondaryCategoryValue);
+                }
+                else {
+                    duplicateCheck = { isDuplicate: false };
+                }
+            }
+            else {
+                // Use comprehensive duplicate check
+                duplicateCheck = await DuplicateCheckService_1.DuplicateCheckService.checkDuplicateWithCategory(normalizedPhone || normalizedLandline || '', primarySkillCategory, secondaryCategoryValue, data.name, data.city);
+            }
+            if (duplicateCheck.isDuplicate && duplicateCheck.sameCategory) {
+                throw new Error(`This person with this category already exists: ${duplicateCheck.existingLead?.leadId} (${duplicateCheck.matchType})`);
+            }
+            // If sameCategory is false, allow it (different category for same person)
             // Decide initial status (restricted set)
             const initialStatus = data.status && ['lead_added', 'contacted', 'interested'].includes(data.status)
                 ? data.status
                 : 'lead_added';
-            // Support both new (primaryCategory) and legacy (primarySkill) field names
-            const primarySkillCategory = (data.primaryCategory || data.primarySkill || '').trim();
-            const secondaryCategoryValue = (data.secondaryCategory || data.secondarySkill || '').trim();
+            // Validate categories (already extracted above)
             if (!primarySkillCategory) {
                 throw new Error('Primary category is required');
             }
@@ -98,7 +129,7 @@ class LeadService {
                 skills: [{
                         name: primarySkillName,
                         category: primarySkillCategory,
-                        level: 'experienced',
+                        level: (data.experienceLevel || 'beginner'),
                         toolsAvailable: false,
                         assignedBy: data.addedBy,
                         assignedAt: new Date()
@@ -119,6 +150,7 @@ class LeadService {
                 leadId,
                 name: data.name,
                 phone: normalizedPhone,
+                landline: normalizedLandline,
                 addedBy: data.addedBy
             });
             return savedLead;
@@ -170,6 +202,67 @@ class LeadService {
     /**
      * Search and filter leads
      */
+    /**
+     * Get unique users who have added leads (for filter dropdown)
+     * Returns array of { userId, name } for users who have added at least one lead
+     */
+    static async getLeadCreators() {
+        try {
+            // Use aggregation to get distinct addedBy values with their names
+            const creators = await Lead_1.default.aggregate([
+                {
+                    $match: {
+                        addedBy: { $exists: true, $ne: null }
+                    }
+                },
+                {
+                    $group: {
+                        _id: '$addedBy',
+                        // Get the most recent non-null name
+                        names: { $push: '$addedByName' }
+                    }
+                },
+                {
+                    $project: {
+                        userId: '$_id',
+                        name: {
+                            $let: {
+                                vars: {
+                                    filteredNames: {
+                                        $filter: {
+                                            input: '$names',
+                                            as: 'name',
+                                            cond: { $ne: ['$$name', null] }
+                                        }
+                                    }
+                                },
+                                in: {
+                                    $cond: {
+                                        if: { $gt: [{ $size: '$$filteredNames' }, 0] },
+                                        then: { $arrayElemAt: ['$$filteredNames', -1] }, // Get last non-null name
+                                        else: 'Unknown'
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                {
+                    $sort: { name: 1 } // Sort alphabetically by name
+                }
+            ]);
+            return creators.map(c => ({
+                userId: c.userId,
+                name: c.name || 'Unknown'
+            }));
+        }
+        catch (error) {
+            logger_1.default.error('Error getting lead creators', {
+                error: error.message
+            });
+            throw error;
+        }
+    }
     static async searchLeads(filters) {
         try {
             const page = filters.page || 1;
@@ -246,6 +339,25 @@ class LeadService {
             const updateData = {};
             if (data.name)
                 updateData.name = data.name.trim();
+            if (data.phone !== undefined) {
+                updateData.phone = data.phone?.trim() ? DuplicateCheckService_1.DuplicateCheckService.normalizePhone(data.phone.trim()) : undefined;
+            }
+            if (data.landline !== undefined) {
+                updateData.landline = data.landline?.trim() ? DuplicateCheckService_1.DuplicateCheckService.normalizeLandline(data.landline.trim()) : undefined;
+            }
+            // Ensure at least one contact number remains after update
+            // Get existing lead to check current phone/landline values
+            const existingLead = await Lead_1.default.findOne({ leadId }).lean();
+            if (!existingLead) {
+                throw new Error('Lead not found');
+            }
+            // Determine final values after update
+            const finalPhone = updateData.phone !== undefined ? updateData.phone : existingLead.phone;
+            const finalLandline = updateData.landline !== undefined ? updateData.landline : existingLead.landline;
+            // Validate at least one contact number exists after update
+            if (!finalPhone?.trim() && !finalLandline?.trim()) {
+                throw new Error('At least one contact number (phone or landline) must be present');
+            }
             if (data.email !== undefined)
                 updateData.email = data.email?.trim().toLowerCase();
             if (data.city)
@@ -711,6 +823,41 @@ class LeadService {
             logger_1.default.error('Error marking address as verified', {
                 error: error.message,
                 leadId
+            });
+            throw error;
+        }
+    }
+    /**
+     * Delete a lead
+     */
+    static async deleteLead(leadId, deletedBy, deletedByName) {
+        try {
+            const lead = await Lead_1.default.findOne({ leadId });
+            if (!lead) {
+                throw new Error('Lead not found');
+            }
+            // Log deletion activity before deleting
+            await this.logActivity(leadId, 'deletion', 'Lead deleted', deletedBy, deletedByName, {
+                leadName: lead.name,
+                leadPhone: lead.phone,
+                leadCity: lead.city,
+                status: lead.status,
+                accountStatus: lead.accountStatus
+            });
+            // Delete the lead
+            await Lead_1.default.deleteOne({ leadId });
+            logger_1.default.info('Lead deleted successfully', {
+                leadId,
+                deletedBy,
+                deletedByName,
+                leadName: lead.name
+            });
+        }
+        catch (error) {
+            logger_1.default.error('Error deleting lead', {
+                error: error.message,
+                leadId,
+                deletedBy
             });
             throw error;
         }

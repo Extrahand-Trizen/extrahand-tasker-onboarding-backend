@@ -14,18 +14,35 @@ class DuplicateCheckService {
         try {
             // Normalize phone number (remove spaces, dashes, country code)
             const normalizedPhone = this.normalizePhone(phone);
-            const existingLead = await Lead_1.default.findOne({
+            // Check in phone field
+            const existingLeadByPhone = await Lead_1.default.findOne({
                 phone: normalizedPhone,
                 status: { $nin: ['rejected', 'inactive'] } // ✅ Don't match rejected or inactive (deleted) leads
             }).lean();
-            if (existingLead) {
+            if (existingLeadByPhone) {
                 logger_1.default.info('Duplicate phone found', {
                     phone: normalizedPhone,
-                    existingLeadId: existingLead.leadId
+                    existingLeadId: existingLeadByPhone.leadId
                 });
                 return {
                     isDuplicate: true,
-                    existingLead: existingLead,
+                    existingLead: existingLeadByPhone,
+                    matchType: 'phone'
+                };
+            }
+            // Also check in landline field (cross-field duplicate check)
+            const existingLeadByLandline = await Lead_1.default.findOne({
+                landline: normalizedPhone,
+                status: { $nin: ['rejected', 'inactive'] }
+            }).lean();
+            if (existingLeadByLandline) {
+                logger_1.default.info('Duplicate phone found in landline field', {
+                    phone: normalizedPhone,
+                    existingLeadId: existingLeadByLandline.leadId
+                });
+                return {
+                    isDuplicate: true,
+                    existingLead: existingLeadByLandline,
                     matchType: 'phone'
                 };
             }
@@ -35,6 +52,55 @@ class DuplicateCheckService {
             logger_1.default.error('Duplicate check error', {
                 error: error.message,
                 phone
+            });
+            throw error;
+        }
+    }
+    /**
+     * Check if a landline number already exists in leads
+     */
+    static async checkLandlineDuplicate(landline) {
+        try {
+            // Normalize landline number
+            const normalizedLandline = this.normalizeLandline(landline);
+            // Check in landline field
+            const existingLeadByLandline = await Lead_1.default.findOne({
+                landline: normalizedLandline,
+                status: { $nin: ['rejected', 'inactive'] }
+            }).lean();
+            if (existingLeadByLandline) {
+                logger_1.default.info('Duplicate landline found', {
+                    landline: normalizedLandline,
+                    existingLeadId: existingLeadByLandline.leadId
+                });
+                return {
+                    isDuplicate: true,
+                    existingLead: existingLeadByLandline,
+                    matchType: 'phone' // Using 'phone' for consistency
+                };
+            }
+            // Also check in phone field (cross-field duplicate check)
+            const existingLeadByPhone = await Lead_1.default.findOne({
+                phone: normalizedLandline,
+                status: { $nin: ['rejected', 'inactive'] }
+            }).lean();
+            if (existingLeadByPhone) {
+                logger_1.default.info('Duplicate landline found in phone field', {
+                    landline: normalizedLandline,
+                    existingLeadId: existingLeadByPhone.leadId
+                });
+                return {
+                    isDuplicate: true,
+                    existingLead: existingLeadByPhone,
+                    matchType: 'phone'
+                };
+            }
+            return { isDuplicate: false };
+        }
+        catch (error) {
+            logger_1.default.error('Landline duplicate check error', {
+                error: error.message,
+                landline
             });
             throw error;
         }
@@ -77,13 +143,22 @@ class DuplicateCheckService {
         }
     }
     /**
-     * Comprehensive duplicate check
+     * Comprehensive duplicate check (supports both phone and landline)
      */
-    static async checkDuplicate(phone, name, city) {
-        // First check phone (most reliable)
-        const phoneCheck = await this.checkPhoneDuplicate(phone);
-        if (phoneCheck.isDuplicate) {
-            return phoneCheck;
+    static async checkDuplicate(phone, landline, name, city) {
+        // First check phone if provided (most reliable)
+        if (phone) {
+            const phoneCheck = await this.checkPhoneDuplicate(phone);
+            if (phoneCheck.isDuplicate) {
+                return phoneCheck;
+            }
+        }
+        // Then check landline if provided
+        if (landline) {
+            const landlineCheck = await this.checkLandlineDuplicate(landline);
+            if (landlineCheck.isDuplicate) {
+                return landlineCheck;
+            }
         }
         // Then check name+city if provided
         if (name && city) {
@@ -109,6 +184,13 @@ class DuplicateCheckService {
             normalized = normalized.slice(-10);
         }
         return normalized;
+    }
+    /**
+     * Normalize landline number
+     */
+    static normalizeLandline(landline) {
+        // Remove all non-digit characters
+        return landline.replace(/\D/g, '');
     }
     /**
      * Bulk check for duplicate phones (optimized - single query)
@@ -142,6 +224,177 @@ class DuplicateCheckService {
             logger_1.default.error('Bulk duplicate check error', {
                 error: error.message,
                 phoneCount: phoneNumbers.length
+            });
+            throw error;
+        }
+    }
+    /**
+     * Check if a phone number or landline already exists with the same category
+     */
+    static async checkPhoneCategoryDuplicate(contact, primaryCategory, secondaryCategory) {
+        try {
+            const normalizedContact = this.normalizePhone(contact); // Try phone normalization first
+            // Build query for exact category match - check both phone and landline fields
+            const categoryQuery = {
+                primaryCategory: primaryCategory,
+                status: { $nin: ['rejected', 'inactive'] }
+            };
+            // If secondary category is provided, match it; otherwise check for missing or empty
+            if (secondaryCategory && secondaryCategory.trim()) {
+                categoryQuery.secondaryCategory = secondaryCategory.trim();
+            }
+            else {
+                categoryQuery.$or = [
+                    { secondaryCategory: { $exists: false } },
+                    { secondaryCategory: '' },
+                    { secondaryCategory: null }
+                ];
+            }
+            // Check in phone field
+            const queryPhone = { ...categoryQuery, phone: normalizedContact };
+            const existingLeadByPhone = await Lead_1.default.findOne(queryPhone).lean();
+            if (existingLeadByPhone) {
+                logger_1.default.info('Duplicate contact+category found (phone field)', {
+                    contact: normalizedContact,
+                    primaryCategory,
+                    secondaryCategory,
+                    existingLeadId: existingLeadByPhone.leadId
+                });
+                return {
+                    isDuplicate: true,
+                    existingLead: existingLeadByPhone,
+                    matchType: 'phone',
+                    sameCategory: true
+                };
+            }
+            // Also check in landline field
+            const normalizedLandline = this.normalizeLandline(contact);
+            const queryLandline = { ...categoryQuery, landline: normalizedLandline };
+            const existingLeadByLandline = await Lead_1.default.findOne(queryLandline).lean();
+            if (existingLeadByLandline) {
+                logger_1.default.info('Duplicate contact+category found (landline field)', {
+                    contact: normalizedLandline,
+                    primaryCategory,
+                    secondaryCategory,
+                    existingLeadId: existingLeadByLandline.leadId
+                });
+                return {
+                    isDuplicate: true,
+                    existingLead: existingLeadByLandline,
+                    matchType: 'phone',
+                    sameCategory: true
+                };
+            }
+            return { isDuplicate: false, sameCategory: false };
+        }
+        catch (error) {
+            logger_1.default.error('Contact+category duplicate check error', {
+                error: error.message,
+                contact,
+                primaryCategory
+            });
+            throw error;
+        }
+    }
+    /**
+     * Check duplicate considering category (allows same person with different categories)
+     * Supports both phone and landline
+     */
+    static async checkDuplicateWithCategory(contact, primaryCategory, secondaryCategory, name, city) {
+        // First check if same contact + same category exists
+        const contactCategoryCheck = await this.checkPhoneCategoryDuplicate(contact, primaryCategory, secondaryCategory);
+        if (contactCategoryCheck.isDuplicate) {
+            return contactCategoryCheck;
+        }
+        // If different category, check if contact exists with different category (check both phone and landline fields)
+        const normalizedContact = this.normalizePhone(contact);
+        const normalizedLandline = this.normalizeLandline(contact);
+        const existingLeadDifferentCategory = await Lead_1.default.findOne({
+            $or: [
+                { phone: normalizedContact },
+                { landline: normalizedLandline }
+            ],
+            status: { $nin: ['rejected', 'inactive'] }
+        }).lean();
+        if (existingLeadDifferentCategory) {
+            // Same phone but different category - this is allowed, but we return info
+            logger_1.default.info('Same phone with different category found', {
+                phone: normalizedPhone,
+                existingLeadId: existingLeadDifferentCategory.leadId,
+                existingCategory: existingLeadDifferentCategory.primaryCategory,
+                newCategory: primaryCategory
+            });
+            return {
+                isDuplicate: false, // Not a duplicate because category is different
+                existingLead: existingLeadDifferentCategory,
+                matchType: 'phone',
+                sameCategory: false
+            };
+        }
+        // Check name+city if provided
+        if (name && city) {
+            const nameCityCheck = await this.checkNameCityDuplicate(name, city);
+            if (nameCityCheck.isDuplicate) {
+                return { ...nameCityCheck, sameCategory: false };
+            }
+        }
+        return { isDuplicate: false, sameCategory: false };
+    }
+    /**
+     * Bulk check for duplicate phones with categories (optimized - single query)
+     * Returns a map of normalized phone -> existing leads array for O(1) lookup
+     */
+    static async checkPhonesBulkWithCategories(contacts, categories) {
+        try {
+            if (contacts.length === 0) {
+                return new Map();
+            }
+            // Normalize all contacts (try phone normalization first, then landline)
+            const normalizedContacts = contacts.map(contact => {
+                // Try phone normalization first (for 10-digit numbers)
+                const phoneNormalized = this.normalizePhone(contact);
+                // Also try landline normalization
+                const landlineNormalized = this.normalizeLandline(contact);
+                return { phoneNormalized, landlineNormalized, original: contact };
+            });
+            const uniqueNormalizedPhones = [...new Set(normalizedContacts.map(c => c.phoneNormalized))];
+            const uniqueNormalizedLandlines = [...new Set(normalizedContacts.map(c => c.landlineNormalized))];
+            // Single MongoDB query to find all existing leads with these contacts (check both phone and landline fields)
+            const existingLeads = await Lead_1.default.find({
+                $or: [
+                    { phone: { $in: uniqueNormalizedPhones } },
+                    { landline: { $in: uniqueNormalizedLandlines } }
+                ],
+                status: { $nin: ['rejected', 'inactive'] }
+            }).lean();
+            // Create a map for O(1) lookup: normalizedContact -> existingLeads[]
+            const contactToLeadsMap = new Map();
+            existingLeads.forEach(lead => {
+                // Add to map using phone if present
+                if (lead.phone) {
+                    if (!contactToLeadsMap.has(lead.phone)) {
+                        contactToLeadsMap.set(lead.phone, []);
+                    }
+                    contactToLeadsMap.get(lead.phone).push(lead);
+                }
+                // Add to map using landline if present
+                if (lead.landline) {
+                    if (!contactToLeadsMap.has(lead.landline)) {
+                        contactToLeadsMap.set(lead.landline, []);
+                    }
+                    contactToLeadsMap.get(lead.landline).push(lead);
+                }
+            });
+            logger_1.default.info('Bulk duplicate check with categories completed', {
+                checkedContacts: contacts.length,
+                foundLeads: contactToLeadsMap.size
+            });
+            return contactToLeadsMap;
+        }
+        catch (error) {
+            logger_1.default.error('Bulk duplicate check with categories error', {
+                error: error.message,
+                contactCount: contacts.length
             });
             throw error;
         }

@@ -20,18 +20,18 @@ router.post(
   LeadController.createLead
 );
 
-// Get unique users who have added leads (for filter dropdown)
-router.get(
-  '/creators',
-  requirePermission('canViewLeads'),
-  LeadController.getLeadCreators
-);
-
 // Search and filter leads
 router.get(
   '/',
   requirePermission('canViewLeads'),
   LeadController.searchLeads
+);
+
+// Get unique users who have added leads (for filter dropdown)
+router.get(
+  '/creators',
+  requirePermission('canViewLeads'),
+  LeadController.getLeadCreators
 );
 
 // Check for duplicates
@@ -67,13 +67,6 @@ router.put(
   '/:leadId',
   requirePermission('canUpdateLead'),
   LeadController.updateLead
-);
-
-// Delete lead
-router.delete(
-  '/:leadId',
-  requirePermission('canDeleteLead'),
-  LeadController.deleteLead
 );
 
 // Update lead status
@@ -112,8 +105,15 @@ router.post(
 
 router.post(
   '/bulk-delete',
-  requirePermission('canDeleteLead'),
+  requirePermission('canUpdateLead'), // Using canUpdateLead permission for delete
   BulkOperationsController.bulkDeleteLeads
+);
+
+// Delete single lead
+router.delete(
+  '/:leadId',
+  requirePermission('canUpdateLead'), // Using canUpdateLead permission for delete
+  LeadController.deleteLead
 );
 
 // Document management

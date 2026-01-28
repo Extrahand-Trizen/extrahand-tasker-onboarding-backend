@@ -8,7 +8,8 @@ import { v4 as uuidv4 } from 'uuid';
 
 export interface CreateLeadData {
   name: string;
-  phone: string;
+  phone?: string;
+  landline?: string;
   email?: string;
   city: string;
   state?: string;
@@ -40,6 +41,8 @@ export interface ILeadSkill {
 
 export interface UpdateLeadData {
   name?: string;
+  phone?: string;
+  landline?: string;
   email?: string;
   city?: string;
   state?: string;
@@ -87,27 +90,61 @@ export class LeadService {
     options?: { skipNameCityDuplicate?: boolean }
   ): Promise<ILead> {
     try {
-      // Normalize phone
-      const normalizedPhone = DuplicateCheckService.normalizePhone(data.phone);
+      // Ensure at least one contact number is provided
+      if (!data.phone?.trim() && !data.landline?.trim()) {
+        throw new Error('At least one contact number (phone or landline) is required');
+      }
+
+      // Normalize phone and landline
+      const normalizedPhone = data.phone ? DuplicateCheckService.normalizePhone(data.phone) : null;
+      const normalizedLandline = data.landline ? DuplicateCheckService.normalizeLandline(data.landline) : null;
 
       // Support both new (primaryCategory) and legacy (primarySkill) field names
       const primarySkillCategory = (data.primaryCategory || data.primarySkill || '').trim();
       const secondaryCategoryValue = (data.secondaryCategory || data.secondarySkill || '').trim();
 
-      // Check for duplicates (considering category)
-      const duplicateCheck = options?.skipNameCityDuplicate
-        ? await DuplicateCheckService.checkPhoneCategoryDuplicate(
+      // Check for duplicates (considering category) - check both phone and landline
+      let duplicateCheck;
+      if (options?.skipNameCityDuplicate) {
+        // Check phone duplicates if phone provided
+        if (normalizedPhone) {
+          duplicateCheck = await DuplicateCheckService.checkPhoneCategoryDuplicate(
             normalizedPhone,
             primarySkillCategory,
             secondaryCategoryValue
-          )
-        : await DuplicateCheckService.checkDuplicateWithCategory(
-            normalizedPhone,
-            primarySkillCategory,
-            secondaryCategoryValue,
-            data.name,
-            data.city
           );
+          if (duplicateCheck.isDuplicate && duplicateCheck.sameCategory) {
+            // Found duplicate, return it
+          } else if (normalizedLandline) {
+            // Also check landline
+            const landlineCheck = await DuplicateCheckService.checkPhoneCategoryDuplicate(
+              normalizedLandline,
+              primarySkillCategory,
+              secondaryCategoryValue
+            );
+            if (landlineCheck.isDuplicate && landlineCheck.sameCategory) {
+              duplicateCheck = landlineCheck;
+            }
+          }
+        } else if (normalizedLandline) {
+          duplicateCheck = await DuplicateCheckService.checkPhoneCategoryDuplicate(
+            normalizedLandline,
+            primarySkillCategory,
+            secondaryCategoryValue
+          );
+        } else {
+          duplicateCheck = { isDuplicate: false };
+        }
+      } else {
+        // Use comprehensive duplicate check
+        duplicateCheck = await DuplicateCheckService.checkDuplicateWithCategory(
+          normalizedPhone || normalizedLandline || '',
+          primarySkillCategory,
+          secondaryCategoryValue,
+          data.name,
+          data.city
+        );
+      }
 
       if (duplicateCheck.isDuplicate && duplicateCheck.sameCategory) {
         throw new Error(
@@ -223,6 +260,7 @@ export class LeadService {
         leadId,
         name: data.name,
         phone: normalizedPhone,
+        landline: normalizedLandline,
         addedBy: data.addedBy
       });
 
@@ -433,6 +471,27 @@ export class LeadService {
       const updateData: any = {};
 
       if (data.name) updateData.name = data.name.trim();
+      if (data.phone !== undefined) {
+        updateData.phone = data.phone?.trim() ? DuplicateCheckService.normalizePhone(data.phone.trim()) : undefined;
+      }
+      if (data.landline !== undefined) {
+        updateData.landline = data.landline?.trim() ? DuplicateCheckService.normalizeLandline(data.landline.trim()) : undefined;
+      }
+      // Ensure at least one contact number remains after update
+      // Get existing lead to check current phone/landline values
+      const existingLead = await Lead.findOne({ leadId }).lean();
+      if (!existingLead) {
+        throw new Error('Lead not found');
+      }
+      
+      // Determine final values after update
+      const finalPhone = updateData.phone !== undefined ? updateData.phone : existingLead.phone;
+      const finalLandline = updateData.landline !== undefined ? updateData.landline : existingLead.landline;
+      
+      // Validate at least one contact number exists after update
+      if (!finalPhone?.trim() && !finalLandline?.trim()) {
+        throw new Error('At least one contact number (phone or landline) must be present');
+      }
       if (data.email !== undefined) updateData.email = data.email?.trim().toLowerCase();
       if (data.city) updateData.city = data.city.trim();
       if (data.state !== undefined) updateData.state = data.state?.trim();

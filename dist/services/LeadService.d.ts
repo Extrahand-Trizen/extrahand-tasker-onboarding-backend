@@ -2,7 +2,8 @@ import { ILead, LeadStatus, LeadSource } from '../models/Lead';
 import { UserRole } from '../lib/permissions';
 export interface CreateLeadData {
     name: string;
-    phone: string;
+    phone?: string;
+    landline?: string;
     email?: string;
     city: string;
     state?: string;
@@ -32,6 +33,8 @@ export interface ILeadSkill {
 }
 export interface UpdateLeadData {
     name?: string;
+    phone?: string;
+    landline?: string;
     email?: string;
     city?: string;
     state?: string;
@@ -83,6 +86,14 @@ export declare class LeadService {
     /**
      * Search and filter leads
      */
+    /**
+     * Get unique users who have added leads (for filter dropdown)
+     * Returns array of { userId, name } for users who have added at least one lead
+     */
+    static getLeadCreators(): Promise<Array<{
+        userId: string;
+        name: string;
+    }>>;
     static searchLeads(filters: SearchFilters): Promise<{
         leads: ILead[];
         total: number;
@@ -150,6 +161,10 @@ export declare class LeadService {
         verifiedAt: Date;
         source: string;
     }): Promise<ILead | null>;
+    /**
+     * Delete a lead
+     */
+    static deleteLead(leadId: string, deletedBy: string, deletedByName?: string): Promise<void>;
     /**
      * Log activity
      */

@@ -54,7 +54,7 @@ class BulkLeadImportController {
             if (!req.admin) {
                 res.status(401).json({
                     success: false,
-                    error: 'Authentication required',
+                    error: "Authentication required",
                 });
                 return;
             }
@@ -62,7 +62,7 @@ class BulkLeadImportController {
             if (!file) {
                 res.status(400).json({
                     success: false,
-                    error: 'CSV file is required',
+                    error: "CSV file is required",
                 });
                 return;
             }
@@ -74,13 +74,13 @@ class BulkLeadImportController {
             });
         }
         catch (error) {
-            logger_1.default.error('Error in previewBulkImport controller', {
+            logger_1.default.error("Error in previewBulkImport controller", {
                 error: error.message,
                 stack: error.stack,
             });
             res.status(500).json({
                 success: false,
-                error: 'Failed to preview import',
+                error: "Failed to preview import",
                 message: error.message,
             });
         }
@@ -94,7 +94,7 @@ class BulkLeadImportController {
             if (!req.admin) {
                 res.status(401).json({
                     success: false,
-                    error: 'Authentication required',
+                    error: "Authentication required",
                 });
                 return;
             }
@@ -102,7 +102,7 @@ class BulkLeadImportController {
             if (!file) {
                 res.status(400).json({
                     success: false,
-                    error: 'CSV file is required',
+                    error: "CSV file is required",
                 });
                 return;
             }
@@ -111,7 +111,7 @@ class BulkLeadImportController {
             if (file.size > maxFileSize) {
                 res.status(400).json({
                     success: false,
-                    error: 'File too large',
+                    error: "File too large",
                     message: `File size (${(file.size / 1024 / 1024).toFixed(2)}MB) exceeds maximum allowed size of 50MB`,
                 });
                 return;
@@ -120,7 +120,7 @@ class BulkLeadImportController {
             if (file.size === 0) {
                 res.status(400).json({
                     success: false,
-                    error: 'File is empty',
+                    error: "File is empty",
                 });
                 return;
             }
@@ -130,96 +130,101 @@ class BulkLeadImportController {
             if (!userId) {
                 res.status(401).json({
                     success: false,
-                    error: 'User ID not found',
+                    error: "User ID not found",
                 });
                 return;
             }
             // Get user role for tracking
             const adminRole = req.admin?.role;
             // Store file temporarily
-            const tempDir = path_1.default.join(process.cwd(), 'temp');
+            const tempDir = path_1.default.join(process.cwd(), "temp");
             await promises_1.default.mkdir(tempDir, { recursive: true });
             const tempFilePath = path_1.default.join(tempDir, `csv-${Date.now()}-${userId}-${file.originalname}`);
             await promises_1.default.writeFile(tempFilePath, file.buffer);
             // Try to use queue if available, otherwise process synchronously
+            // try {
+            //   const queue = csvQueue.get();
+            //   logger.info('CSV file stored temporarily, queuing job', {
+            //     tempFilePath,
+            //     fileName: file.originalname,
+            //     fileSize: file.buffer.length,
+            //     userId,
+            //   });
+            //   // Queue job for background processing
+            //   const job = await queue.add(
+            //     'process-csv',
+            //     {
+            //       filePath: tempFilePath,
+            //       fileName: file.originalname,
+            //       userId,
+            //       adminName: req.admin?.name,
+            //       adminEmail: req.admin?.email,
+            //       adminRole,
+            //       source,
+            //       primaryCategory,
+            //       secondaryCategory,
+            //     },
+            //     {
+            //       jobId: `csv-${Date.now()}-${userId}`, // Unique job ID
+            //     }
+            //   );
+            //   logger.info('CSV job queued successfully', {
+            //     jobId: job.id,
+            //     userId,
+            //     fileName: file.originalname,
+            //   });
+            //   // Return immediately with job ID
+            //   res.json({
+            //     success: true,
+            //     jobId: job.id,
+            //     status: 'queued',
+            //     message: 'CSV processing started. Use jobId to check progress.',
+            //   });
+            //   return;
+            // } catch (queueError: any) {
+            // Queue not available - fall back to synchronous processing
+            logger_1.default.warn("CSV queue disabled/not available, processing synchronously", {
+                // error: queueError.message,
+                fileName: file.originalname,
+                userId,
+            });
+            // Process synchronously (original behavior)
+            const result = await BulkLeadImportService_1.BulkLeadImportService.bulkImportLeads(file.buffer, file.originalname, userId, req.admin?.name, req.admin?.email, adminRole, source, primaryCategory, secondaryCategory);
+            // Clean up temp file
             try {
-                const queue = csvQueue_1.csvQueue.get();
-                logger_1.default.info('CSV file stored temporarily, queuing job', {
-                    tempFilePath,
-                    fileName: file.originalname,
-                    fileSize: file.buffer.length,
-                    userId,
-                });
-                // Queue job for background processing
-                const job = await queue.add('process-csv', {
-                    filePath: tempFilePath,
-                    fileName: file.originalname,
-                    userId,
-                    adminName: req.admin?.name,
-                    adminEmail: req.admin?.email,
-                    adminRole,
-                    source,
-                    primaryCategory,
-                    secondaryCategory,
-                }, {
-                    jobId: `csv-${Date.now()}-${userId}`, // Unique job ID
-                });
-                logger_1.default.info('CSV job queued successfully', {
-                    jobId: job.id,
-                    userId,
-                    fileName: file.originalname,
-                });
-                // Return immediately with job ID
-                res.json({
-                    success: true,
-                    jobId: job.id,
-                    status: 'queued',
-                    message: 'CSV processing started. Use jobId to check progress.',
-                });
-                return;
+                await promises_1.default.unlink(tempFilePath);
             }
-            catch (queueError) {
-                // Queue not available - fall back to synchronous processing
-                logger_1.default.warn('CSV queue not available, processing synchronously', {
-                    error: queueError.message,
-                    fileName: file.originalname,
-                    userId,
+            catch (cleanupError) {
+                logger_1.default.warn("Failed to cleanup temp file:", {
+                    filePath: tempFilePath,
+                    error: cleanupError.message,
                 });
-                // Process synchronously (original behavior)
-                const result = await BulkLeadImportService_1.BulkLeadImportService.bulkImportLeads(file.buffer, file.originalname, userId, req.admin?.name, req.admin?.email, adminRole, source, primaryCategory, secondaryCategory);
-                // Clean up temp file
-                try {
-                    await promises_1.default.unlink(tempFilePath);
-                }
-                catch (cleanupError) {
-                    logger_1.default.warn('Failed to cleanup temp file:', {
-                        filePath: tempFilePath,
-                        error: cleanupError.message,
-                    });
-                }
-                // Return result immediately
-                res.json({
-                    success: true,
+            }
+            // Return result immediately
+            res.json({
+                success: true,
+                data: {
                     importId: result.importId,
                     totalRows: result.totalRows,
                     successCount: result.successCount,
                     failedCount: result.failedCount,
                     errors: result.errors.slice(0, 10), // Limit errors in response
                     importedLeadIds: result.importedLeadIds.slice(0, 10), // Limit IDs in response
-                    message: `Imported ${result.successCount} leads successfully${result.failedCount > 0 ? `, ${result.failedCount} failed` : ''}`,
-                    note: 'Processed synchronously (Redis queue not available)',
-                });
-                return;
-            }
+                },
+                message: `Imported ${result.successCount} leads successfully${result.failedCount > 0 ? `, ${result.failedCount} failed` : ""}`,
+                note: "Processed synchronously (Queue disabled)",
+            });
+            return;
+            // }
         }
         catch (error) {
-            logger_1.default.error('Error in bulkImport controller', {
+            logger_1.default.error("Error in bulkImport controller", {
                 error: error.message,
                 stack: error.stack,
             });
             res.status(500).json({
                 success: false,
-                error: 'Failed to queue CSV import',
+                error: "Failed to queue CSV import",
                 message: error.message,
             });
         }
@@ -233,7 +238,7 @@ class BulkLeadImportController {
             if (!req.admin) {
                 res.status(401).json({
                     success: false,
-                    error: 'Authentication required',
+                    error: "Authentication required",
                 });
                 return;
             }
@@ -241,7 +246,7 @@ class BulkLeadImportController {
             if (!jobId) {
                 res.status(400).json({
                     success: false,
-                    error: 'Job ID is required',
+                    error: "Job ID is required",
                 });
                 return;
             }
@@ -249,12 +254,12 @@ class BulkLeadImportController {
             if (!job) {
                 res.status(404).json({
                     success: false,
-                    error: 'Job not found',
+                    error: "Job not found",
                 });
                 return;
             }
             const state = await job.getState();
-            const progress = typeof job.progress === 'number' ? job.progress : 0;
+            const progress = typeof job.progress === "number" ? job.progress : 0;
             const result = job.returnvalue;
             const failedReason = job.failedReason;
             // Get job data for context
@@ -269,20 +274,24 @@ class BulkLeadImportController {
                     failedReason,
                     fileName: jobData.fileName,
                     createdAt: new Date(job.timestamp).toISOString(),
-                    processedAt: job.processedOn ? new Date(job.processedOn).toISOString() : null,
-                    finishedAt: job.finishedOn ? new Date(job.finishedOn).toISOString() : null,
+                    processedAt: job.processedOn
+                        ? new Date(job.processedOn).toISOString()
+                        : null,
+                    finishedAt: job.finishedOn
+                        ? new Date(job.finishedOn).toISOString()
+                        : null,
                 },
             });
         }
         catch (error) {
-            logger_1.default.error('Error getting job status', {
+            logger_1.default.error("Error getting job status", {
                 error: error.message,
                 stack: error.stack,
                 jobId: req.params.jobId,
             });
             res.status(500).json({
                 success: false,
-                error: 'Failed to get job status',
+                error: "Failed to get job status",
                 message: error.message,
             });
         }
@@ -297,19 +306,19 @@ class BulkLeadImportController {
             const secondaryCategory = req.query.secondaryCategory;
             const template = BulkLeadImportService_1.BulkLeadImportService.generateTemplate(primaryCategory, secondaryCategory);
             const filename = primaryCategory && secondaryCategory
-                ? `tasker-import-${primaryCategory}-${secondaryCategory.replace(/\s+/g, '-')}-template.csv`
-                : 'tasker-import-template.csv';
-            res.setHeader('Content-Type', 'text/csv');
-            res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+                ? `tasker-import-${primaryCategory}-${secondaryCategory.replace(/\s+/g, "-")}-template.csv`
+                : "tasker-import-template.csv";
+            res.setHeader("Content-Type", "text/csv");
+            res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
             res.send(template);
         }
         catch (error) {
-            logger_1.default.error('Error in downloadTemplate controller', {
+            logger_1.default.error("Error in downloadTemplate controller", {
                 error: error.message,
             });
             res.status(500).json({
                 success: false,
-                error: 'Failed to generate template',
+                error: "Failed to generate template",
                 message: error.message,
             });
         }
@@ -325,7 +334,7 @@ class BulkLeadImportController {
             if (!req.admin) {
                 res.status(401).json({
                     success: false,
-                    error: 'Authentication required',
+                    error: "Authentication required",
                 });
                 return;
             }
@@ -333,15 +342,15 @@ class BulkLeadImportController {
             const userId = req.admin?.userId || req.admin?.uid;
             // ✅ ISOLATION: Qualifiers can only see their own imports
             // Lead Access Managers can see all imports
-            if (userRole === 'qualifier' && userId) {
+            if (userRole === "qualifier" && userId) {
                 // Qualifiers can only see their own imports - filter by createdBy
                 // Don't allow them to filter by other users
             }
-            else if (userRole !== 'lead_access_manager') {
+            else if (userRole !== "lead_access_manager") {
                 res.status(403).json({
                     success: false,
-                    error: 'Permission denied',
-                    message: 'Import history is only accessible to Lead Access Managers and Qualifiers',
+                    error: "Permission denied",
+                    message: "Import history is only accessible to Lead Access Managers and Qualifiers",
                 });
                 return;
             }
@@ -352,7 +361,9 @@ class BulkLeadImportController {
             const createdBy = req.query.createdBy;
             const createdByEmail = req.query.createdByEmail;
             const createdByName = req.query.createdByName;
-            const from = req.query.from ? new Date(req.query.from) : undefined;
+            const from = req.query.from
+                ? new Date(req.query.from)
+                : undefined;
             const to = req.query.to ? new Date(req.query.to) : undefined;
             const status = req.query.status;
             // ✅ ISOLATION: For qualifiers, force filter by their own userId
@@ -366,15 +377,15 @@ class BulkLeadImportController {
                 page,
                 limit,
             };
-            if (userRole === 'qualifier' && userId) {
+            if (userRole === "qualifier" && userId) {
                 // Qualifiers can only see their own imports
                 filters.userId = userId;
-                logger_1.default.debug('Qualifier isolation applied to import history', {
+                logger_1.default.debug("Qualifier isolation applied to import history", {
                     userId,
-                    role: userRole
+                    role: userRole,
                 });
             }
-            else if (userRole === 'lead_access_manager') {
+            else if (userRole === "lead_access_manager") {
                 // Lead Access Managers can filter by any user
                 filters.userId = createdBy;
             }
@@ -385,13 +396,43 @@ class BulkLeadImportController {
             });
         }
         catch (error) {
-            logger_1.default.error('Error in getImportHistory controller', {
+            logger_1.default.error("Error in getImportHistory controller", {
                 error: error.message,
                 stack: error.stack,
             });
             res.status(500).json({
                 success: false,
-                error: 'Failed to fetch import history',
+                error: "Failed to fetch import history",
+                message: error.message,
+            });
+        }
+    }
+    /**
+     * Get comprehensive import analytics
+     * GET /api/v1/onboarding/leads/bulk-import/analytics
+     */
+    static async getImportAnalytics(req, res) {
+        try {
+            if (!req.admin) {
+                res.status(401).json({
+                    success: false,
+                    error: "Authentication required",
+                });
+                return;
+            }
+            const analytics = await BulkLeadImportService_1.BulkLeadImportService.getImportAnalytics();
+            res.json({
+                success: true,
+                data: analytics,
+            });
+        }
+        catch (error) {
+            logger_1.default.error("Error in getImportAnalytics controller", {
+                error: error.message,
+            });
+            res.status(500).json({
+                success: false,
+                error: "Failed to fetch import analytics",
                 message: error.message,
             });
         }
@@ -410,20 +451,20 @@ class BulkLeadImportController {
             });
         }
         catch (error) {
-            if (error.message === 'Import not found') {
+            if (error.message === "Import not found") {
                 res.status(404).json({
                     success: false,
-                    error: 'Import not found',
+                    error: "Import not found",
                 });
                 return;
             }
-            logger_1.default.error('Error in getImportDetails controller', {
+            logger_1.default.error("Error in getImportDetails controller", {
                 error: error.message,
                 importId: req.params.importId,
             });
             res.status(500).json({
                 success: false,
-                error: 'Failed to fetch import details',
+                error: "Failed to fetch import details",
                 message: error.message,
             });
         }
@@ -437,7 +478,7 @@ class BulkLeadImportController {
             if (!req.admin) {
                 res.status(401).json({
                     success: false,
-                    error: 'Authentication required',
+                    error: "Authentication required",
                 });
                 return;
             }
@@ -449,7 +490,7 @@ class BulkLeadImportController {
             if (!importRecord) {
                 res.status(404).json({
                     success: false,
-                    error: 'Import not found',
+                    error: "Import not found",
                 });
                 return;
             }
@@ -459,7 +500,7 @@ class BulkLeadImportController {
             const paginatedLeadIds = leadIds.slice(skip, skip + limit);
             // Fetch leads
             const leads = await Lead_1.default.find({ leadId: { $in: paginatedLeadIds } })
-                .select('leadId name phone email city state address pincode primarySkill primaryCategory secondarySkill secondaryCategory status createdAt')
+                .select("leadId name phone email city state address pincode primarySkill primaryCategory secondarySkill secondaryCategory status createdAt")
                 .lean();
             // Map to expected format
             const leadsData = leads.map((lead) => ({
@@ -492,13 +533,13 @@ class BulkLeadImportController {
             });
         }
         catch (error) {
-            logger_1.default.error('Error in getImportedLeads controller', {
+            logger_1.default.error("Error in getImportedLeads controller", {
                 error: error.message,
                 importId: req.params.importId,
             });
             res.status(500).json({
                 success: false,
-                error: 'Failed to fetch imported leads',
+                error: "Failed to fetch imported leads",
                 message: error.message,
             });
         }
@@ -512,7 +553,7 @@ class BulkLeadImportController {
             if (!req.admin) {
                 res.status(401).json({
                     success: false,
-                    error: 'Authentication required',
+                    error: "Authentication required",
                 });
                 return;
             }
@@ -521,7 +562,7 @@ class BulkLeadImportController {
             if (!importRecord) {
                 res.status(404).json({
                     success: false,
-                    error: 'Import not found',
+                    error: "Import not found",
                 });
                 return;
             }
@@ -531,52 +572,56 @@ class BulkLeadImportController {
             if (leadIds.length === 0) {
                 res.status(400).json({
                     success: false,
-                    error: 'No imported leads found for this import',
+                    error: "No imported leads found for this import",
                 });
                 return;
             }
             // Fetch leads and get Firebase UIDs from activationData
             const leads = await Lead_1.default.find({ leadId: { $in: leadIds } })
-                .select('leadId name phone email activationData')
+                .select("leadId name phone email activationData")
                 .lean();
             // Filter leads that have been activated (have firebaseUid)
-            const activatedLeads = leads.filter(lead => lead.activationData?.firebaseUid);
+            const activatedLeads = leads.filter((lead) => lead.activationData?.firebaseUid);
             if (activatedLeads.length === 0) {
                 res.status(400).json({
                     success: false,
-                    error: 'No activated users found. Leads need to be activated first to have Firebase UIDs.',
+                    error: "No activated users found. Leads need to be activated first to have Firebase UIDs.",
                 });
                 return;
             }
             // Fetch user details for all Firebase UIDs
-            const firebaseUids = activatedLeads.map(lead => lead.activationData.firebaseUid);
+            const firebaseUids = activatedLeads.map((lead) => lead.activationData.firebaseUid);
             const userDetails = [];
             // Use lead data as fallback, but try to fetch from user service for latest data
-            const { env } = await Promise.resolve().then(() => __importStar(require('../config/env')));
-            const axios = (await Promise.resolve().then(() => __importStar(require('axios')))).default;
+            const { env } = await Promise.resolve().then(() => __importStar(require("../config/env")));
+            const axios = (await Promise.resolve().then(() => __importStar(require("axios")))).default;
             const BATCH_SIZE = 50;
             for (let i = 0; i < firebaseUids.length; i += BATCH_SIZE) {
                 const batch = firebaseUids.slice(i, i + BATCH_SIZE);
                 const batchResults = await Promise.allSettled(batch.map(async (uid) => {
-                    const lead = activatedLeads.find(l => l.activationData?.firebaseUid === uid);
+                    const lead = activatedLeads.find((l) => l.activationData?.firebaseUid === uid);
                     const leadData = {
                         uid,
-                        name: lead?.name || '',
-                        phone: lead?.phone || '',
-                        leadId: lead?.leadId || ''
+                        name: lead?.name || "",
+                        phone: lead?.phone || "",
+                        leadId: lead?.leadId || "",
                     };
                     try {
                         const response = await axios.get(`${env.USER_SERVICE_URL}/api/v1/profiles/${uid}`, {
                             headers: {
-                                'X-Service-Auth': env.SERVICE_AUTH_TOKEN,
-                                'X-Service-Name': 'admin-service'
-                            }
+                                "X-Service-Auth": env.SERVICE_AUTH_TOKEN,
+                                "X-Service-Name": "admin-service",
+                            },
                         });
                         return {
                             uid,
-                            name: response.data?.profile?.name || response.data?.name || leadData.name,
-                            phone: response.data?.profile?.phone || response.data?.phone || leadData.phone,
-                            leadId: leadData.leadId
+                            name: response.data?.profile?.name ||
+                                response.data?.name ||
+                                leadData.name,
+                            phone: response.data?.profile?.phone ||
+                                response.data?.phone ||
+                                leadData.phone,
+                            leadId: leadData.leadId,
                         };
                     }
                     catch (error) {
@@ -585,43 +630,43 @@ class BulkLeadImportController {
                     }
                 }));
                 batchResults.forEach((result) => {
-                    if (result.status === 'fulfilled') {
+                    if (result.status === "fulfilled") {
                         userDetails.push(result.value);
                     }
                     else {
                         // If failed, use lead data as fallback
-                        const uid = batch[result.status === 'rejected' ? batch.indexOf(result.reason) : -1];
-                        const lead = activatedLeads.find(l => l.activationData?.firebaseUid === uid);
+                        const uid = batch[result.status === "rejected" ? batch.indexOf(result.reason) : -1];
+                        const lead = activatedLeads.find((l) => l.activationData?.firebaseUid === uid);
                         if (lead) {
                             userDetails.push({
                                 uid,
-                                name: lead.name || '',
-                                phone: lead.phone || '',
-                                leadId: lead.leadId
+                                name: lead.name || "",
+                                phone: lead.phone || "",
+                                leadId: lead.leadId,
                             });
                         }
                     }
                 });
             }
             // Generate CSV
-            let csv = 'uid,name,phone,leadId\n';
+            let csv = "uid,name,phone,leadId\n";
             userDetails.forEach((user) => {
-                const name = (user.name || '').replace(/"/g, '""'); // Escape quotes
-                const phone = (user.phone || '').replace(/"/g, '""');
+                const name = (user.name || "").replace(/"/g, '""'); // Escape quotes
+                const phone = (user.phone || "").replace(/"/g, '""');
                 csv += `"${user.uid}","${name}","${phone}","${user.leadId}"\n`;
             });
-            res.setHeader('Content-Type', 'text/csv');
-            res.setHeader('Content-Disposition', `attachment; filename=user-uids-${importId}.csv`);
+            res.setHeader("Content-Type", "text/csv");
+            res.setHeader("Content-Disposition", `attachment; filename=user-uids-${importId}.csv`);
             res.send(csv);
         }
         catch (error) {
-            logger_1.default.error('Export UIDs error', {
+            logger_1.default.error("Export UIDs error", {
                 error: error.message,
                 importId: req.params.importId,
             });
             res.status(500).json({
                 success: false,
-                error: 'Failed to export UIDs',
+                error: "Failed to export UIDs",
                 message: error.message,
             });
         }

@@ -230,7 +230,7 @@ export class InviteController {
    */
   static async list(req: Request, res: Response) {
     try {
-      const { status, email, page, limit } = req.query;
+      const { status, email } = req.query;
 
       const query: any = {};
       if (status) {
@@ -240,19 +240,9 @@ export class InviteController {
         query.email = { $regex: email, $options: 'i' };
       }
 
-      // Pagination parameters
-      const pageNum = page ? parseInt(page as string, 10) : 1;
-      const limitNum = limit ? parseInt(limit as string, 10) : 20;
-      const skip = (pageNum - 1) * limitNum;
-
-      // Get total count for pagination
-      const total = await AdminInvite.countDocuments(query);
-
-      // Fetch paginated invites
       const invites = await AdminInvite.find(query)
         .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limitNum)
+        .limit(100)
         .lean();
 
       // Get creator and user information
@@ -279,12 +269,6 @@ export class InviteController {
       res.json({
         success: true,
         data: enrichedInvites,
-        pagination: {
-          page: pageNum,
-          limit: limitNum,
-          total,
-          totalPages: Math.ceil(total / limitNum),
-        },
       });
     } catch (error: any) {
       logger.error('Error listing invites', { error: error.message });

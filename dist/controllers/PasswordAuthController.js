@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -340,6 +373,135 @@ class PasswordAuthController {
             return res.status(500).json({
                 success: false,
                 error: 'Logout failed'
+            });
+        }
+    }
+    /**
+     * Verify password reset token
+     * GET /api/v1/auth/verify-reset-token?token=XXX
+     */
+    static async verifyResetToken(req, res) {
+        try {
+            const { token } = req.query;
+            if (!token || typeof token !== 'string') {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Reset token is required'
+                });
+            }
+            // Import PasswordResetToken model
+            const PasswordResetToken = (await Promise.resolve().then(() => __importStar(require('../models/PasswordResetToken')))).default;
+            // Find token
+            const resetToken = await PasswordResetToken.findOne({
+                token,
+                used: false
+            });
+            if (!resetToken) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'Invalid or expired reset token'
+                });
+            }
+            // Check if expired
+            if (resetToken.expiresAt < new Date()) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Reset token has expired. Please request a new password reset.'
+                });
+            }
+            // Return masked email for display
+            const maskedEmail = resetToken.email.replace(/^(.{2})(.*)(@.*)$/, (_, start, middle, end) => start + '*'.repeat(Math.min(middle.length, 5)) + end);
+            logger_1.default.info('Reset token verified', {
+                tokenId: resetToken._id,
+                email: maskedEmail
+            });
+            return res.json({
+                success: true,
+                data: {
+                    email: maskedEmail,
+                    expiresAt: resetToken.expiresAt
+                }
+            });
+        }
+        catch (error) {
+            logger_1.default.error('Verify reset token error', { error: error.message });
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to verify reset token'
+            });
+        }
+    }
+    /**
+     * Reset password using token
+     * POST /api/v1/auth/reset-password
+     */
+    static async resetPassword(req, res) {
+        try {
+            const { token, password } = req.body;
+            if (!token || !password) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Token and password are required'
+                });
+            }
+            // Validate password strength
+            if (password.length < 8) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Password must be at least 8 characters'
+                });
+            }
+            // Import PasswordResetToken model
+            const PasswordResetToken = (await Promise.resolve().then(() => __importStar(require('../models/PasswordResetToken')))).default;
+            // Find and validate token
+            const resetToken = await PasswordResetToken.findOne({
+                token,
+                used: false
+            });
+            if (!resetToken) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'Invalid or expired reset token'
+                });
+            }
+            // Check if expired
+            if (resetToken.expiresAt < new Date()) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Reset token has expired. Please request a new password reset.'
+                });
+            }
+            // Find user
+            const user = await AdminUser_1.default.findOne({ userId: resetToken.userId });
+            if (!user) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'User not found'
+                });
+            }
+            // Hash new password
+            const passwordHash = await bcrypt_1.default.hash(password, 10);
+            // Update user's password
+            user.passwordHash = passwordHash;
+            await user.save();
+            // Mark token as used
+            resetToken.used = true;
+            resetToken.usedAt = new Date();
+            await resetToken.save();
+            logger_1.default.info('Password reset successful', {
+                userId: user.userId,
+                email: user.email
+            });
+            return res.json({
+                success: true,
+                message: 'Password reset successful. You can now login with your new password.'
+            });
+        }
+        catch (error) {
+            logger_1.default.error('Reset password error', { error: error.message });
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to reset password'
             });
         }
     }

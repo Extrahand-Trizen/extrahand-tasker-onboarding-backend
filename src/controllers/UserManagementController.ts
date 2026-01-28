@@ -579,14 +579,13 @@ export class UserManagementController {
   }
 
   /**
-   * Delete admin user
+   * Delete a user (soft delete by setting status to inactive)
    * DELETE /api/v1/admin/users/:userId
    */
   static async deleteUser(req: AdminRequest, res: Response) {
     try {
       const { userId } = req.params;
       const actorId = req.admin?.userId || 'system';
-      const actorName = req.admin?.name || req.admin?.email || actorId;
 
       const user = await AdminUser.findOne({ userId });
       if (!user) {
@@ -600,25 +599,18 @@ export class UserManagementController {
       if (user.userId === actorId) {
         return res.status(400).json({
           success: false,
-          error: 'You cannot delete your own account',
+          error: 'Cannot delete your own account',
         });
       }
 
-      // Log deletion before deleting
-      logger.info('Admin user deletion initiated', {
-        deletedUserId: user.userId,
-        deletedUserEmail: user.email,
-        deletedUserName: user.name,
-        deletedBy: actorId,
-        deletedByName: actorName,
-      });
+      // Soft delete by setting status to inactive
+      user.status = 'inactive';
+      user.refreshTokens = []; // Revoke all sessions
+      await user.save();
 
-      // Delete the user
-      await AdminUser.deleteOne({ userId });
-
-      logger.info('Admin user deleted successfully', {
-        deletedUserId: user.userId,
-        deletedUserEmail: user.email,
+      logger.info('User deleted (soft delete)', {
+        userId: user.userId,
+        email: user.email,
         deletedBy: actorId,
       });
 
@@ -627,10 +619,7 @@ export class UserManagementController {
         message: 'User deleted successfully',
       });
     } catch (error: any) {
-      logger.error('Delete user error', {
-        error: error.message,
-        userId: req.params.userId,
-      });
+      logger.error('Delete user error', { error: error.message });
       return res.status(500).json({
         success: false,
         error: 'Failed to delete user',
