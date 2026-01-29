@@ -212,7 +212,10 @@ class DuplicateCheckService {
             // Create a map for O(1) lookup: normalizedPhone -> existingLead
             const duplicatePhoneToLeadMap = new Map();
             existingLeads.forEach(lead => {
-                duplicatePhoneToLeadMap.set(lead.phone, lead);
+                const phone = lead.phone;
+                if (phone) {
+                    duplicatePhoneToLeadMap.set(phone, lead);
+                }
             });
             logger_1.default.info('Bulk duplicate check completed', {
                 checkedPhones: uniqueNormalizedPhones.length,
@@ -319,7 +322,7 @@ class DuplicateCheckService {
         if (existingLeadDifferentCategory) {
             // Same phone but different category - this is allowed, but we return info
             logger_1.default.info('Same phone with different category found', {
-                phone: normalizedPhone,
+                phone: normalizedContact,
                 existingLeadId: existingLeadDifferentCategory.leadId,
                 existingCategory: existingLeadDifferentCategory.primaryCategory,
                 newCategory: primaryCategory

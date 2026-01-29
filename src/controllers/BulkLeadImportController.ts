@@ -7,6 +7,7 @@ import Lead from "../models/Lead";
 import { csvQueue } from "../queues/csvQueue";
 import fs from "fs/promises";
 import path from "path";
+import os from "os";
 
 export class BulkLeadImportController {
   /**
@@ -123,8 +124,8 @@ export class BulkLeadImportController {
         | "lead_access_manager"
         | undefined;
 
-      // Store file temporarily
-      const tempDir = path.join(process.cwd(), "temp");
+      // Store file temporarily (use os.tmpdir() so production has write access, e.g. /tmp)
+      const tempDir = path.join(os.tmpdir(), "extrahand-csv-import");
       await fs.mkdir(tempDir, { recursive: true });
 
       const tempFilePath = path.join(
@@ -234,7 +235,7 @@ export class BulkLeadImportController {
       });
       res.status(500).json({
         success: false,
-        error: "Failed to queue CSV import",
+        error: "CSV import failed",
         message: error.message,
       });
     }
