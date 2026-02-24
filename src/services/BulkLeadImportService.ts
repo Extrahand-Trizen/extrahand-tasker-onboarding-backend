@@ -102,6 +102,10 @@ export class BulkLeadImportService {
       events: "events",
       "events & entertainment": "events",
       "events and entertainment": "events",
+      "water-tanker": "water-tanker",
+      "water & tanker services": "water-tanker",
+      "water and tanker services": "water-tanker",
+      "water tanker": "water-tanker",
       other: "other",
     };
 
@@ -683,6 +687,7 @@ export class BulkLeadImportService {
       "beauty",
       "pet-care",
       "events",
+      "water-tanker",
       "other",
     ];
     const normalizedCategory = primaryCategory.toLowerCase().trim();
@@ -693,13 +698,13 @@ export class BulkLeadImportService {
       };
     }
 
-    // Check secondary category - use row value or default
+    // Check secondary category - use row value or default (optional for water-tanker)
     const secondaryCategory = (
       row.secondaryCategory ||
       defaultSecondaryCategory ||
       ""
     ).trim();
-    if (!secondaryCategory || secondaryCategory.length < 1) {
+    if ((!secondaryCategory || secondaryCategory.length < 1) && normalizedCategory !== "water-tanker") {
       return {
         valid: false,
         error:

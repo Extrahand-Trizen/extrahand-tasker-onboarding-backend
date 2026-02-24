@@ -95,7 +95,7 @@ export class LeadController {
         return;
       }
       
-      if (!secondaryCategoryValue) {
+      if (!secondaryCategoryValue && primaryCategoryValue !== 'water-tanker') {
         res.status(400).json({
           success: false,
           error: 'Missing required fields',
@@ -103,7 +103,7 @@ export class LeadController {
         });
         return;
       }
-      
+
       if (!experienceLevel) {
         res.status(400).json({
           success: false,
@@ -124,8 +124,8 @@ export class LeadController {
         pincode,
         primaryCategory: primaryCategoryValue,
         primarySkill: primarySkill, // For backward compatibility
-        secondaryCategory: secondaryCategoryValue,
-        secondarySkill: secondarySkill, // For backward compatibility
+        secondaryCategory: secondaryCategoryValue || '',
+        secondarySkill: secondarySkill || '', // For backward compatibility
         experienceLevel,
         workingDays,
         preferredTimeSlot,

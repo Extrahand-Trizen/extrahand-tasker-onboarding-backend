@@ -475,6 +475,7 @@ export class UserCreationService {
       'beauty',
       'pet-care',
       'events',
+      'water-tanker',
       'other'
     ];
     const normalized = category?.toLowerCase() || 'other';
@@ -516,6 +517,10 @@ export class UserCreationService {
       'events': 'events',
       'events & entertainment': 'events',
       'events and entertainment': 'events',
+      'water-tanker': 'water-tanker',
+      'water & tanker services': 'water-tanker',
+      'water and tanker services': 'water-tanker',
+      'water tanker': 'water-tanker',
       'other': 'other'
     };
     

@@ -162,11 +162,11 @@ export class LeadService {
       if (!primarySkillCategory) {
         throw new Error('Primary category is required');
       }
-      
-      if (!secondaryCategoryValue) {
+      // Secondary category required for all except water-tanker (generalized service)
+      if (!secondaryCategoryValue && primarySkillCategory !== 'water-tanker') {
         throw new Error('Secondary category is required');
       }
-      
+
       if (!data.experienceLevel) {
         throw new Error('Experience level is required');
       }
@@ -185,6 +185,7 @@ export class LeadService {
         'beauty': 'Beauty & Wellness',
         'pet-care': 'Pet Care',
         'events': 'Events & Entertainment',
+        'water-tanker': 'Water & Tanker Services',
         'other': 'Other'
       };
       const primarySkillName = primarySkillNameMap[primarySkillCategory] || primarySkillCategory;
@@ -202,8 +203,8 @@ export class LeadService {
         pincode: data.pincode?.trim(),
         primarySkill: primarySkillCategory,  // Legacy field
         primaryCategory: primarySkillCategory,  // New field
-        secondarySkill: secondaryCategoryValue,  // Legacy field
-        secondaryCategory: secondaryCategoryValue,  // New field
+        secondarySkill: secondaryCategoryValue || '',  // Legacy field
+        secondaryCategory: secondaryCategoryValue || '',  // New field
         experienceLevel: data.experienceLevel,
         workingDays: data.workingDays?.trim(),
         preferredTimeSlot: data.preferredTimeSlot?.trim(),
