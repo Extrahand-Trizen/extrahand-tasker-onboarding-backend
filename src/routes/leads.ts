@@ -105,14 +105,14 @@ router.post(
 
 router.post(
   '/bulk-delete',
-  requirePermission('canUpdateLead'), // Using canUpdateLead permission for delete
+  requirePermission('canDeleteLead'),
   BulkOperationsController.bulkDeleteLeads
 );
 
-// Delete single lead
+// Delete single lead (only lead_access_manager can delete)
 router.delete(
   '/:leadId',
-  requirePermission('canUpdateLead'), // Using canUpdateLead permission for delete
+  requirePermission('canDeleteLead'),
   LeadController.deleteLead
 );
 
