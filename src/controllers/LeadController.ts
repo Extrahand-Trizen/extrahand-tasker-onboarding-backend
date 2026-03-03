@@ -363,7 +363,8 @@ export class LeadController {
         startDate,
         endDate,
         page,
-        limit
+        limit,
+        registrationStatus
       } = req.query;
 
       const role = req.admin.role as UserRole;
@@ -379,7 +380,8 @@ export class LeadController {
         startDate: startDate ? new Date(startDate as string) : undefined,
         endDate: endDate ? new Date(endDate as string) : undefined,
         page: page ? parseInt(page as string) : undefined,
-        limit: limit ? parseInt(limit as string) : undefined
+        limit: limit ? parseInt(limit as string) : undefined,
+        registrationStatus: registrationStatus as SearchFilters['registrationStatus']
       };
 
       // ✅ ISOLATION: Qualifiers can only see leads they added

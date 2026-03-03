@@ -9,7 +9,8 @@
     "start": "node dist/server.js",
     "prod": "NODE_ENV=production node dist/server.js",
     "migrate:lead-status": "node scripts/migrate-lead-status-values.js",
-    "migrate:rejected-to-inactive": "node scripts/migrate-rejected-to-inactive.js"
+    "migrate:rejected-to-inactive": "node scripts/migrate-rejected-to-inactive.js",
+    "migrate:status-history-legacy": "node scripts/migrate-status-history-legacy-values.js"
   },
   "engines": {
     "node": ">=18"

@@ -61,6 +61,8 @@ export interface UpdateStatusData {
   changedByName?: string;
 }
 
+export type RegistrationStatusFilter = 'not_registered' | 'registered' | 'registered_verified';
+
 export interface SearchFilters {
   status?: LeadStatus;
   city?: string;
@@ -72,6 +74,8 @@ export interface SearchFilters {
   endDate?: Date;
   page?: number;
   limit?: number;
+  /** Filter by conversion/registration on main website */
+  registrationStatus?: RegistrationStatusFilter;
 }
 
 export class LeadService {
@@ -433,6 +437,40 @@ export class LeadService {
           { city: searchRegex },
           { leadId: searchRegex }
         ];
+      }
+
+      // Registration/conversion status (main website)
+      if (filters.registrationStatus) {
+        switch (filters.registrationStatus) {
+          case 'not_registered':
+            query.$and = query.$and || [];
+            query.$and.push({
+              $or: [
+                { conversionData: { $exists: false } },
+                { 'conversionData.platformUid': { $exists: false } },
+                { 'conversionData.platformUid': null },
+                { 'conversionData.platformUid': '' }
+              ]
+            });
+            break;
+          case 'registered':
+            query.$and = query.$and || [];
+            query.$and.push({
+              'conversionData.platformUid': { $exists: true, $nin: [null, ''] },
+              $or: [
+                { 'conversionData.isAadhaarVerified': { $ne: true } },
+                { 'conversionData.isAadhaarVerified': { $exists: false } }
+              ]
+            });
+            break;
+          case 'registered_verified':
+            query.$and = query.$and || [];
+            query.$and.push({
+              'conversionData.platformUid': { $exists: true, $nin: [null, ''] },
+              'conversionData.isAadhaarVerified': true
+            });
+            break;
+        }
       }
 
       // Execute query
