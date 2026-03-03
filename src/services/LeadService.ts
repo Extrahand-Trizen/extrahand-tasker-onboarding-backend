@@ -154,7 +154,7 @@ export class LeadService {
       // If sameCategory is false, allow it (different category for same person)
 
       // Decide initial status (restricted set)
-      const initialStatus: LeadStatus = data.status && ['lead_added', 'contacted', 'interested'].includes(data.status)
+      const initialStatus: LeadStatus = data.status && ['lead_added', 'contacted_not_interested', 'contacted_interested'].includes(data.status)
         ? data.status
         : 'lead_added';
 

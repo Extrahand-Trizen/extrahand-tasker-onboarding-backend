@@ -759,7 +759,7 @@ export class BulkLeadImportService {
       };
     }
 
-    // const allowedStatuses: LeadStatus[] = ['lead_added', 'contacted', 'interested'];
+    // const allowedStatuses: LeadStatus[] = ['lead_added', 'contacted_not_interested', 'contacted_interested'];
     // if (row.status && !allowedStatuses.includes(row.status as LeadStatus)) {
     //   return { valid: false, error: `Invalid status. Allowed: ${allowedStatuses.join(', ')}` };
     // }
@@ -1020,7 +1020,7 @@ export class BulkLeadImportService {
         ) {
           const activeLeadsCount = await Lead.countDocuments({
             leadId: { $in: existingImport.importedUserIds },
-            status: { $nin: ["inactive", "rejected"] }, // Count only active leads
+            status: { $nin: ["inactive"] }, // Count only active leads
           }).session(session);
 
           if (activeLeadsCount === 0) {
@@ -1110,7 +1110,7 @@ export class BulkLeadImportService {
       if (existingImport && existingImport.status === "completed") {
         const activeLeadsCount = await Lead.countDocuments({
           leadId: { $in: existingImport.importedUserIds || [] },
-          status: { $nin: ["inactive", "rejected"] },
+          status: { $nin: ["inactive"] },
         }).session(session);
 
         if (activeLeadsCount === 0) {

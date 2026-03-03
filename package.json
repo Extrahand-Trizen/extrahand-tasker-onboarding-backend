@@ -7,7 +7,9 @@
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "prod": "NODE_ENV=production node dist/server.js"
+    "prod": "NODE_ENV=production node dist/server.js",
+    "migrate:lead-status": "node scripts/migrate-lead-status-values.js",
+    "migrate:rejected-to-inactive": "node scripts/migrate-rejected-to-inactive.js"
   },
   "engines": {
     "node": ">=18"

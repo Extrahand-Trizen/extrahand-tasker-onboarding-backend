@@ -3,12 +3,11 @@ import mongoose, { Schema, Document } from 'mongoose';
 // ✅ LEAD STATUS - CRM/Onboarding concern (ends at approved)
 export type LeadStatus = 
   | 'lead_added'
-  | 'contacted'
-  | 'interested'
+  | 'contacted_not_interested'
+  | 'contacted_interested'
   | 'documents_submitted'
   | 'under_verification'
   | 'approved'
-  | 'rejected'
   | 'inactive';
 
 // ✅ ACCOUNT STATUS - Auth/Platform concern (starts after lead approval)
@@ -152,6 +151,13 @@ export interface ILead extends Document {
   
   // Activation
   activationData?: IActivationData;
+
+  // Conversion (lead registered on main website and verification status)
+  conversionData?: {
+    platformUid?: string;
+    isAadhaarVerified?: boolean;
+    lastCheckedAt?: Date;
+  };
   
   // Creation method tracking
   creationMethod?: CreationMethod;
@@ -253,8 +259,8 @@ const LeadSchema = new Schema<ILead>({
     type: String,
     enum: [
       'lead_added',
-      'contacted',
-      'interested',
+      'contacted_not_interested',
+      'contacted_interested',
       'documents_submitted',
       'under_verification',
       'approved',
@@ -279,14 +285,13 @@ const LeadSchema = new Schema<ILead>({
       type: String,
       enum: [
         'lead_added',
-        'contacted',
-        'interested',
+        'contacted_not_interested',
+        'contacted_interested',
         'documents_submitted',
         'under_verification',
         'approved',
-        'rejected',
         'inactive'
-        // ❌ REMOVED: 'account_created', 'activated' - these are account statuses, not lead statuses
+        // ❌ REMOVED: 'rejected' - use inactive instead
       ]
     },
     changedBy: String,
@@ -403,6 +408,11 @@ const LeadSchema = new Schema<ILead>({
     activatedAt: Date,
     firebaseUid: { type: String, index: true, sparse: true },
     profileCreated: { type: Boolean, default: false }
+  },
+  conversionData: {
+    platformUid: String,
+    isAadhaarVerified: { type: Boolean, default: false },
+    lastCheckedAt: Date
   },
   creationMethod: {
     type: String,

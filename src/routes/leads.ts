@@ -1,10 +1,8 @@
 import { Router } from 'express';
 import { LeadController } from '../controllers/LeadController';
 import { BulkOperationsController } from '../controllers/BulkOperationsController';
-import { DocumentController } from '../controllers/DocumentController';
 import { SkillController } from '../controllers/SkillController';
 import { ActivationController } from '../controllers/ActivationController';
-import { ApprovalController } from '../controllers/ApprovalController';
 import { adminAuthMiddleware } from '../middleware/adminAuth';
 import { requirePermission } from '../middleware/roleAuth';
 
@@ -41,18 +39,18 @@ router.post(
   LeadController.checkDuplicate
 );
 
-// Verification queue (must be before /:leadId to avoid route conflict)
-router.get(
-  '/verification-queue',
-  requirePermission('canVerifyDocuments'),
-  ApprovalController.getVerificationQueue
-);
-
 // Activation queue (must be before /:leadId to avoid route conflict)
 router.get(
   '/activation-queue',
   requirePermission('canActivate'),
   ActivationController.getActivationQueue
+);
+
+// Conversion status (lead registered on main website + Aadhaar verified)
+router.get(
+  '/:leadId/conversion-status',
+  requirePermission('canViewLeads'),
+  LeadController.getConversionStatus
 );
 
 // Get lead by ID
@@ -114,46 +112,6 @@ router.delete(
   '/:leadId',
   requirePermission('canDeleteLead'),
   LeadController.deleteLead
-);
-
-// Document management
-router.post(
-  '/:leadId/documents',
-  requirePermission('canUploadDocuments'),
-  DocumentController.uploadDocument
-);
-
-// Aadhaar verification (API-based)
-router.post(
-  '/:leadId/documents/:documentIndex/verify-aadhaar/initiate',
-  requirePermission('canVerifyDocuments'),
-  DocumentController.initiateAadhaarVerification
-);
-
-router.post(
-  '/:leadId/documents/:documentIndex/verify-aadhaar/verify',
-  requirePermission('canVerifyDocuments'),
-  DocumentController.verifyAadhaarOTP
-);
-
-// PAN verification (API-based)
-router.post(
-  '/:leadId/documents/:documentIndex/verify-pan',
-  requirePermission('canVerifyDocuments'),
-  DocumentController.verifyPAN
-);
-
-// Manual document verification (for address_proof and other documents)
-router.put(
-  '/:leadId/documents/:documentIndex',
-  requirePermission('canVerifyDocuments'),
-  DocumentController.verifyDocument
-);
-
-router.delete(
-  '/:leadId/documents/:documentIndex',
-  requirePermission('canUpdateLead'),
-  DocumentController.deleteDocument
 );
 
 // Skill management

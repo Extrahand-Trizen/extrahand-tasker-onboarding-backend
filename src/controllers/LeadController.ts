@@ -2,6 +2,8 @@ import { Response } from 'express';
 import { AdminRequest } from '../middleware/adminAuth';
 import { LeadService, CreateLeadData, UpdateLeadData, UpdateStatusData, SearchFilters } from '../services/LeadService';
 import { DuplicateCheckService } from '../services/DuplicateCheckService';
+import { getConversionStatusByPhone } from '../services/UserLookupService';
+import Lead from '../models/Lead';
 import { UserRole } from '../lib/permissions';
 import logger from '../config/logger';
 
@@ -215,6 +217,90 @@ export class LeadController {
       res.status(500).json({
         success: false,
         error: 'Failed to get lead',
+        message: error.message
+      });
+    }
+  }
+
+  /**
+   * Get conversion status (did lead register on main website and verify Aadhaar?)
+   * GET /api/v1/onboarding/leads/:leadId/conversion-status
+   */
+  static async getConversionStatus(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      if (!req.admin) {
+        res.status(401).json({
+          success: false,
+          error: 'Authentication required'
+        });
+        return;
+      }
+
+      const { leadId } = req.params;
+      const lead = await LeadService.getLeadById(leadId);
+
+      if (!lead) {
+        res.status(404).json({
+          success: false,
+          error: 'Lead not found'
+        });
+        return;
+      }
+
+      if (!canAccessLead(req, lead.addedBy)) {
+        res.status(403).json({
+          success: false,
+          error: 'Forbidden',
+          message: 'You can only access leads that you have added.'
+        });
+        return;
+      }
+
+      const phone = lead.phone || (lead as any).landline;
+      if (!phone) {
+        res.status(400).json({
+          success: false,
+          error: 'Lead has no phone number',
+          message: 'Cannot check conversion status without a phone number.'
+        });
+        return;
+      }
+
+      const status = await getConversionStatusByPhone(phone);
+
+      // Optionally cache on lead for list views
+      if (status.converted && (status.platformUid || status.isAadhaarVerified !== undefined)) {
+        await Lead.findOneAndUpdate(
+          { leadId },
+          {
+            $set: {
+              conversionData: {
+                platformUid: status.platformUid,
+                isAadhaarVerified: status.isAadhaarVerified,
+                lastCheckedAt: new Date()
+              }
+            }
+          }
+        );
+      }
+
+      res.json({
+        success: true,
+        data: {
+          converted: status.converted,
+          platformUid: status.platformUid,
+          isAadhaarVerified: status.isAadhaarVerified,
+          name: status.name
+        }
+      });
+    } catch (error: any) {
+      logger.error('Error in getConversionStatus', {
+        error: error.message,
+        leadId: req.params.leadId
+      });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to get conversion status',
         message: error.message
       });
     }

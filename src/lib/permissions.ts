@@ -3,12 +3,11 @@ export type UserRole = 'qualifier' | 'onboarder' | 'lead_access_manager' | 'supp
 // ✅ LEAD STATUS - CRM/Onboarding concern (ends at approved)
 export type LeadStatus = 
   | 'lead_added'
-  | 'contacted'
-  | 'interested'
+  | 'contacted_not_interested'
+  | 'contacted_interested'
   | 'documents_submitted'
   | 'under_verification'
   | 'approved'
-  | 'rejected'
   | 'inactive';
 
 // ✅ ACCOUNT STATUS - Auth/Platform concern (starts after lead approval)
@@ -48,7 +47,7 @@ export const PERMISSIONS: Record<UserRole, Permissions> = {
     canCreateLead: true,
     canUpdateLead: true,
     canDeleteLead: false,
-    canUpdateStatus: ['lead_added', 'contacted', 'interested'], // ✅ Qualifier can only move up to 'interested' - Onboarder handles documents
+    canUpdateStatus: ['lead_added', 'contacted_not_interested', 'contacted_interested'], // ✅ Qualifier can only move up to 'contacted_interested'
     canViewDocuments: true,
     canUploadDocuments: false,
     canVerifyDocuments: false,
@@ -68,7 +67,7 @@ export const PERMISSIONS: Record<UserRole, Permissions> = {
   },
   onboarder: {
     canViewLeads: true,
-    canCreateLead: true,
+    canCreateLead: false,
     canUpdateLead: true,
     canDeleteLead: false,
     canUpdateStatus: 'all',
@@ -82,7 +81,7 @@ export const PERMISSIONS: Record<UserRole, Permissions> = {
     canActivate: true,
     canViewAnalytics: true,
     canViewSettings: false,
-    canBulkImport: true,
+    canBulkImport: false,
     canBulkApprove: true,
     canBulkActivate: true,
     canAddNotes: true,
@@ -117,7 +116,7 @@ export const PERMISSIONS: Record<UserRole, Permissions> = {
     canCreateLead: false,
     canUpdateLead: false,
     canDeleteLead: false,
-    canUpdateStatus: ['contacted', 'interested'], // Limited status updates
+    canUpdateStatus: ['contacted_not_interested', 'contacted_interested'], // Limited status updates
     canViewDocuments: true,
     canUploadDocuments: false,
     canVerifyDocuments: false,
@@ -180,9 +179,9 @@ export function canUpdateStatus(role: UserRole, currentStatus: LeadStatus, newSt
   // Activation is handled via canActivate permission and accountStatus field, not via status update
   
   if (Array.isArray(permissions.canUpdateStatus)) {
-    // Qualifier can only move forward in pipeline (up to 'interested')
+    // Qualifier can only move forward in pipeline (up to 'contacted_interested')
     if (role === 'qualifier') {
-      const statusOrder: LeadStatus[] = ['lead_added', 'contacted', 'interested'];
+      const statusOrder: LeadStatus[] = ['lead_added', 'contacted_not_interested', 'contacted_interested'];
       const currentIndex = statusOrder.indexOf(currentStatus);
       const newIndex = statusOrder.indexOf(newStatus);
       // ✅ Allow moving forward in pipeline, or staying at same status
