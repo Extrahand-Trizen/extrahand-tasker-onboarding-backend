@@ -423,6 +423,27 @@ const LeadSchema = new Schema<ILead>({
   timestamps: true
 });
 
+// Legacy status values that were renamed; map to current enum so validation passes
+const LEGACY_STATUS_MAP: Record<string, string> = {
+  contacted: 'contacted_not_interested',
+  interested: 'contacted_interested',
+};
+
+// Pre-save hook: normalize legacy status values in status and statusHistory (so saves don't fail validation)
+LeadSchema.pre('save', function(next) {
+  if (this.status && LEGACY_STATUS_MAP[this.status]) {
+    this.status = LEGACY_STATUS_MAP[this.status] as LeadStatus;
+  }
+  if (this.statusHistory?.length) {
+    this.statusHistory.forEach((entry) => {
+      if (entry.status && LEGACY_STATUS_MAP[entry.status]) {
+        entry.status = LEGACY_STATUS_MAP[entry.status] as LeadStatus;
+      }
+    });
+  }
+  next();
+});
+
 // Pre-save hook to ensure at least one contact number (phone or landline) exists
 LeadSchema.pre('save', function(next) {
   if (!this.phone && !this.landline) {
