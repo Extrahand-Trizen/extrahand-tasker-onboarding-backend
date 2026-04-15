@@ -46,7 +46,7 @@ class CertificateReviewService {
             params: {
                 uid: params.uid,
                 q: params.q,
-                status: params.status,
+                ...(params.status ? { status: params.status } : {}),
                 city: params.city,
                 page: params.page || 1,
                 limit: params.limit || 20,
@@ -61,6 +61,16 @@ class CertificateReviewService {
                 totalPages: response.data?.data?.pagination?.totalPages || 0,
             },
         };
+    }
+    static async getAnalyticsFromUserService(params) {
+        const response = await axios_1.default.get(`${this.getProfileBaseUrl()}/internal/certificates/analytics`, {
+            headers: this.getHeaders(params.actorUid),
+            params: {
+                from: params.from,
+                to: params.to,
+            },
+        });
+        return response.data?.data || {};
     }
     static buildQueueFromProfiles(profiles, filters) {
         const desiredStatus = filters?.status;
@@ -146,6 +156,7 @@ class CertificateReviewService {
             ...certificate,
             status: nextStatus,
             reviewedBy: reviewerDisplayName,
+            reviewedByUserId: actorUid,
             reviewedAt: nowIso,
             reviewNotes: reviewNotes?.trim() || undefined,
             rejectionReason: nextStatus === 'rejected' ? rejectionReason?.trim() : undefined,
@@ -171,8 +182,8 @@ class CertificateReviewService {
             certificateIndex,
             previousStatus: currentStatus,
             nextStatus,
-            reviewedBy: actorUid,
-            reviewedByName: actorName,
+            reviewedByUserId: actorUid,
+            reviewedByName: reviewerDisplayName,
         });
     }
 }

@@ -33,9 +33,13 @@ class CertificateReviewController {
                 return;
             }
             const { q, uid, status, city, page = '1', limit = '20', } = req.query;
-            const normalizedStatus = status?.trim();
-            if (normalizedStatus &&
-                !['pending', 'verified', 'rejected'].includes(normalizedStatus)) {
+            const statusTrimmed = status?.trim();
+            const normalizedStatus = statusTrimmed === 'pending' ||
+                statusTrimmed === 'verified' ||
+                statusTrimmed === 'rejected'
+                ? statusTrimmed
+                : undefined;
+            if (statusTrimmed && !normalizedStatus) {
                 res.status(400).json({
                     success: false,
                     error: 'Invalid status filter. Allowed: pending, verified, rejected',
@@ -68,6 +72,48 @@ class CertificateReviewController {
             res.status(500).json({
                 success: false,
                 error: 'Failed to fetch certificate queue',
+                message: error.message,
+            });
+        }
+    }
+    /**
+     * GET /api/v1/onboarding/certificates/analytics
+     */
+    static async getAnalytics(req, res) {
+        try {
+            if (!req.admin) {
+                res.status(401).json({
+                    success: false,
+                    error: 'Authentication required',
+                });
+                return;
+            }
+            const actorUid = req.admin.userId || req.admin.uid;
+            if (!actorUid) {
+                res.status(401).json({
+                    success: false,
+                    error: 'Authenticated admin identity not found',
+                });
+                return;
+            }
+            const { from, to } = req.query;
+            const data = await CertificateReviewService_1.CertificateReviewService.getAnalyticsFromUserService({
+                actorUid,
+                from: from ? String(from) : undefined,
+                to: to ? String(to) : undefined,
+            });
+            res.json({
+                success: true,
+                data,
+            });
+        }
+        catch (error) {
+            logger_1.default.error('Certificate analytics fetch failed', {
+                error: error.message,
+            });
+            res.status(500).json({
+                success: false,
+                error: 'Failed to fetch certificate analytics',
                 message: error.message,
             });
         }

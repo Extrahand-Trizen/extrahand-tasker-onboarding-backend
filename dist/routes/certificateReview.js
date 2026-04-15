@@ -10,6 +10,7 @@ const roleAuth_1 = require("../middleware/roleAuth");
 const router = express_1.default.Router();
 router.use(adminAuth_1.adminAuthMiddleware);
 router.get('/queue', (0, roleAuth_1.requirePermission)('canVerifyUserCertificates'), CertificateReviewController_1.CertificateReviewController.getQueue);
+router.get('/analytics', (0, roleAuth_1.requireRole)('lead_access_manager'), CertificateReviewController_1.CertificateReviewController.getAnalytics);
 router.put('/:uid/:skillIndex/:certificateIndex/verify', (0, roleAuth_1.requirePermission)('canVerifyUserCertificates'), CertificateReviewController_1.CertificateReviewController.verify);
 router.put('/:uid/:skillIndex/:certificateIndex/reject', (0, roleAuth_1.requirePermission)('canVerifyUserCertificates'), CertificateReviewController_1.CertificateReviewController.reject);
 exports.default = router;

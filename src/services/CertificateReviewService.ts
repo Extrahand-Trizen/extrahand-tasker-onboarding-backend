@@ -18,6 +18,8 @@ interface ProfileCertificate {
   expiryDate?: string;
   status?: CertificateStatus;
   reviewedBy?: string;
+  /** Admin/onboarder stable id (analytics) */
+  reviewedByUserId?: string;
   reviewedAt?: string;
   rejectionReason?: string;
   reviewNotes?: string;
@@ -124,7 +126,7 @@ export class CertificateReviewService {
       params: {
         uid: params.uid,
         q: params.q,
-        status: params.status,
+        ...(params.status ? { status: params.status } : {}),
         city: params.city,
         page: params.page || 1,
         limit: params.limit || 20,
@@ -140,6 +142,25 @@ export class CertificateReviewService {
         totalPages: response.data?.data?.pagination?.totalPages || 0,
       },
     };
+  }
+
+  static async getAnalyticsFromUserService(params: {
+    actorUid: string;
+    from?: string;
+    to?: string;
+  }): Promise<Record<string, unknown>> {
+    const response = await axios.get<{
+      success?: boolean;
+      data?: Record<string, unknown>;
+    }>(`${this.getProfileBaseUrl()}/internal/certificates/analytics`, {
+      headers: this.getHeaders(params.actorUid),
+      params: {
+        from: params.from,
+        to: params.to,
+      },
+    });
+
+    return response.data?.data || {};
   }
 
   static buildQueueFromProfiles(
@@ -270,6 +291,7 @@ export class CertificateReviewService {
       ...certificate, 
       status: nextStatus,
       reviewedBy: reviewerDisplayName,
+      reviewedByUserId: actorUid,
       reviewedAt: nowIso,
       reviewNotes: reviewNotes?.trim() || undefined,
       rejectionReason: nextStatus === 'rejected' ? rejectionReason?.trim() : undefined,
@@ -303,8 +325,8 @@ export class CertificateReviewService {
       certificateIndex,
       previousStatus: currentStatus,
       nextStatus,
-      reviewedBy: actorUid,
-      reviewedByName: actorName,
+      reviewedByUserId: actorUid,
+      reviewedByName: reviewerDisplayName,
     });
   }
 }

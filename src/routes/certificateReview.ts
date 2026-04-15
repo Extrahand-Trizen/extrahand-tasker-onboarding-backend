@@ -1,7 +1,7 @@
 import express from 'express';
 import { CertificateReviewController } from '../controllers/CertificateReviewController';
 import { adminAuthMiddleware } from '../middleware/adminAuth';
-import { requirePermission } from '../middleware/roleAuth';
+import { requirePermission, requireRole } from '../middleware/roleAuth';
 
 const router = express.Router();
 
@@ -11,6 +11,12 @@ router.get(
   '/queue',
   requirePermission('canVerifyUserCertificates'),
   CertificateReviewController.getQueue
+);
+
+router.get(
+  '/analytics',
+  requireRole('lead_access_manager'),
+  CertificateReviewController.getAnalytics
 );
 
 router.put(

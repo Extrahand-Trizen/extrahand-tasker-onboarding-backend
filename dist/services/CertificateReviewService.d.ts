@@ -13,6 +13,8 @@ interface ProfileCertificate {
     expiryDate?: string;
     status?: CertificateStatus;
     reviewedBy?: string;
+    /** Admin/onboarder stable id (analytics) */
+    reviewedByUserId?: string;
     reviewedAt?: string;
     rejectionReason?: string;
     reviewNotes?: string;
@@ -50,6 +52,11 @@ export declare class CertificateReviewService {
             totalPages: number;
         };
     }>;
+    static getAnalyticsFromUserService(params: {
+        actorUid: string;
+        from?: string;
+        to?: string;
+    }): Promise<Record<string, unknown>>;
     static buildQueueFromProfiles(profiles: any[], filters?: {
         status?: CertificateStatus;
         city?: string;
