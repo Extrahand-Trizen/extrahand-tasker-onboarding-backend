@@ -1,5 +1,5 @@
 import mongoose, { Document } from 'mongoose';
-export type LeadStatus = 'lead_added' | 'contacted' | 'interested' | 'documents_submitted' | 'under_verification' | 'approved' | 'rejected' | 'inactive';
+export type LeadStatus = 'lead_added' | 'contacted_not_interested' | 'contacted_interested' | 'documents_submitted' | 'under_verification' | 'approved' | 'inactive';
 export type AccountStatus = 'not_created' | 'invited' | 'activated' | 'suspended';
 export type LeadSource = 'referral' | 'campaign' | 'walk-in' | 'agent' | 'other';
 export type CreationMethod = 'manual_onboarding' | 'bulk_upload' | 'direct_activation';
@@ -103,6 +103,11 @@ export interface ILead extends Document {
     isDuplicate: boolean;
     blacklisted: boolean;
     activationData?: IActivationData;
+    conversionData?: {
+        platformUid?: string;
+        isAadhaarVerified?: boolean;
+        lastCheckedAt?: Date;
+    };
     creationMethod?: CreationMethod;
     createdAt: Date;
     updatedAt: Date;

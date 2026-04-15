@@ -44,6 +44,7 @@ const Lead_1 = __importDefault(require("../models/Lead"));
 const csvQueue_1 = require("../queues/csvQueue");
 const promises_1 = __importDefault(require("fs/promises"));
 const path_1 = __importDefault(require("path"));
+const os_1 = __importDefault(require("os"));
 class BulkLeadImportController {
     /**
      * Preview bulk import (validation + duplicate check, no records created)
@@ -136,8 +137,8 @@ class BulkLeadImportController {
             }
             // Get user role for tracking
             const adminRole = req.admin?.role;
-            // Store file temporarily
-            const tempDir = path_1.default.join(process.cwd(), "temp");
+            // Store file temporarily (use os.tmpdir() so production has write access, e.g. /tmp)
+            const tempDir = path_1.default.join(os_1.default.tmpdir(), "extrahand-csv-import");
             await promises_1.default.mkdir(tempDir, { recursive: true });
             const tempFilePath = path_1.default.join(tempDir, `csv-${Date.now()}-${userId}-${file.originalname}`);
             await promises_1.default.writeFile(tempFilePath, file.buffer);
@@ -224,7 +225,7 @@ class BulkLeadImportController {
             });
             res.status(500).json({
                 success: false,
-                error: "Failed to queue CSV import",
+                error: "CSV import failed",
                 message: error.message,
             });
         }
@@ -307,7 +308,9 @@ class BulkLeadImportController {
             const template = BulkLeadImportService_1.BulkLeadImportService.generateTemplate(primaryCategory, secondaryCategory);
             const filename = primaryCategory && secondaryCategory
                 ? `tasker-import-${primaryCategory}-${secondaryCategory.replace(/\s+/g, "-")}-template.csv`
-                : "tasker-import-template.csv";
+                : primaryCategory
+                    ? `tasker-import-${primaryCategory}-template.csv`
+                    : "tasker-import-template.csv";
             res.setHeader("Content-Type", "text/csv");
             res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
             res.send(template);

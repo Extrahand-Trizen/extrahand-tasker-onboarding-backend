@@ -3,10 +3,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const LeadController_1 = require("../controllers/LeadController");
 const BulkOperationsController_1 = require("../controllers/BulkOperationsController");
-const DocumentController_1 = require("../controllers/DocumentController");
 const SkillController_1 = require("../controllers/SkillController");
 const ActivationController_1 = require("../controllers/ActivationController");
-const ApprovalController_1 = require("../controllers/ApprovalController");
 const adminAuth_1 = require("../middleware/adminAuth");
 const roleAuth_1 = require("../middleware/roleAuth");
 const router = (0, express_1.Router)();
@@ -20,10 +18,10 @@ router.get('/', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadControlle
 router.get('/creators', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getLeadCreators);
 // Check for duplicates
 router.post('/duplicate-check', (0, roleAuth_1.requirePermission)('canCreateLead'), LeadController_1.LeadController.checkDuplicate);
-// Verification queue (must be before /:leadId to avoid route conflict)
-router.get('/verification-queue', (0, roleAuth_1.requirePermission)('canVerifyDocuments'), ApprovalController_1.ApprovalController.getVerificationQueue);
 // Activation queue (must be before /:leadId to avoid route conflict)
 router.get('/activation-queue', (0, roleAuth_1.requirePermission)('canActivate'), ActivationController_1.ActivationController.getActivationQueue);
+// Conversion status (lead registered on main website + Aadhaar verified)
+router.get('/:leadId/conversion-status', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getConversionStatus);
 // Get lead by ID
 router.get('/:leadId', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getLead);
 // Update lead
@@ -38,21 +36,9 @@ router.post('/:leadId/notes', (0, roleAuth_1.requirePermission)('canAddNotes'), 
 // Bulk operations
 router.post('/bulk-status', (0, roleAuth_1.requirePermission)('canUpdateLead'), BulkOperationsController_1.BulkOperationsController.bulkStatusChange);
 router.post('/bulk-assign-skills', (0, roleAuth_1.requirePermission)('canAssignSkills'), BulkOperationsController_1.BulkOperationsController.bulkAssignSkills);
-router.post('/bulk-delete', (0, roleAuth_1.requirePermission)('canUpdateLead'), // Using canUpdateLead permission for delete
-BulkOperationsController_1.BulkOperationsController.bulkDeleteLeads);
-// Delete single lead
-router.delete('/:leadId', (0, roleAuth_1.requirePermission)('canUpdateLead'), // Using canUpdateLead permission for delete
-LeadController_1.LeadController.deleteLead);
-// Document management
-router.post('/:leadId/documents', (0, roleAuth_1.requirePermission)('canUploadDocuments'), DocumentController_1.DocumentController.uploadDocument);
-// Aadhaar verification (API-based)
-router.post('/:leadId/documents/:documentIndex/verify-aadhaar/initiate', (0, roleAuth_1.requirePermission)('canVerifyDocuments'), DocumentController_1.DocumentController.initiateAadhaarVerification);
-router.post('/:leadId/documents/:documentIndex/verify-aadhaar/verify', (0, roleAuth_1.requirePermission)('canVerifyDocuments'), DocumentController_1.DocumentController.verifyAadhaarOTP);
-// PAN verification (API-based)
-router.post('/:leadId/documents/:documentIndex/verify-pan', (0, roleAuth_1.requirePermission)('canVerifyDocuments'), DocumentController_1.DocumentController.verifyPAN);
-// Manual document verification (for address_proof and other documents)
-router.put('/:leadId/documents/:documentIndex', (0, roleAuth_1.requirePermission)('canVerifyDocuments'), DocumentController_1.DocumentController.verifyDocument);
-router.delete('/:leadId/documents/:documentIndex', (0, roleAuth_1.requirePermission)('canUpdateLead'), DocumentController_1.DocumentController.deleteDocument);
+router.post('/bulk-delete', (0, roleAuth_1.requirePermission)('canDeleteLead'), BulkOperationsController_1.BulkOperationsController.bulkDeleteLeads);
+// Delete single lead (only lead_access_manager can delete)
+router.delete('/:leadId', (0, roleAuth_1.requirePermission)('canDeleteLead'), LeadController_1.LeadController.deleteLead);
 // Skill management
 router.post('/:leadId/skills', (0, roleAuth_1.requirePermission)('canAssignSkills'), SkillController_1.SkillController.addSkill);
 router.put('/:leadId/skills/:skillIndex', (0, roleAuth_1.requirePermission)('canAssignSkills'), SkillController_1.SkillController.updateSkill);

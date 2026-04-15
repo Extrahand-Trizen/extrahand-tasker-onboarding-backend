@@ -126,8 +126,8 @@ const LeadSchema = new mongoose_1.Schema({
         type: String,
         enum: [
             'lead_added',
-            'contacted',
-            'interested',
+            'contacted_not_interested',
+            'contacted_interested',
             'documents_submitted',
             'under_verification',
             'approved',
@@ -152,14 +152,13 @@ const LeadSchema = new mongoose_1.Schema({
                 type: String,
                 enum: [
                     'lead_added',
-                    'contacted',
-                    'interested',
+                    'contacted_not_interested',
+                    'contacted_interested',
                     'documents_submitted',
                     'under_verification',
                     'approved',
-                    'rejected',
                     'inactive'
-                    // ❌ REMOVED: 'account_created', 'activated' - these are account statuses, not lead statuses
+                    // ❌ REMOVED: 'rejected' - use inactive instead
                 ]
             },
             changedBy: String,
@@ -277,6 +276,11 @@ const LeadSchema = new mongoose_1.Schema({
         firebaseUid: { type: String, index: true, sparse: true },
         profileCreated: { type: Boolean, default: false }
     },
+    conversionData: {
+        platformUid: String,
+        isAadhaarVerified: { type: Boolean, default: false },
+        lastCheckedAt: Date
+    },
     creationMethod: {
         type: String,
         enum: ['manual_onboarding', 'bulk_upload', 'direct_activation'],
@@ -284,6 +288,25 @@ const LeadSchema = new mongoose_1.Schema({
     }
 }, {
     timestamps: true
+});
+// Legacy status values that were renamed; map to current enum so validation passes
+const LEGACY_STATUS_MAP = {
+    contacted: 'contacted_not_interested',
+    interested: 'contacted_interested',
+};
+// Pre-save hook: normalize legacy status values in status and statusHistory (so saves don't fail validation)
+LeadSchema.pre('save', function (next) {
+    if (this.status && LEGACY_STATUS_MAP[this.status]) {
+        this.status = LEGACY_STATUS_MAP[this.status];
+    }
+    if (this.statusHistory?.length) {
+        this.statusHistory.forEach((entry) => {
+            if (entry.status && LEGACY_STATUS_MAP[entry.status]) {
+                entry.status = LEGACY_STATUS_MAP[entry.status];
+            }
+        });
+    }
+    next();
 });
 // Pre-save hook to ensure at least one contact number (phone or landline) exists
 LeadSchema.pre('save', function (next) {

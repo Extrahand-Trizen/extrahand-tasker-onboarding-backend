@@ -1,5 +1,5 @@
 export type UserRole = 'qualifier' | 'onboarder' | 'lead_access_manager' | 'support' | 'trust';
-export type LeadStatus = 'lead_added' | 'contacted' | 'interested' | 'documents_submitted' | 'under_verification' | 'approved' | 'rejected' | 'inactive';
+export type LeadStatus = 'lead_added' | 'contacted_not_interested' | 'contacted_interested' | 'documents_submitted' | 'under_verification' | 'approved' | 'inactive';
 export type AccountStatus = 'not_created' | 'invited' | 'activated' | 'suspended';
 export interface Permissions {
     canViewLeads: boolean;
@@ -23,6 +23,7 @@ export interface Permissions {
     canAddNotes: boolean;
     canViewAllNotes: boolean;
     canCommunicate: boolean;
+    canVerifyUserCertificates: boolean;
 }
 export declare const PERMISSIONS: Record<UserRole, Permissions>;
 export declare function getPermissions(role: UserRole): Permissions;

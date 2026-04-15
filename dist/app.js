@@ -20,6 +20,7 @@ const invites_1 = __importDefault(require("./routes/invites"));
 const microsoftAuth_1 = __importDefault(require("./routes/microsoftAuth"));
 const passwordAuth_1 = __importDefault(require("./routes/passwordAuth"));
 const userManagement_1 = __importDefault(require("./routes/userManagement"));
+const certificateReview_1 = __importDefault(require("./routes/certificateReview"));
 const errorHandler_1 = require("./middleware/errorHandler");
 const logger_1 = __importDefault(require("./config/logger"));
 const app = (0, express_1.default)();
@@ -64,6 +65,7 @@ app.use('/api/v1/onboarding/leads', activation_1.default);
 app.use('/api/v1/onboarding/analytics', analytics_1.default);
 app.use('/api/v1/onboarding/uploads', uploads_1.default);
 app.use('/api/v1/onboarding/team', adminUsers_1.default);
+app.use('/api/v1/onboarding/certificates', certificateReview_1.default);
 // Error handler
 app.use(errorHandler_1.errorHandler);
 exports.default = app;

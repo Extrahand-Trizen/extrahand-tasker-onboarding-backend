@@ -10,7 +10,7 @@ exports.PERMISSIONS = {
         canCreateLead: true,
         canUpdateLead: true,
         canDeleteLead: false,
-        canUpdateStatus: ['lead_added', 'contacted', 'interested'], // ✅ Qualifier can only move up to 'interested' - Onboarder handles documents
+        canUpdateStatus: ['lead_added', 'contacted_not_interested', 'contacted_interested'], // ✅ Qualifier can only move up to 'contacted_interested'
         canViewDocuments: true,
         canUploadDocuments: false,
         canVerifyDocuments: false,
@@ -26,11 +26,12 @@ exports.PERMISSIONS = {
         canBulkActivate: false, // ❌ REMOVED - Qualifier cannot bulk activate
         canAddNotes: true,
         canViewAllNotes: true,
-        canCommunicate: true
+        canCommunicate: true,
+        canVerifyUserCertificates: false,
     },
     onboarder: {
         canViewLeads: true,
-        canCreateLead: true,
+        canCreateLead: false,
         canUpdateLead: true,
         canDeleteLead: false,
         canUpdateStatus: 'all',
@@ -44,12 +45,13 @@ exports.PERMISSIONS = {
         canActivate: true,
         canViewAnalytics: true,
         canViewSettings: false,
-        canBulkImport: true,
+        canBulkImport: false,
         canBulkApprove: true,
         canBulkActivate: true,
         canAddNotes: true,
         canViewAllNotes: true,
-        canCommunicate: true
+        canCommunicate: true,
+        canVerifyUserCertificates: true,
     },
     lead_access_manager: {
         canViewLeads: true,
@@ -72,14 +74,15 @@ exports.PERMISSIONS = {
         canBulkActivate: true,
         canAddNotes: true,
         canViewAllNotes: true,
-        canCommunicate: true
+        canCommunicate: true,
+        canVerifyUserCertificates: true,
     },
     support: {
         canViewLeads: true,
         canCreateLead: false,
         canUpdateLead: false,
         canDeleteLead: false,
-        canUpdateStatus: ['contacted', 'interested'], // Limited status updates
+        canUpdateStatus: ['contacted_not_interested', 'contacted_interested'], // Limited status updates
         canViewDocuments: true,
         canUploadDocuments: false,
         canVerifyDocuments: false,
@@ -95,7 +98,8 @@ exports.PERMISSIONS = {
         canBulkActivate: false,
         canAddNotes: true,
         canViewAllNotes: true,
-        canCommunicate: true
+        canCommunicate: true,
+        canVerifyUserCertificates: true,
     },
     trust: {
         canViewLeads: true,
@@ -118,7 +122,8 @@ exports.PERMISSIONS = {
         canBulkActivate: false,
         canAddNotes: false,
         canViewAllNotes: true,
-        canCommunicate: false
+        canCommunicate: false,
+        canVerifyUserCertificates: false,
     }
 };
 function getPermissions(role) {
@@ -136,9 +141,9 @@ function canUpdateStatus(role, currentStatus, newStatus) {
     // ❌ REMOVED: Special case for activation - activation is now separate from lead status
     // Activation is handled via canActivate permission and accountStatus field, not via status update
     if (Array.isArray(permissions.canUpdateStatus)) {
-        // Qualifier can only move forward in pipeline (up to 'interested')
+        // Qualifier can only move forward in pipeline (up to 'contacted_interested')
         if (role === 'qualifier') {
-            const statusOrder = ['lead_added', 'contacted', 'interested'];
+            const statusOrder = ['lead_added', 'contacted_not_interested', 'contacted_interested'];
             const currentIndex = statusOrder.indexOf(currentStatus);
             const newIndex = statusOrder.indexOf(newStatus);
             // ✅ Allow moving forward in pipeline, or staying at same status

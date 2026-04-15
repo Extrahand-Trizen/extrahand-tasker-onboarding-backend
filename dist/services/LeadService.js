@@ -66,14 +66,15 @@ class LeadService {
             }
             // If sameCategory is false, allow it (different category for same person)
             // Decide initial status (restricted set)
-            const initialStatus = data.status && ['lead_added', 'contacted', 'interested'].includes(data.status)
+            const initialStatus = data.status && ['lead_added', 'contacted_not_interested', 'contacted_interested'].includes(data.status)
                 ? data.status
                 : 'lead_added';
             // Validate categories (already extracted above)
             if (!primarySkillCategory) {
                 throw new Error('Primary category is required');
             }
-            if (!secondaryCategoryValue) {
+            // Secondary category required for all except water-tanker (generalized service)
+            if (!secondaryCategoryValue && primarySkillCategory !== 'water-tanker') {
                 throw new Error('Secondary category is required');
             }
             if (!data.experienceLevel) {
@@ -93,6 +94,7 @@ class LeadService {
                 'beauty': 'Beauty & Wellness',
                 'pet-care': 'Pet Care',
                 'events': 'Events & Entertainment',
+                'water-tanker': 'Water & Tanker Services',
                 'other': 'Other'
             };
             const primarySkillName = primarySkillNameMap[primarySkillCategory] || primarySkillCategory;
@@ -109,8 +111,8 @@ class LeadService {
                 pincode: data.pincode?.trim(),
                 primarySkill: primarySkillCategory, // Legacy field
                 primaryCategory: primarySkillCategory, // New field
-                secondarySkill: secondaryCategoryValue, // Legacy field
-                secondaryCategory: secondaryCategoryValue, // New field
+                secondarySkill: secondaryCategoryValue || '', // Legacy field
+                secondaryCategory: secondaryCategoryValue || '', // New field
                 experienceLevel: data.experienceLevel,
                 workingDays: data.workingDays?.trim(),
                 preferredTimeSlot: data.preferredTimeSlot?.trim(),
@@ -303,6 +305,39 @@ class LeadService {
                     { city: searchRegex },
                     { leadId: searchRegex }
                 ];
+            }
+            // Registration/conversion status (main website)
+            if (filters.registrationStatus) {
+                switch (filters.registrationStatus) {
+                    case 'not_registered':
+                        query.$and = query.$and || [];
+                        query.$and.push({
+                            $or: [
+                                { conversionData: { $exists: false } },
+                                { 'conversionData.platformUid': { $exists: false } },
+                                { 'conversionData.platformUid': null },
+                                { 'conversionData.platformUid': '' }
+                            ]
+                        });
+                        break;
+                    case 'registered':
+                        query.$and = query.$and || [];
+                        query.$and.push({
+                            'conversionData.platformUid': { $exists: true, $nin: [null, ''] },
+                            $or: [
+                                { 'conversionData.isAadhaarVerified': { $ne: true } },
+                                { 'conversionData.isAadhaarVerified': { $exists: false } }
+                            ]
+                        });
+                        break;
+                    case 'registered_verified':
+                        query.$and = query.$and || [];
+                        query.$and.push({
+                            'conversionData.platformUid': { $exists: true, $nin: [null, ''] },
+                            'conversionData.isAadhaarVerified': true
+                        });
+                        break;
+                }
             }
             // Execute query
             const [leads, total] = await Promise.all([

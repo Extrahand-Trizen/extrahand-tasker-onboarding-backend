@@ -6,6 +6,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.LeadController = void 0;
 const LeadService_1 = require("../services/LeadService");
 const DuplicateCheckService_1 = require("../services/DuplicateCheckService");
+const UserLookupService_1 = require("../services/UserLookupService");
+const Lead_1 = __importDefault(require("../models/Lead"));
 const logger_1 = __importDefault(require("../config/logger"));
 /**
  * Helper function to get consistent userId from req.admin
@@ -71,7 +73,7 @@ class LeadController {
                 });
                 return;
             }
-            if (!secondaryCategoryValue) {
+            if (!secondaryCategoryValue && primaryCategoryValue !== 'water-tanker') {
                 res.status(400).json({
                     success: false,
                     error: 'Missing required fields',
@@ -98,8 +100,8 @@ class LeadController {
                 pincode,
                 primaryCategory: primaryCategoryValue,
                 primarySkill: primarySkill, // For backward compatibility
-                secondaryCategory: secondaryCategoryValue,
-                secondarySkill: secondarySkill, // For backward compatibility
+                secondaryCategory: secondaryCategoryValue || '',
+                secondarySkill: secondarySkill || '', // For backward compatibility
                 experienceLevel,
                 workingDays,
                 preferredTimeSlot,
@@ -190,6 +192,80 @@ class LeadController {
         }
     }
     /**
+     * Get conversion status (did lead register on main website and verify Aadhaar?)
+     * GET /api/v1/onboarding/leads/:leadId/conversion-status
+     */
+    static async getConversionStatus(req, res) {
+        try {
+            if (!req.admin) {
+                res.status(401).json({
+                    success: false,
+                    error: 'Authentication required'
+                });
+                return;
+            }
+            const { leadId } = req.params;
+            const lead = await LeadService_1.LeadService.getLeadById(leadId);
+            if (!lead) {
+                res.status(404).json({
+                    success: false,
+                    error: 'Lead not found'
+                });
+                return;
+            }
+            if (!canAccessLead(req, lead.addedBy)) {
+                res.status(403).json({
+                    success: false,
+                    error: 'Forbidden',
+                    message: 'You can only access leads that you have added.'
+                });
+                return;
+            }
+            const phone = lead.phone || lead.landline;
+            if (!phone) {
+                res.status(400).json({
+                    success: false,
+                    error: 'Lead has no phone number',
+                    message: 'Cannot check conversion status without a phone number.'
+                });
+                return;
+            }
+            const status = await (0, UserLookupService_1.getConversionStatusByPhone)(phone);
+            // Optionally cache on lead for list views
+            if (status.converted && (status.platformUid || status.isAadhaarVerified !== undefined)) {
+                await Lead_1.default.findOneAndUpdate({ leadId }, {
+                    $set: {
+                        conversionData: {
+                            platformUid: status.platformUid,
+                            isAadhaarVerified: status.isAadhaarVerified,
+                            lastCheckedAt: new Date()
+                        }
+                    }
+                });
+            }
+            res.json({
+                success: true,
+                data: {
+                    converted: status.converted,
+                    platformUid: status.platformUid,
+                    isAadhaarVerified: status.isAadhaarVerified,
+                    name: status.name
+                }
+            });
+        }
+        catch (error) {
+            logger_1.default.error('Error in getConversionStatus', {
+                error: error.message,
+                leadId: req.params.leadId
+            });
+            res.status(500).json({
+                success: false,
+                error: 'Failed to get conversion status',
+                message: error.message
+            });
+        }
+    }
+    /**
      * Get unique users who have added leads (for filter dropdown)
      * GET /api/v1/onboarding/leads/creators
      */
@@ -233,7 +309,7 @@ class LeadController {
                 });
                 return;
             }
-            const { status, city, primarySkill, source, addedBy, search, startDate, endDate, page, limit } = req.query;
+            const { status, city, primarySkill, source, addedBy, search, startDate, endDate, page, limit, registrationStatus } = req.query;
             const role = req.admin.role;
             const userId = getUserId(req);
             const filters = {
@@ -246,7 +322,8 @@ class LeadController {
                 startDate: startDate ? new Date(startDate) : undefined,
                 endDate: endDate ? new Date(endDate) : undefined,
                 page: page ? parseInt(page) : undefined,
-                limit: limit ? parseInt(limit) : undefined
+                limit: limit ? parseInt(limit) : undefined,
+                registrationStatus: registrationStatus
             };
             // ✅ ISOLATION: Qualifiers can only see leads they added
             // Lead Access Managers and Onboarders can see all leads

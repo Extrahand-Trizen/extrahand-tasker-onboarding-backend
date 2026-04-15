@@ -13,6 +13,11 @@ export declare class LeadController {
      */
     static getLead(req: AdminRequest, res: Response): Promise<void>;
     /**
+     * Get conversion status (did lead register on main website and verify Aadhaar?)
+     * GET /api/v1/onboarding/leads/:leadId/conversion-status
+     */
+    static getConversionStatus(req: AdminRequest, res: Response): Promise<void>;
+    /**
      * Get unique users who have added leads (for filter dropdown)
      * GET /api/v1/onboarding/leads/creators
      */

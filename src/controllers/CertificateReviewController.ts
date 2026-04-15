@@ -1,0 +1,195 @@
+import { Response } from 'express';
+import { AdminRequest } from '../middleware/adminAuth';
+import {
+  CertificateReviewService,
+  CertificateStatus,
+} from '../services/CertificateReviewService';
+import logger from '../config/logger';
+
+export class CertificateReviewController {
+  /**
+   * Search certificate review queue.
+   * GET /api/v1/onboarding/certificates/queue
+   *
+   * Notes:
+   * - Current user-service does not expose a bulk "all profiles" endpoint.
+   * - Queue is generated from profile search (`q`) and/or specific `uid`.
+   */
+  static async getQueue(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      if (!req.admin) {
+        res.status(401).json({
+          success: false,
+          error: 'Authentication required',
+        });
+        return;
+      }
+
+      const actorUid = req.admin.userId || req.admin.uid;
+      if (!actorUid) {
+        res.status(401).json({
+          success: false,
+          error: 'Authenticated admin identity not found',
+        });
+        return;
+      }
+
+      const {
+        q,
+        uid,
+        status,
+        city,
+        page = '1',
+        limit = '20',
+      } = req.query;
+
+      const normalizedStatus = (status as string | undefined)?.trim() as
+        | CertificateStatus
+        | undefined;
+      if (
+        normalizedStatus &&
+        !['pending', 'verified', 'rejected'].includes(normalizedStatus)
+      ) {
+        res.status(400).json({
+          success: false,
+          error: 'Invalid status filter. Allowed: pending, verified, rejected',
+        });
+        return;
+      }
+
+      const parsedPage = Math.max(parseInt(page as string, 10) || 1, 1);
+      const parsedLimit = Math.min(
+        Math.max(parseInt(limit as string, 10) || 20, 1),
+        100
+      );
+
+      const queue = await CertificateReviewService.getQueueFromUserService({
+        actorUid,
+        uid: uid ? String(uid).trim() : undefined,
+        q: q ? String(q).trim() : undefined,
+        status: normalizedStatus,
+        city: city as string | undefined,
+        page: parsedPage,
+        limit: parsedLimit,
+      });
+
+      res.json({
+        success: true,
+        data: {
+          items: queue.items,
+          pagination: queue.pagination,
+        },
+      });
+    } catch (error: any) {
+      logger.error('Certificate queue fetch failed', {
+        error: error.message,
+      });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch certificate queue',
+        message: error.message,
+      });
+    }
+  }
+
+  static async verify(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      if (!req.admin) {
+        res.status(401).json({
+          success: false,
+          error: 'Authentication required',
+        });
+        return;
+      }
+
+      const actorUid = req.admin.userId || req.admin.uid;
+      if (!actorUid) {
+        res.status(401).json({
+          success: false,
+          error: 'Authenticated admin identity not found',
+        });
+        return;
+      }
+
+      const { uid, skillIndex, certificateIndex } = req.params;
+      const { reviewNotes } = req.body || {};
+
+      await CertificateReviewService.updateCertificateStatus({
+        uid,
+        skillIndex: parseInt(skillIndex, 10),
+        certificateIndex: parseInt(certificateIndex, 10),
+        nextStatus: 'verified',
+        actorUid,
+        actorName: req.admin.name,
+        actorEmail: req.admin.email,
+        reviewNotes,
+      });
+
+      res.json({
+        success: true,
+        message: 'Certificate verified successfully',
+      });
+    } catch (error: any) {
+      const badRequest =
+        error.message?.includes('Invalid') ||
+        error.message?.includes('required') ||
+        error.message?.includes('already reviewed');
+      res.status(badRequest ? 400 : 500).json({
+        success: false,
+        error: badRequest ? error.message : 'Failed to verify certificate',
+        message: error.message,
+      });
+    }
+  }
+
+  static async reject(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      if (!req.admin) {
+        res.status(401).json({
+          success: false,
+          error: 'Authentication required',
+        });
+        return;
+      }
+
+      const actorUid = req.admin.userId || req.admin.uid;
+      if (!actorUid) {
+        res.status(401).json({
+          success: false,
+          error: 'Authenticated admin identity not found',
+        });
+        return;
+      }
+
+      const { uid, skillIndex, certificateIndex } = req.params;
+      const { rejectionReason, reviewNotes } = req.body || {};
+
+      await CertificateReviewService.updateCertificateStatus({
+        uid,
+        skillIndex: parseInt(skillIndex, 10),
+        certificateIndex: parseInt(certificateIndex, 10),
+        nextStatus: 'rejected',
+        actorUid,
+        actorName: req.admin.name,
+        actorEmail: req.admin.email,
+        rejectionReason,
+        reviewNotes,
+      });
+
+      res.json({
+        success: true,
+        message: 'Certificate rejected successfully',
+      });
+    } catch (error: any) {
+      const badRequest =
+        error.message?.includes('Invalid') ||
+        error.message?.includes('required') ||
+        error.message?.includes('already reviewed');
+      res.status(badRequest ? 400 : 500).json({
+        success: false,
+        error: badRequest ? error.message : 'Failed to reject certificate',
+        message: error.message,
+      });
+    }
+  }
+}

@@ -51,6 +51,7 @@ export interface UpdateStatusData {
     changedBy: string;
     changedByName?: string;
 }
+export type RegistrationStatusFilter = 'not_registered' | 'registered' | 'registered_verified';
 export interface SearchFilters {
     status?: LeadStatus;
     city?: string;
@@ -62,6 +63,8 @@ export interface SearchFilters {
     endDate?: Date;
     page?: number;
     limit?: number;
+    /** Filter by conversion/registration on main website */
+    registrationStatus?: RegistrationStatusFilter;
 }
 export declare class LeadService {
     /**

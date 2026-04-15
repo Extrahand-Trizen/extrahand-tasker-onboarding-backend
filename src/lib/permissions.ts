@@ -39,6 +39,7 @@ export interface Permissions {
   canAddNotes: boolean;
   canViewAllNotes: boolean;
   canCommunicate: boolean;
+  canVerifyUserCertificates: boolean;
 }
 
 export const PERMISSIONS: Record<UserRole, Permissions> = {
@@ -63,7 +64,8 @@ export const PERMISSIONS: Record<UserRole, Permissions> = {
     canBulkActivate: false, // ❌ REMOVED - Qualifier cannot bulk activate
     canAddNotes: true,
     canViewAllNotes: true,
-    canCommunicate: true
+    canCommunicate: true,
+    canVerifyUserCertificates: false,
   },
   onboarder: {
     canViewLeads: true,
@@ -86,7 +88,8 @@ export const PERMISSIONS: Record<UserRole, Permissions> = {
     canBulkActivate: true,
     canAddNotes: true,
     canViewAllNotes: true,
-    canCommunicate: true
+    canCommunicate: true,
+    canVerifyUserCertificates: true,
   },
   lead_access_manager: {
     canViewLeads: true,
@@ -109,7 +112,8 @@ export const PERMISSIONS: Record<UserRole, Permissions> = {
     canBulkActivate: true,
     canAddNotes: true,
     canViewAllNotes: true,
-    canCommunicate: true
+    canCommunicate: true,
+    canVerifyUserCertificates: true,
   },
   support: {
     canViewLeads: true,
@@ -132,7 +136,8 @@ export const PERMISSIONS: Record<UserRole, Permissions> = {
     canBulkActivate: false,
     canAddNotes: true,
     canViewAllNotes: true,
-    canCommunicate: true
+    canCommunicate: true,
+    canVerifyUserCertificates: true,
   },
   trust: {
     canViewLeads: true,
@@ -155,7 +160,8 @@ export const PERMISSIONS: Record<UserRole, Permissions> = {
     canBulkActivate: false,
     canAddNotes: false,
     canViewAllNotes: true,
-    canCommunicate: false
+    canCommunicate: false,
+    canVerifyUserCertificates: false,
   }
 };
 

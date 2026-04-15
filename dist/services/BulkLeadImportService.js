@@ -100,6 +100,10 @@ class BulkLeadImportService {
             events: "events",
             "events & entertainment": "events",
             "events and entertainment": "events",
+            "water-tanker": "water-tanker",
+            "water & tanker services": "water-tanker",
+            "water and tanker services": "water-tanker",
+            "water tanker": "water-tanker",
             other: "other",
         };
         return skillMap[normalized] || normalized; // Return mapped value or original if not found
@@ -527,6 +531,7 @@ class BulkLeadImportService {
             "beauty",
             "pet-care",
             "events",
+            "water-tanker",
             "other",
         ];
         const normalizedCategory = primaryCategory.toLowerCase().trim();
@@ -536,11 +541,11 @@ class BulkLeadImportService {
                 error: `Invalid primary category. Must be one of: ${validCategories.join(", ")}`,
             };
         }
-        // Check secondary category - use row value or default
+        // Check secondary category - use row value or default (optional for water-tanker)
         const secondaryCategory = (row.secondaryCategory ||
             defaultSecondaryCategory ||
             "").trim();
-        if (!secondaryCategory || secondaryCategory.length < 1) {
+        if ((!secondaryCategory || secondaryCategory.length < 1) && normalizedCategory !== "water-tanker") {
             return {
                 valid: false,
                 error: "Secondary category is required (either in CSV or provided as default)",
@@ -588,7 +593,7 @@ class BulkLeadImportService {
                 error: `Invalid source. Must be one of: ${validSources.join(", ")}`,
             };
         }
-        // const allowedStatuses: LeadStatus[] = ['lead_added', 'contacted', 'interested'];
+        // const allowedStatuses: LeadStatus[] = ['lead_added', 'contacted_not_interested', 'contacted_interested'];
         // if (row.status && !allowedStatuses.includes(row.status as LeadStatus)) {
         //   return { valid: false, error: `Invalid status. Allowed: ${allowedStatuses.join(', ')}` };
         // }
@@ -759,7 +764,7 @@ class BulkLeadImportService {
                     existingImport.importedUserIds.length > 0) {
                     const activeLeadsCount = await Lead_1.default.countDocuments({
                         leadId: { $in: existingImport.importedUserIds },
-                        status: { $nin: ["inactive", "rejected"] }, // Count only active leads
+                        status: { $nin: ["inactive"] }, // Count only active leads
                     }).session(session);
                     if (activeLeadsCount === 0) {
                         // All leads from previous import are inactive/deleted - allow re-import
@@ -828,7 +833,7 @@ class BulkLeadImportService {
             if (existingImport && existingImport.status === "completed") {
                 const activeLeadsCount = await Lead_1.default.countDocuments({
                     leadId: { $in: existingImport.importedUserIds || [] },
-                    status: { $nin: ["inactive", "rejected"] },
+                    status: { $nin: ["inactive"] },
                 }).session(session);
                 if (activeLeadsCount === 0) {
                     // Delete the old import record to allow new one

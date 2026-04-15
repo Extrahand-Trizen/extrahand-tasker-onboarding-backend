@@ -17,7 +17,7 @@ class DuplicateCheckService {
             // Check in phone field
             const existingLeadByPhone = await Lead_1.default.findOne({
                 phone: normalizedPhone,
-                status: { $nin: ['rejected', 'inactive'] } // ✅ Don't match rejected or inactive (deleted) leads
+                status: { $nin: ['inactive'] } // Don't match inactive (archived) leads
             }).lean();
             if (existingLeadByPhone) {
                 logger_1.default.info('Duplicate phone found', {
@@ -33,7 +33,7 @@ class DuplicateCheckService {
             // Also check in landline field (cross-field duplicate check)
             const existingLeadByLandline = await Lead_1.default.findOne({
                 landline: normalizedPhone,
-                status: { $nin: ['rejected', 'inactive'] }
+                status: { $nin: ['inactive'] }
             }).lean();
             if (existingLeadByLandline) {
                 logger_1.default.info('Duplicate phone found in landline field', {
@@ -66,7 +66,7 @@ class DuplicateCheckService {
             // Check in landline field
             const existingLeadByLandline = await Lead_1.default.findOne({
                 landline: normalizedLandline,
-                status: { $nin: ['rejected', 'inactive'] }
+                status: { $nin: ['inactive'] }
             }).lean();
             if (existingLeadByLandline) {
                 logger_1.default.info('Duplicate landline found', {
@@ -82,7 +82,7 @@ class DuplicateCheckService {
             // Also check in phone field (cross-field duplicate check)
             const existingLeadByPhone = await Lead_1.default.findOne({
                 phone: normalizedLandline,
-                status: { $nin: ['rejected', 'inactive'] }
+                status: { $nin: ['inactive'] }
             }).lean();
             if (existingLeadByPhone) {
                 logger_1.default.info('Duplicate landline found in phone field', {
@@ -116,7 +116,7 @@ class DuplicateCheckService {
                 $and: [
                     { name: { $regex: new RegExp(normalizedName, 'i') } },
                     { city: { $regex: new RegExp(normalizedCity, 'i') } },
-                    { status: { $nin: ['rejected', 'inactive'] } } // ✅ Don't match rejected or inactive (deleted) leads
+                    { status: { $nin: ['inactive'] } }
                 ]
             }).lean();
             if (existingLead) {
@@ -207,7 +207,7 @@ class DuplicateCheckService {
             // Single MongoDB query to find all existing leads with these phone numbers
             const existingLeads = await Lead_1.default.find({
                 phone: { $in: uniqueNormalizedPhones },
-                status: { $nin: ['rejected', 'inactive'] } // ✅ Don't match rejected or inactive (deleted) leads
+                status: { $nin: ['inactive'] } // Don't match inactive (archived) leads
             }).lean();
             // Create a map for O(1) lookup: normalizedPhone -> existingLead
             const duplicatePhoneToLeadMap = new Map();
@@ -240,7 +240,7 @@ class DuplicateCheckService {
             // Build query for exact category match - check both phone and landline fields
             const categoryQuery = {
                 primaryCategory: primaryCategory,
-                status: { $nin: ['rejected', 'inactive'] }
+                status: { $nin: ['inactive'] }
             };
             // If secondary category is provided, match it; otherwise check for missing or empty
             if (secondaryCategory && secondaryCategory.trim()) {
@@ -317,7 +317,7 @@ class DuplicateCheckService {
                 { phone: normalizedContact },
                 { landline: normalizedLandline }
             ],
-            status: { $nin: ['rejected', 'inactive'] }
+            status: { $nin: ['inactive'] }
         }).lean();
         if (existingLeadDifferentCategory) {
             // Same phone but different category - this is allowed, but we return info
@@ -368,7 +368,7 @@ class DuplicateCheckService {
                     { phone: { $in: uniqueNormalizedPhones } },
                     { landline: { $in: uniqueNormalizedLandlines } }
                 ],
-                status: { $nin: ['rejected', 'inactive'] }
+                status: { $nin: ['inactive'] }
             }).lean();
             // Create a map for O(1) lookup: normalizedContact -> existingLeads[]
             const contactToLeadsMap = new Map();
