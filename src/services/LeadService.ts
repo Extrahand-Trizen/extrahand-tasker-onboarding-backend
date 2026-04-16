@@ -6,6 +6,7 @@ import { canUpdateStatus, UserRole } from '../lib/permissions';
 import logger from '../config/logger';
 import { v4 as uuidv4 } from 'uuid';
 import { validateAndNormalizeLeadStatusUpdate } from '../validators/leadStatusValidator';
+import XLSX from 'xlsx';
 
 export interface CreateLeadData {
   name: string;
@@ -86,7 +87,83 @@ export interface SearchFilters {
   registrationStatus?: RegistrationStatusFilter;
 }
 
+export interface CallbackQueueFilters {
+  city?: string;
+  primarySkill?: string;
+  addedBy?: string;
+  startDate?: Date;
+  endDate?: Date;
+  page?: number;
+  limit?: number;
+}
+
+export interface CallbackQueueStats {
+  totalScheduled: number;
+  overdue: number;
+  dueToday: number;
+}
+
+export type FollowUpDueType = 'all' | 'callback' | 'onboarding';
+export type FollowUpBucket = 'all' | 'today' | 'overdue' | 'upcoming' | 'range';
+
+export interface FollowUpQueueFilters {
+  city?: string;
+  primarySkill?: string;
+  addedBy?: string;
+  startDate?: Date;
+  endDate?: Date;
+  dueType?: FollowUpDueType;
+  bucket?: FollowUpBucket;
+  page?: number;
+  limit?: number;
+}
+
+export interface FollowUpQueueItem {
+  [key: string]: any;
+  leadId: string;
+  name: string;
+  status: LeadStatus;
+  dueType: 'callback' | 'onboarding';
+  dueAt: Date;
+}
+
+export interface FollowUpQueueStats {
+  callbackTotal: number;
+  onboardingTotal: number;
+  callbackDueToday: number;
+  callbackOverdue: number;
+  onboardingDueToday: number;
+  onboardingOverdue: number;
+  totalFollowUps: number;
+}
+
+export interface StatusAnalyticsFilters {
+  from: Date;
+  to: Date;
+  qualifierId?: string;
+}
+
+export interface StatusReportExportFilters extends StatusAnalyticsFilters {
+  format: 'csv' | 'xlsx';
+  template: 'eod' | 'detailed';
+  includeNotes?: boolean;
+}
+
 export class LeadService {
+  private static formatIST(date?: Date): string {
+    if (!date) return '';
+    return new Intl.DateTimeFormat('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true,
+    }).format(date);
+  }
+
   /**
    * Generate unique lead ID
    */
@@ -520,6 +597,479 @@ export class LeadService {
       logger.error('Error searching leads', {
         error: error.message,
         filters
+      });
+      throw error;
+    }
+  }
+
+  static async getCallbackQueue(filters: CallbackQueueFilters): Promise<{
+    leads: ILead[];
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  }> {
+    try {
+      const page = filters.page || 1;
+      const limit = filters.limit || 20;
+      const skip = (page - 1) * limit;
+
+      const query: any = {
+        nextCallbackAt: { $exists: true, $ne: null },
+      };
+
+      if (filters.city) {
+        query.city = { $regex: new RegExp(filters.city, 'i') };
+      }
+
+      if (filters.primarySkill) {
+        query.$or = [
+          { primarySkill: { $regex: new RegExp(filters.primarySkill, 'i') } },
+          { primaryCategory: { $regex: new RegExp(filters.primarySkill, 'i') } },
+        ];
+      }
+
+      if (filters.addedBy) {
+        query.addedBy = filters.addedBy;
+      }
+
+      if (filters.startDate || filters.endDate) {
+        query.nextCallbackAt = query.nextCallbackAt || {};
+        if (filters.startDate) query.nextCallbackAt.$gte = filters.startDate;
+        if (filters.endDate) query.nextCallbackAt.$lte = filters.endDate;
+      }
+
+      const [leads, total] = await Promise.all([
+        Lead.find(query)
+          .sort({ nextCallbackAt: 1, createdAt: -1 })
+          .skip(skip)
+          .limit(limit)
+          .lean(),
+        Lead.countDocuments(query),
+      ]);
+
+      const normalizedLeads = leads.map((lead) => this.normalizeLeadData(lead));
+
+      return {
+        leads: normalizedLeads as unknown as ILead[],
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      };
+    } catch (error: any) {
+      logger.error('Error fetching callback queue', {
+        error: error.message,
+        filters,
+      });
+      throw error;
+    }
+  }
+
+  static async getCallbackQueueStats(filters: Pick<CallbackQueueFilters, 'addedBy'>): Promise<CallbackQueueStats> {
+    try {
+      const now = new Date();
+      const startOfToday = new Date(now);
+      startOfToday.setHours(0, 0, 0, 0);
+      const endOfToday = new Date(now);
+      endOfToday.setHours(23, 59, 59, 999);
+
+      const baseQuery: any = {
+        nextCallbackAt: { $exists: true, $ne: null },
+      };
+
+      if (filters.addedBy) {
+        baseQuery.addedBy = filters.addedBy;
+      }
+
+      const [totalScheduled, overdue, dueToday] = await Promise.all([
+        Lead.countDocuments(baseQuery),
+        Lead.countDocuments({
+          ...baseQuery,
+          nextCallbackAt: { $lt: now },
+        }),
+        Lead.countDocuments({
+          ...baseQuery,
+          nextCallbackAt: { $gte: startOfToday, $lte: endOfToday },
+        }),
+      ]);
+
+      return {
+        totalScheduled,
+        overdue,
+        dueToday,
+      };
+    } catch (error: any) {
+      logger.error('Error fetching callback queue stats', {
+        error: error.message,
+        filters,
+      });
+      throw error;
+    }
+  }
+
+  static async getFollowUpQueue(filters: FollowUpQueueFilters): Promise<{
+    leads: FollowUpQueueItem[];
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  }> {
+    try {
+      const page = filters.page || 1;
+      const limit = filters.limit || 20;
+      const skip = (page - 1) * limit;
+      const now = new Date();
+      const startOfToday = new Date(now);
+      startOfToday.setHours(0, 0, 0, 0);
+      const endOfToday = new Date(now);
+      endOfToday.setHours(23, 59, 59, 999);
+
+      const query: any = {};
+      if (filters.city) {
+        query.city = { $regex: new RegExp(filters.city, 'i') };
+      }
+      if (filters.primarySkill) {
+        query.$or = [
+          { primarySkill: { $regex: new RegExp(filters.primarySkill, 'i') } },
+          { primaryCategory: { $regex: new RegExp(filters.primarySkill, 'i') } },
+        ];
+      }
+      if (filters.addedBy) {
+        query.addedBy = filters.addedBy;
+      }
+
+      if (filters.dueType === 'callback') {
+        query.nextCallbackAt = { $exists: true, $ne: null };
+      } else if (filters.dueType === 'onboarding') {
+        query.expectedOnboardingAt = { $exists: true, $ne: null };
+      } else {
+        query.$and = query.$and || [];
+        query.$and.push({
+          $or: [
+            { nextCallbackAt: { $exists: true, $ne: null } },
+            { expectedOnboardingAt: { $exists: true, $ne: null } },
+          ],
+        });
+      }
+
+      const leads = await Lead.find(query).lean();
+
+      let items: FollowUpQueueItem[] = [];
+      for (const lead of leads) {
+        if ((filters.dueType === 'all' || !filters.dueType || filters.dueType === 'callback') && lead.nextCallbackAt) {
+          items.push({
+            ...(this.normalizeLeadData(lead) as ILead),
+            dueType: 'callback',
+            dueAt: new Date(lead.nextCallbackAt),
+          });
+        }
+        if ((filters.dueType === 'all' || !filters.dueType || filters.dueType === 'onboarding') && lead.expectedOnboardingAt) {
+          items.push({
+            ...(this.normalizeLeadData(lead) as ILead),
+            dueType: 'onboarding',
+            dueAt: new Date(lead.expectedOnboardingAt),
+          });
+        }
+      }
+
+      const bucket = filters.bucket || 'all';
+      items = items.filter((item) => {
+        if (bucket === 'today') return item.dueAt >= startOfToday && item.dueAt <= endOfToday;
+        if (bucket === 'overdue') return item.dueAt < now;
+        if (bucket === 'upcoming') return item.dueAt > endOfToday;
+        if (bucket === 'range') {
+          if (filters.startDate && item.dueAt < filters.startDate) return false;
+          if (filters.endDate && item.dueAt > filters.endDate) return false;
+          return true;
+        }
+        if (filters.startDate && item.dueAt < filters.startDate) return false;
+        if (filters.endDate && item.dueAt > filters.endDate) return false;
+        return true;
+      });
+
+      items.sort((a, b) => a.dueAt.getTime() - b.dueAt.getTime());
+      const total = items.length;
+      const paged = items.slice(skip, skip + limit);
+
+      return {
+        leads: paged,
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      };
+    } catch (error: any) {
+      logger.error('Error fetching follow-up queue', {
+        error: error.message,
+        filters,
+      });
+      throw error;
+    }
+  }
+
+  static async getFollowUpQueueStats(filters: Pick<FollowUpQueueFilters, 'addedBy'>): Promise<FollowUpQueueStats> {
+    try {
+      const now = new Date();
+      const startOfToday = new Date(now);
+      startOfToday.setHours(0, 0, 0, 0);
+      const endOfToday = new Date(now);
+      endOfToday.setHours(23, 59, 59, 999);
+
+      const scope: any = {};
+      if (filters.addedBy) scope.addedBy = filters.addedBy;
+
+      const [
+        callbackDueToday,
+        callbackOverdue,
+        onboardingDueToday,
+        onboardingOverdue,
+        callbackTotal,
+        onboardingTotal,
+      ] = await Promise.all([
+        Lead.countDocuments({
+          ...scope,
+          nextCallbackAt: { $gte: startOfToday, $lte: endOfToday },
+        }),
+        Lead.countDocuments({
+          ...scope,
+          nextCallbackAt: { $lt: now },
+        }),
+        Lead.countDocuments({
+          ...scope,
+          expectedOnboardingAt: { $gte: startOfToday, $lte: endOfToday },
+        }),
+        Lead.countDocuments({
+          ...scope,
+          expectedOnboardingAt: { $lt: now },
+        }),
+        Lead.countDocuments({
+          ...scope,
+          nextCallbackAt: { $exists: true, $ne: null },
+        }),
+        Lead.countDocuments({
+          ...scope,
+          expectedOnboardingAt: { $exists: true, $ne: null },
+        }),
+      ]);
+
+      return {
+        callbackTotal,
+        onboardingTotal,
+        callbackDueToday,
+        callbackOverdue,
+        onboardingDueToday,
+        onboardingOverdue,
+        totalFollowUps: callbackTotal + onboardingTotal,
+      };
+    } catch (error: any) {
+      logger.error('Error fetching follow-up queue stats', {
+        error: error.message,
+        filters,
+      });
+      throw error;
+    }
+  }
+
+  static async getStatusAnalytics(filters: StatusAnalyticsFilters): Promise<{
+    touchedLeads: number;
+    interested: number;
+    notInterested: number;
+    callbackScheduled: number;
+    callbackOverdue: number;
+    statusCounts: Array<{ status: string; count: number }>;
+    qualifierBreakdown: Array<{ qualifierId: string; qualifierName: string; touchedLeads: number }>;
+  }> {
+    try {
+      const leadMatch: any = {};
+      if (filters.qualifierId) {
+        leadMatch.addedBy = filters.qualifierId;
+      }
+
+      const dateMatch = {
+        'statusHistory.changedAt': { $gte: filters.from, $lte: filters.to },
+      };
+
+      const basePipeline: any[] = [
+        { $match: leadMatch },
+        { $unwind: '$statusHistory' },
+        { $match: dateMatch },
+      ];
+
+      const [statusCountsRaw, touchedRaw, qualifierRaw] = await Promise.all([
+        Lead.aggregate([
+          ...basePipeline,
+          {
+            $group: {
+              _id: '$statusHistory.status',
+              count: { $sum: 1 },
+            },
+          },
+        ]),
+        Lead.aggregate([
+          ...basePipeline,
+          {
+            $group: {
+              _id: '$leadId',
+            },
+          },
+          { $count: 'count' },
+        ]),
+        Lead.aggregate([
+          ...basePipeline,
+          {
+            $group: {
+              _id: '$addedBy',
+              qualifierName: { $last: '$addedByName' },
+              leadIds: { $addToSet: '$leadId' },
+            },
+          },
+          {
+            $project: {
+              qualifierId: '$_id',
+              qualifierName: { $ifNull: ['$qualifierName', 'Unknown'] },
+              touchedLeads: { $size: '$leadIds' },
+            },
+          },
+          { $sort: { touchedLeads: -1 } },
+        ]),
+      ]);
+
+      const statusCounts = statusCountsRaw.map((row: any) => ({
+        status: row._id,
+        count: row.count,
+      }));
+      const statusCountMap = new Map(statusCounts.map((row) => [row.status, row.count]));
+
+      const callbackOverdue = await Lead.countDocuments({
+        ...(filters.qualifierId ? { addedBy: filters.qualifierId } : {}),
+        nextCallbackAt: { $lt: new Date() },
+      });
+
+      return {
+        touchedLeads: touchedRaw[0]?.count || 0,
+        interested: statusCountMap.get('contacted_interested') || 0,
+        notInterested: statusCountMap.get('contacted_not_interested') || 0,
+        callbackScheduled: statusCountMap.get('contacted_interested') || 0,
+        callbackOverdue,
+        statusCounts,
+        qualifierBreakdown: qualifierRaw.map((row: any) => ({
+          qualifierId: row.qualifierId,
+          qualifierName: row.qualifierName,
+          touchedLeads: row.touchedLeads,
+        })),
+      };
+    } catch (error: any) {
+      logger.error('Error fetching status analytics', {
+        error: error.message,
+        filters,
+      });
+      throw error;
+    }
+  }
+
+  static async exportStatusReport(filters: StatusReportExportFilters): Promise<{
+    filename: string;
+    mimeType: string;
+    buffer: Buffer;
+    rowCount: number;
+  }> {
+    try {
+      const leadMatch: any = {};
+      if (filters.qualifierId) {
+        leadMatch.addedBy = filters.qualifierId;
+      }
+
+      const rows = await Lead.aggregate([
+        { $match: leadMatch },
+        { $unwind: '$statusHistory' },
+        { $match: { 'statusHistory.changedAt': { $gte: filters.from, $lte: filters.to } } },
+        { $sort: { 'statusHistory.changedAt': -1 } },
+        {
+          $group: {
+            _id: '$leadId',
+            leadId: { $first: '$leadId' },
+            name: { $first: '$name' },
+            phone: { $first: '$phone' },
+            landline: { $first: '$landline' },
+            city: { $first: '$city' },
+            state: { $first: '$state' },
+            primaryCategory: { $first: '$primaryCategory' },
+            secondaryCategory: { $first: '$secondaryCategory' },
+            source: { $first: '$source' },
+            sourceDetails: { $first: '$sourceDetails' },
+            createdAt: { $first: '$createdAt' },
+            updatedAt: { $first: '$updatedAt' },
+            currentStatus: { $first: '$status' },
+            qualifierName: { $first: '$addedByName' },
+            qualifierId: { $first: '$addedBy' },
+            isDuplicate: { $first: '$isDuplicate' },
+            blacklisted: { $first: '$blacklisted' },
+            latestHistory: { $first: '$statusHistory' },
+          },
+        },
+        { $sort: { updatedAt: -1 } },
+      ]);
+
+      const reportRows = rows.map((row: any) => {
+        const base: Record<string, any> = {
+          Date: this.formatIST(row.latestHistory?.changedAt),
+          'Qualifier Name': row.qualifierName || 'Unknown',
+          'Lead ID': row.leadId,
+          'Lead Name': row.name || '',
+          'Phone/Landline': row.phone || row.landline || '',
+          City: row.city || '',
+          'Current Status': row.currentStatus || '',
+          'Status Reason': row.latestHistory?.statusReasonText || row.latestHistory?.statusReasonCode || '',
+          'Callback Date': this.formatIST(row.latestHistory?.callbackAt),
+          'Expected Onboarding Date': this.formatIST(row.latestHistory?.expectedOnboardingAt),
+          'Last Updated At': this.formatIST(row.updatedAt),
+          'Last Updated By': row.latestHistory?.changedByName || row.latestHistory?.changedBy || '',
+        };
+
+        if (filters.template === 'detailed') {
+          base.State = row.state || '';
+          base['Primary Category'] = row.primaryCategory || '';
+          base['Secondary Category'] = row.secondaryCategory || '';
+          base.Source = row.source || '';
+          base['Source Details'] = row.sourceDetails || '';
+          base['Created At'] = this.formatIST(row.createdAt);
+          base['Updated At'] = this.formatIST(row.updatedAt);
+          if (filters.includeNotes) {
+            base.Notes = row.latestHistory?.notes || '';
+          }
+          base['Is Duplicate'] = row.isDuplicate ? 'Yes' : 'No';
+          base.Blacklisted = row.blacklisted ? 'Yes' : 'No';
+        }
+        return base;
+      });
+
+      const worksheet = XLSX.utils.json_to_sheet(reportRows);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Status Report');
+
+      const dateStamp = new Date().toISOString().slice(0, 10);
+      const filename = `lead-status-report-${filters.template}-${dateStamp}.${filters.format}`;
+      const mimeType =
+        filters.format === 'xlsx'
+          ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+          : 'text/csv';
+
+      const buffer =
+        filters.format === 'xlsx'
+          ? XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer
+          : Buffer.from(XLSX.utils.sheet_to_csv(worksheet), 'utf-8');
+
+      return {
+        filename,
+        mimeType,
+        buffer,
+        rowCount: reportRows.length,
+      };
+    } catch (error: any) {
+      logger.error('Error exporting status report', {
+        error: error.message,
+        filters,
       });
       throw error;
     }

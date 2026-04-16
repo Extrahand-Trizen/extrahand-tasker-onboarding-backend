@@ -14,10 +14,17 @@ router.use(adminAuth_1.adminAuthMiddleware);
 router.post('/', (0, roleAuth_1.requirePermission)('canCreateLead'), LeadController_1.LeadController.createLead);
 // Search and filter leads
 router.get('/', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.searchLeads);
+// Callback queue
+router.get('/callback-queue', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getCallbackQueue);
+router.get('/callback-queue/stats', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getCallbackQueueStats);
+router.get('/follow-up-queue', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getFollowUpQueue);
+router.get('/follow-up-queue/stats', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getFollowUpQueueStats);
 // Get unique users who have added leads (for filter dropdown)
 router.get('/creators', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getLeadCreators);
 // Shared status reason codes for lead status updates
 router.get('/status-reason-codes', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getStatusReasonCodes);
+router.get('/status-analytics', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getStatusAnalytics);
+router.get('/status-reports/export', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.exportStatusReport);
 // Check for duplicates
 router.post('/duplicate-check', (0, roleAuth_1.requirePermission)('canCreateLead'), LeadController_1.LeadController.checkDuplicate);
 // Activation queue (must be before /:leadId to avoid route conflict)

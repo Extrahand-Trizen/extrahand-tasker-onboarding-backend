@@ -25,6 +25,28 @@ router.get(
   LeadController.searchLeads
 );
 
+// Callback queue
+router.get(
+  '/callback-queue',
+  requirePermission('canViewLeads'),
+  LeadController.getCallbackQueue
+);
+router.get(
+  '/callback-queue/stats',
+  requirePermission('canViewLeads'),
+  LeadController.getCallbackQueueStats
+);
+router.get(
+  '/follow-up-queue',
+  requirePermission('canViewLeads'),
+  LeadController.getFollowUpQueue
+);
+router.get(
+  '/follow-up-queue/stats',
+  requirePermission('canViewLeads'),
+  LeadController.getFollowUpQueueStats
+);
+
 // Get unique users who have added leads (for filter dropdown)
 router.get(
   '/creators',
@@ -37,6 +59,16 @@ router.get(
   '/status-reason-codes',
   requirePermission('canViewLeads'),
   LeadController.getStatusReasonCodes
+);
+router.get(
+  '/status-analytics',
+  requirePermission('canViewLeads'),
+  LeadController.getStatusAnalytics
+);
+router.get(
+  '/status-reports/export',
+  requirePermission('canViewLeads'),
+  LeadController.exportStatusReport
 );
 
 // Check for duplicates

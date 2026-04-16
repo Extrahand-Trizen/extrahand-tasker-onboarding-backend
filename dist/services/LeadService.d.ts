@@ -73,7 +73,62 @@ export interface SearchFilters {
     /** Filter by conversion/registration on main website */
     registrationStatus?: RegistrationStatusFilter;
 }
+export interface CallbackQueueFilters {
+    city?: string;
+    primarySkill?: string;
+    addedBy?: string;
+    startDate?: Date;
+    endDate?: Date;
+    page?: number;
+    limit?: number;
+}
+export interface CallbackQueueStats {
+    totalScheduled: number;
+    overdue: number;
+    dueToday: number;
+}
+export type FollowUpDueType = 'all' | 'callback' | 'onboarding';
+export type FollowUpBucket = 'all' | 'today' | 'overdue' | 'upcoming' | 'range';
+export interface FollowUpQueueFilters {
+    city?: string;
+    primarySkill?: string;
+    addedBy?: string;
+    startDate?: Date;
+    endDate?: Date;
+    dueType?: FollowUpDueType;
+    bucket?: FollowUpBucket;
+    page?: number;
+    limit?: number;
+}
+export interface FollowUpQueueItem {
+    [key: string]: any;
+    leadId: string;
+    name: string;
+    status: LeadStatus;
+    dueType: 'callback' | 'onboarding';
+    dueAt: Date;
+}
+export interface FollowUpQueueStats {
+    callbackTotal: number;
+    onboardingTotal: number;
+    callbackDueToday: number;
+    callbackOverdue: number;
+    onboardingDueToday: number;
+    onboardingOverdue: number;
+    totalFollowUps: number;
+}
+export interface StatusAnalyticsFilters {
+    from: Date;
+    to: Date;
+    qualifierId?: string;
+}
+export interface StatusReportExportFilters extends StatusAnalyticsFilters {
+    format: 'csv' | 'xlsx';
+    template: 'eod' | 'detailed';
+    includeNotes?: boolean;
+}
 export declare class LeadService {
+    private static formatIST;
     /**
      * Generate unique lead ID
      */
@@ -110,6 +165,44 @@ export declare class LeadService {
         page: number;
         limit: number;
         totalPages: number;
+    }>;
+    static getCallbackQueue(filters: CallbackQueueFilters): Promise<{
+        leads: ILead[];
+        total: number;
+        page: number;
+        limit: number;
+        totalPages: number;
+    }>;
+    static getCallbackQueueStats(filters: Pick<CallbackQueueFilters, 'addedBy'>): Promise<CallbackQueueStats>;
+    static getFollowUpQueue(filters: FollowUpQueueFilters): Promise<{
+        leads: FollowUpQueueItem[];
+        total: number;
+        page: number;
+        limit: number;
+        totalPages: number;
+    }>;
+    static getFollowUpQueueStats(filters: Pick<FollowUpQueueFilters, 'addedBy'>): Promise<FollowUpQueueStats>;
+    static getStatusAnalytics(filters: StatusAnalyticsFilters): Promise<{
+        touchedLeads: number;
+        interested: number;
+        notInterested: number;
+        callbackScheduled: number;
+        callbackOverdue: number;
+        statusCounts: Array<{
+            status: string;
+            count: number;
+        }>;
+        qualifierBreakdown: Array<{
+            qualifierId: string;
+            qualifierName: string;
+            touchedLeads: number;
+        }>;
+    }>;
+    static exportStatusReport(filters: StatusReportExportFilters): Promise<{
+        filename: string;
+        mimeType: string;
+        buffer: Buffer;
+        rowCount: number;
     }>;
     /**
      * Update lead

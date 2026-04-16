@@ -1,6 +1,6 @@
 import { Response } from 'express';
 import { AdminRequest } from '../middleware/adminAuth';
-import { LeadService, CreateLeadData, UpdateLeadData, UpdateStatusData, SearchFilters } from '../services/LeadService';
+import { LeadService, CreateLeadData, UpdateLeadData, UpdateStatusData, SearchFilters, CallbackQueueFilters, FollowUpQueueFilters } from '../services/LeadService';
 import { DuplicateCheckService } from '../services/DuplicateCheckService';
 import { getConversionStatusByPhone } from '../services/UserLookupService';
 import { CertificateReviewService } from '../services/CertificateReviewService';
@@ -560,6 +560,379 @@ export class LeadController {
       res.status(500).json({
         success: false,
         error: 'Failed to search leads',
+        message: error.message
+      });
+    }
+  }
+
+  /**
+   * Get callback queue.
+   * GET /api/v1/onboarding/leads/callback-queue
+   * Qualifier: only own leads
+   * Onboarder/Admin: all leads
+   */
+  static async getCallbackQueue(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      if (!req.admin) {
+        res.status(401).json({
+          success: false,
+          error: 'Authentication required'
+        });
+        return;
+      }
+
+      const { city, primarySkill, startDate, endDate, page, limit } = req.query;
+      const role = req.admin.role as UserRole;
+      const userId = getUserId(req);
+
+      const filters: CallbackQueueFilters = {
+        city: city as string,
+        primarySkill: primarySkill as string,
+        startDate: startDate ? new Date(startDate as string) : undefined,
+        endDate: endDate ? new Date(endDate as string) : undefined,
+        page: page ? parseInt(page as string) : undefined,
+        limit: limit ? parseInt(limit as string) : undefined,
+      };
+
+      if (role === 'qualifier' && userId) {
+        filters.addedBy = userId;
+      }
+
+      const result = await LeadService.getCallbackQueue(filters);
+
+      res.json({
+        success: true,
+        data: result.leads,
+        pagination: {
+          page: result.page,
+          limit: result.limit,
+          total: result.total,
+          totalPages: result.totalPages
+        }
+      });
+    } catch (error: any) {
+      logger.error('Error in getCallbackQueue controller', {
+        error: error.message
+      });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch callback queue',
+        message: error.message
+      });
+    }
+  }
+
+  /**
+   * Get callback queue counters for dashboard widgets.
+   * GET /api/v1/onboarding/leads/callback-queue/stats
+   */
+  static async getCallbackQueueStats(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      if (!req.admin) {
+        res.status(401).json({
+          success: false,
+          error: 'Authentication required'
+        });
+        return;
+      }
+
+      const role = req.admin.role as UserRole;
+      const userId = getUserId(req);
+
+      const filters: Pick<CallbackQueueFilters, 'addedBy'> = {};
+      if (role === 'qualifier' && userId) {
+        filters.addedBy = userId;
+      }
+
+      const stats = await LeadService.getCallbackQueueStats(filters);
+
+      res.json({
+        success: true,
+        data: stats
+      });
+    } catch (error: any) {
+      logger.error('Error in getCallbackQueueStats controller', {
+        error: error.message
+      });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch callback queue stats',
+        message: error.message
+      });
+    }
+  }
+
+  /**
+   * Unified follow-up queue for callback + onboarding promises.
+   * GET /api/v1/onboarding/leads/follow-up-queue
+   */
+  static async getFollowUpQueue(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      if (!req.admin) {
+        res.status(401).json({
+          success: false,
+          error: 'Authentication required'
+        });
+        return;
+      }
+
+      const {
+        city,
+        primarySkill,
+        startDate,
+        endDate,
+        dueType,
+        bucket,
+        page,
+        limit,
+      } = req.query;
+      const role = req.admin.role as UserRole;
+      const userId = getUserId(req);
+
+      const filters: FollowUpQueueFilters = {
+        city: city as string,
+        primarySkill: primarySkill as string,
+        startDate: startDate ? new Date(startDate as string) : undefined,
+        endDate: endDate ? new Date(endDate as string) : undefined,
+        dueType: (dueType as FollowUpQueueFilters['dueType']) || 'all',
+        bucket: (bucket as FollowUpQueueFilters['bucket']) || 'all',
+        page: page ? parseInt(page as string) : undefined,
+        limit: limit ? parseInt(limit as string) : undefined,
+      };
+
+      if (role === 'qualifier' && userId) {
+        filters.addedBy = userId;
+      }
+
+      const result = await LeadService.getFollowUpQueue(filters);
+
+      res.json({
+        success: true,
+        data: result.leads,
+        pagination: {
+          page: result.page,
+          limit: result.limit,
+          total: result.total,
+          totalPages: result.totalPages
+        }
+      });
+    } catch (error: any) {
+      logger.error('Error in getFollowUpQueue controller', {
+        error: error.message
+      });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch follow-up queue',
+        message: error.message
+      });
+    }
+  }
+
+  /**
+   * Unified follow-up stats for callback + onboarding promises.
+   * GET /api/v1/onboarding/leads/follow-up-queue/stats
+   */
+  static async getFollowUpQueueStats(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      if (!req.admin) {
+        res.status(401).json({
+          success: false,
+          error: 'Authentication required'
+        });
+        return;
+      }
+
+      const role = req.admin.role as UserRole;
+      const userId = getUserId(req);
+
+      const filters: Pick<FollowUpQueueFilters, 'addedBy'> = {};
+      if (role === 'qualifier' && userId) {
+        filters.addedBy = userId;
+      }
+
+      const stats = await LeadService.getFollowUpQueueStats(filters);
+
+      res.json({
+        success: true,
+        data: stats
+      });
+    } catch (error: any) {
+      logger.error('Error in getFollowUpQueueStats controller', {
+        error: error.message
+      });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch follow-up queue stats',
+        message: error.message
+      });
+    }
+  }
+
+  /**
+   * GET /api/v1/onboarding/leads/status-analytics
+   */
+  static async getStatusAnalytics(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      if (!req.admin) {
+        res.status(401).json({
+          success: false,
+          error: 'Authentication required'
+        });
+        return;
+      }
+
+      const role = req.admin.role as UserRole;
+      const userId = getUserId(req);
+      const { from, to, qualifierId } = req.query;
+
+      const fromDate = from ? new Date(from as string) : new Date(Date.now() - 6 * 24 * 60 * 60 * 1000);
+      const toDate = to ? new Date(to as string) : new Date();
+
+      if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime())) {
+        res.status(400).json({
+          success: false,
+          error: 'Invalid date range',
+          message: 'from/to must be valid ISO date strings'
+        });
+        return;
+      }
+
+      const filters: { from: Date; to: Date; qualifierId?: string } = {
+        from: fromDate,
+        to: toDate,
+      };
+
+      if (role === 'qualifier' && userId) {
+        filters.qualifierId = userId;
+      } else if (qualifierId && (role === 'onboarder' || role === 'lead_access_manager')) {
+        filters.qualifierId = qualifierId as string;
+      }
+
+      const analytics = await LeadService.getStatusAnalytics(filters);
+      res.json({
+        success: true,
+        data: analytics
+      });
+    } catch (error: any) {
+      logger.error('Error in getStatusAnalytics controller', {
+        error: error.message
+      });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch status analytics',
+        message: error.message
+      });
+    }
+  }
+
+  /**
+   * GET /api/v1/onboarding/leads/status-reports/export
+   */
+  static async exportStatusReport(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      if (!req.admin) {
+        res.status(401).json({
+          success: false,
+          error: 'Authentication required'
+        });
+        return;
+      }
+
+      const role = req.admin.role as UserRole;
+      const userId = getUserId(req);
+      const {
+        from,
+        to,
+        qualifierId,
+        format = 'csv',
+        template = 'eod',
+        includeNotes = 'false',
+      } = req.query;
+
+      if (!['csv', 'xlsx'].includes(String(format))) {
+        res.status(400).json({
+          success: false,
+          error: 'Invalid format',
+          message: 'format must be csv or xlsx'
+        });
+        return;
+      }
+
+      if (!['eod', 'detailed'].includes(String(template))) {
+        res.status(400).json({
+          success: false,
+          error: 'Invalid template',
+          message: 'template must be eod or detailed'
+        });
+        return;
+      }
+
+      const fromDate = from ? new Date(from as string) : new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const toDate = to ? new Date(to as string) : new Date();
+
+      if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime())) {
+        res.status(400).json({
+          success: false,
+          error: 'Invalid date range',
+          message: 'from/to must be valid ISO date strings'
+        });
+        return;
+      }
+
+      const filters: {
+        from: Date;
+        to: Date;
+        qualifierId?: string;
+        format: 'csv' | 'xlsx';
+        template: 'eod' | 'detailed';
+        includeNotes?: boolean;
+      } = {
+        from: fromDate,
+        to: toDate,
+        format: format as 'csv' | 'xlsx',
+        template: template as 'eod' | 'detailed',
+        includeNotes: String(includeNotes) === 'true',
+      };
+
+      if (role === 'qualifier' && userId) {
+        filters.qualifierId = userId;
+      } else if (qualifierId && (role === 'onboarder' || role === 'lead_access_manager')) {
+        filters.qualifierId = qualifierId as string;
+      }
+
+      const report = await LeadService.exportStatusReport(filters);
+
+      await LeadService.logActivity(
+        'SYSTEM',
+        'report_export',
+        `Status report export (${report.rowCount} rows)`,
+        userId || 'unknown',
+        req.admin.name,
+        {
+          reportType: 'lead-status-report',
+          role,
+          filters: {
+            from: fromDate.toISOString(),
+            to: toDate.toISOString(),
+            qualifierId: filters.qualifierId,
+            format: filters.format,
+            template: filters.template,
+            includeNotes: filters.includeNotes,
+          },
+          rowCount: report.rowCount
+        }
+      );
+
+      res.setHeader('Content-Type', report.mimeType);
+      res.setHeader('Content-Disposition', `attachment; filename="${report.filename}"`);
+      res.send(report.buffer);
+    } catch (error: any) {
+      logger.error('Error in exportStatusReport controller', {
+        error: error.message
+      });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to export status report',
         message: error.message
       });
     }

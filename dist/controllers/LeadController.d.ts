@@ -36,6 +36,36 @@ export declare class LeadController {
      */
     static searchLeads(req: AdminRequest, res: Response): Promise<void>;
     /**
+     * Get callback queue.
+     * GET /api/v1/onboarding/leads/callback-queue
+     * Qualifier: only own leads
+     * Onboarder/Admin: all leads
+     */
+    static getCallbackQueue(req: AdminRequest, res: Response): Promise<void>;
+    /**
+     * Get callback queue counters for dashboard widgets.
+     * GET /api/v1/onboarding/leads/callback-queue/stats
+     */
+    static getCallbackQueueStats(req: AdminRequest, res: Response): Promise<void>;
+    /**
+     * Unified follow-up queue for callback + onboarding promises.
+     * GET /api/v1/onboarding/leads/follow-up-queue
+     */
+    static getFollowUpQueue(req: AdminRequest, res: Response): Promise<void>;
+    /**
+     * Unified follow-up stats for callback + onboarding promises.
+     * GET /api/v1/onboarding/leads/follow-up-queue/stats
+     */
+    static getFollowUpQueueStats(req: AdminRequest, res: Response): Promise<void>;
+    /**
+     * GET /api/v1/onboarding/leads/status-analytics
+     */
+    static getStatusAnalytics(req: AdminRequest, res: Response): Promise<void>;
+    /**
+     * GET /api/v1/onboarding/leads/status-reports/export
+     */
+    static exportStatusReport(req: AdminRequest, res: Response): Promise<void>;
+    /**
      * Update lead
      * PUT /api/v1/admin/caos/leads/:leadId
      */
