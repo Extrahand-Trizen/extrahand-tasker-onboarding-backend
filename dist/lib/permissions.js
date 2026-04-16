@@ -10,7 +10,7 @@ exports.PERMISSIONS = {
         canCreateLead: true,
         canUpdateLead: true,
         canDeleteLead: false,
-        canUpdateStatus: ['lead_added', 'contacted_not_interested', 'contacted_interested'], // ✅ Qualifier can only move up to 'contacted_interested'
+        canUpdateStatus: ['lead_added', 'contacted_not_lifted', 'contacted_not_interested', 'contacted_interested'], // ✅ Qualifier can only move up to 'contacted_interested'
         canViewDocuments: true,
         canUploadDocuments: false,
         canVerifyDocuments: false,
@@ -82,7 +82,7 @@ exports.PERMISSIONS = {
         canCreateLead: false,
         canUpdateLead: false,
         canDeleteLead: false,
-        canUpdateStatus: ['contacted_not_interested', 'contacted_interested'], // Limited status updates
+        canUpdateStatus: ['contacted_not_lifted', 'contacted_not_interested', 'contacted_interested'], // Limited status updates
         canViewDocuments: true,
         canUploadDocuments: false,
         canVerifyDocuments: false,
@@ -142,9 +142,9 @@ function canUpdateStatus(role, currentStatus, newStatus) {
     // Activation is handled via canActivate permission and accountStatus field, not via status update
     if (Array.isArray(permissions.canUpdateStatus)) {
         // Qualifier can move within qualifier-owned pipeline statuses
-        // (lead_added, contacted_not_interested, contacted_interested), including backward transitions.
+        // (lead_added, contacted_not_lifted, contacted_not_interested, contacted_interested), including backward transitions.
         if (role === 'qualifier') {
-            const statusOrder = ['lead_added', 'contacted_not_interested', 'contacted_interested'];
+            const statusOrder = ['lead_added', 'contacted_not_lifted', 'contacted_not_interested', 'contacted_interested'];
             const currentIndex = statusOrder.indexOf(currentStatus);
             const newIndex = statusOrder.indexOf(newStatus);
             return currentIndex >= 0 && newIndex >= 0 && newIndex <= statusOrder.length - 1;

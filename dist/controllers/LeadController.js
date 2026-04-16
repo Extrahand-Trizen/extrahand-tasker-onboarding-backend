@@ -785,31 +785,8 @@ class LeadController {
      */
     static async updateLead(req, res) {
         try {
-            if (!req.admin) {
-                res.status(401).json({
-                    success: false,
-                    error: 'Authentication required'
-                });
-                return;
-            }
             const { leadId } = req.params;
             const updateData = req.body;
-            const existingLead = await LeadService_1.LeadService.getLeadById(leadId);
-            if (!existingLead) {
-                res.status(404).json({
-                    success: false,
-                    error: 'Lead not found'
-                });
-                return;
-            }
-            if (!canManageLead(req, existingLead.addedBy)) {
-                res.status(403).json({
-                    success: false,
-                    error: 'Forbidden',
-                    message: 'You can only update leads that you have added.'
-                });
-                return;
-            }
             const lead = await LeadService_1.LeadService.updateLead(leadId, updateData);
             if (!lead) {
                 res.status(404).json({
@@ -839,7 +816,6 @@ class LeadController {
     /**
      * Update lead status
      * PUT /api/v1/admin/caos/leads/:leadId/status
-     * ✅ ISOLATION: Qualifiers can only update leads they added
      */
     static async updateStatus(req, res) {
         try {
@@ -859,20 +835,11 @@ class LeadController {
                 });
                 return;
             }
-            // ✅ ISOLATION: Check if qualifier can access this lead
             const existingLead = await LeadService_1.LeadService.getLeadById(leadId);
             if (!existingLead) {
                 res.status(404).json({
                     success: false,
                     error: 'Lead not found'
-                });
-                return;
-            }
-            if (!canManageLead(req, existingLead.addedBy)) {
-                res.status(403).json({
-                    success: false,
-                    error: 'Forbidden',
-                    message: 'You can only update leads that you have added.'
                 });
                 return;
             }

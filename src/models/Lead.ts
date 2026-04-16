@@ -3,6 +3,7 @@ import mongoose, { Schema, Document } from 'mongoose';
 // ✅ LEAD STATUS - CRM/Onboarding concern (ends at approved)
 export type LeadStatus = 
   | 'lead_added'
+  | 'contacted_not_lifted'
   | 'contacted_not_interested'
   | 'contacted_interested'
   | 'documents_submitted'
@@ -265,6 +266,7 @@ const LeadSchema = new Schema<ILead>({
     type: String,
     enum: [
       'lead_added',
+      'contacted_not_lifted',
       'contacted_not_interested',
       'contacted_interested',
       'documents_submitted',
@@ -291,6 +293,7 @@ const LeadSchema = new Schema<ILead>({
       type: String,
       enum: [
         'lead_added',
+        'contacted_not_lifted',
         'contacted_not_interested',
         'contacted_interested',
         'documents_submitted',

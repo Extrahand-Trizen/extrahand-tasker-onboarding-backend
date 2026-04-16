@@ -1,5 +1,5 @@
 export type UserRole = 'qualifier' | 'onboarder' | 'lead_access_manager' | 'support' | 'trust';
-export type LeadStatus = 'lead_added' | 'contacted_not_interested' | 'contacted_interested' | 'documents_submitted' | 'under_verification' | 'approved' | 'inactive';
+export type LeadStatus = 'lead_added' | 'contacted_not_lifted' | 'contacted_not_interested' | 'contacted_interested' | 'documents_submitted' | 'under_verification' | 'approved' | 'inactive';
 export type AccountStatus = 'not_created' | 'invited' | 'activated' | 'suspended';
 export interface Permissions {
     canViewLeads: boolean;

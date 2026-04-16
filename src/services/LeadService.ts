@@ -263,7 +263,7 @@ export class LeadService {
       // For category-aware flows, same contact + different category is allowed.
 
       // Decide initial status (restricted set)
-      const initialStatus: LeadStatus = data.status && ['lead_added', 'contacted_not_interested', 'contacted_interested'].includes(data.status)
+      const initialStatus: LeadStatus = data.status && ['lead_added', 'contacted_not_lifted', 'contacted_not_interested', 'contacted_interested'].includes(data.status)
         ? data.status
         : 'lead_added';
 
@@ -1242,7 +1242,7 @@ export class LeadService {
       const normalizedStatusUpdate = validateAndNormalizeLeadStatusUpdate(data);
 
       // Update status
-      const isContactStatus = ['contacted_not_interested', 'contacted_interested'].includes(finalStatus);
+      const isContactStatus = ['contacted_not_lifted', 'contacted_not_interested', 'contacted_interested'].includes(finalStatus);
       const statusReasonCode = normalizedStatusUpdate.statusReasonCode;
       const statusReasonText = normalizedStatusUpdate.statusReasonText;
       const callbackAt = normalizedStatusUpdate.callbackAt;

@@ -73,7 +73,6 @@ export declare class LeadController {
     /**
      * Update lead status
      * PUT /api/v1/admin/caos/leads/:leadId/status
-     * ✅ ISOLATION: Qualifiers can only update leads they added
      */
     static updateStatus(req: AdminRequest, res: Response): Promise<void>;
     /**

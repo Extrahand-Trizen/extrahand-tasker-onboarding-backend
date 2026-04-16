@@ -124,6 +124,7 @@ const LeadSchema = new mongoose_1.Schema({
         type: String,
         enum: [
             'lead_added',
+            'contacted_not_lifted',
             'contacted_not_interested',
             'contacted_interested',
             'documents_submitted',
@@ -150,6 +151,7 @@ const LeadSchema = new mongoose_1.Schema({
                 type: String,
                 enum: [
                     'lead_added',
+                    'contacted_not_lifted',
                     'contacted_not_interested',
                     'contacted_interested',
                     'documents_submitted',

@@ -1,5 +1,5 @@
 import mongoose, { Document } from 'mongoose';
-export type LeadStatus = 'lead_added' | 'contacted_not_interested' | 'contacted_interested' | 'documents_submitted' | 'under_verification' | 'approved' | 'inactive';
+export type LeadStatus = 'lead_added' | 'contacted_not_lifted' | 'contacted_not_interested' | 'contacted_interested' | 'documents_submitted' | 'under_verification' | 'approved' | 'inactive';
 export type AccountStatus = 'not_created' | 'invited' | 'activated' | 'suspended';
 export type LeadSource = 'referral' | 'campaign' | 'walk-in' | 'agent' | 'other';
 export type CreationMethod = 'manual_onboarding' | 'bulk_upload' | 'direct_activation';
