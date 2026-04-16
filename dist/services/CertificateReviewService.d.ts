@@ -43,6 +43,9 @@ export declare class CertificateReviewService {
         city?: string;
         page?: number;
         limit?: number;
+        onlyOwnReviewedDecisions?: boolean;
+        reviewerUserId?: string;
+        reviewerIdentities?: string[];
     }): Promise<{
         items: CertificateQueueItem[];
         pagination: {

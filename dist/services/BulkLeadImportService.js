@@ -263,9 +263,16 @@ class BulkLeadImportService {
                             normalizedRecord["Preferred Time Slot"] ||
                             normalizedRecord["Preferred TimeSlot"] ||
                             "",
-                        source: (normalizedRecord.source ||
-                            normalizedRecord["Source"] ||
-                            "referral").toLowerCase(),
+                        source: (() => {
+                            const normalizedSource = (normalizedRecord.source ||
+                                normalizedRecord["Source"] ||
+                                "")
+                                .toLowerCase()
+                                .trim();
+                            return normalizedSource
+                                ? normalizedSource
+                                : undefined;
+                        })(),
                         sourceDetails: normalizedRecord.sourceDetails ||
                             normalizedRecord["Source Details"] ||
                             "",
@@ -418,9 +425,16 @@ class BulkLeadImportService {
                             normalizedRecord["Preferred Time Slot"] ||
                             normalizedRecord["Preferred TimeSlot"] ||
                             "",
-                        source: (normalizedRecord.source ||
-                            normalizedRecord["Source"] ||
-                            "referral").toLowerCase(),
+                        source: (() => {
+                            const normalizedSource = (normalizedRecord.source ||
+                                normalizedRecord["Source"] ||
+                                "")
+                                .toLowerCase()
+                                .trim();
+                            return normalizedSource
+                                ? normalizedSource
+                                : undefined;
+                        })(),
                         sourceDetails: normalizedRecord.sourceDetails ||
                             normalizedRecord["Source Details"] ||
                             "",
@@ -494,18 +508,6 @@ class BulkLeadImportService {
                 };
             }
         }
-        if (!row.city || row.city.trim().length < 2) {
-            return { valid: false, error: "City is required" };
-        }
-        if (!row.state || row.state.trim().length < 2) {
-            return { valid: false, error: "State is required" };
-        }
-        if (!row.address || row.address.trim().length < 5) {
-            return {
-                valid: false,
-                error: "Address is required (minimum 5 characters)",
-            };
-        }
         // Check primary category - use row value or default
         const primaryCategory = (row.primaryCategory ||
             row.primarySkill ||
@@ -551,27 +553,9 @@ class BulkLeadImportService {
                 error: "Secondary category is required (either in CSV or provided as default)",
             };
         }
-        if (!row.city || row.city.trim().length < 2) {
-            return { valid: false, error: "City is required" };
-        }
-        if (!row.state || row.state.trim().length < 2) {
-            return { valid: false, error: "State is required" };
-        }
-        if (!row.address || row.address.trim().length < 5) {
-            return {
-                valid: false,
-                error: "Address is required (minimum 5 characters)",
-            };
-        }
-        // Validate experience level is provided
-        if (!row.experienceLevel) {
-            return {
-                valid: false,
-                error: "Experience level is required (beginner, intermediate, or experienced)",
-            };
-        }
         const validExperienceLevels = ["beginner", "intermediate", "experienced"];
-        if (!validExperienceLevels.includes(row.experienceLevel.toLowerCase())) {
+        if (row.experienceLevel &&
+            !validExperienceLevels.includes(row.experienceLevel.toLowerCase())) {
             return {
                 valid: false,
                 error: `Invalid experience level. Must be one of: ${validExperienceLevels.join(", ")}`,
@@ -587,7 +571,7 @@ class BulkLeadImportService {
             "agent",
             "other",
         ];
-        if (!validSources.includes(row.source)) {
+        if (row.source && !validSources.includes(row.source)) {
             return {
                 valid: false,
                 error: `Invalid source. Must be one of: ${validSources.join(", ")}`,
@@ -1033,7 +1017,7 @@ class BulkLeadImportService {
                     });
                     if (!skillAlreadyExists) {
                         // Use experience level from CSV directly (supports beginner, intermediate, experienced)
-                        const experienceLevel = row.experienceLevel || "beginner";
+                        const experienceLevel = row.experienceLevel;
                         logger_1.default.info("Adding new skill to existing lead", {
                             leadId: existingLead.leadId,
                             phone: normalizedPhone,
@@ -1049,7 +1033,11 @@ class BulkLeadImportService {
                             newSkill: {
                                 name: primarySkillName,
                                 category: primarySkillCategory,
-                                level: experienceLevel,
+                                ...(experienceLevel
+                                    ? {
+                                        level: experienceLevel,
+                                    }
+                                    : {}),
                                 toolsAvailable: false,
                                 assignedBy: userId,
                                 assignedAt: new Date(),
@@ -1075,7 +1063,7 @@ class BulkLeadImportService {
                 }
                 // No existing lead - create new one
                 // Use provided source or row source
-                const leadSource = source || row.source || "referral";
+                const leadSource = source || row.source;
                 // Prepare lead document for bulk insert
                 const leadId = LeadService_1.LeadService.generateLeadId();
                 // Track normalized contacts for logging (use phone if available, otherwise landline)
@@ -1091,20 +1079,20 @@ class BulkLeadImportService {
                     phone: normalizedPhone || undefined,
                     landline: normalizedLandline || undefined,
                     email: row.email?.trim(),
-                    city: row.city.trim(),
-                    state: row.state.trim(),
-                    address: row.address.trim(),
-                    pincode: row.pincode?.trim(),
+                    city: row.city?.trim() || "",
+                    state: row.state?.trim() || "",
+                    address: row.address?.trim() || "",
+                    pincode: row.pincode?.trim() || undefined,
                     primaryCategory: primarySkillCategory,
                     primarySkill: primarySkillCategory, // Legacy field
                     secondaryCategory: row.secondaryCategory?.trim() || "",
                     secondarySkill: row.secondaryCategory?.trim() || "", // Legacy field
-                    experienceLevel: row.experienceLevel || "beginner",
+                    experienceLevel: row.experienceLevel,
                     workingDays: row.workingDays?.trim(),
-                    preferredTimeSlot: row.preferredTimeSlot?.trim(),
+                    preferredTimeSlot: row.preferredTimeSlot?.trim() || undefined,
                     source: leadSource,
                     sourceDetails: row.sourceDetails?.trim() ||
-                        (leadSource !== row.source
+                        (leadSource && leadSource !== row.source
                             ? `Bulk import: ${row.source}`
                             : undefined),
                     status: "lead_added",
@@ -1121,7 +1109,11 @@ class BulkLeadImportService {
                         {
                             name: primarySkillName,
                             category: primarySkillCategory,
-                            level: (row.experienceLevel || "beginner"),
+                            ...(row.experienceLevel
+                                ? {
+                                    level: row.experienceLevel,
+                                }
+                                : {}),
                             toolsAvailable: false,
                             assignedBy: userId,
                             assignedAt: new Date(),
@@ -1631,18 +1623,18 @@ class BulkLeadImportService {
             "Phone Number (Optional)",
             "Landline Number (Optional)",
             "Email (optional)",
-            "City / Area",
+            "City / Area (optional)",
             "State (optional)",
-            "Address",
-            "Pincode",
+            "Address (optional)",
+            "Pincode (optional)",
             ...(includeCategoryColumns
                 ? ["Primary Category", "Secondary Category"]
                 : []),
-            "Experience Level (beginner/intermediate/experienced)",
+            "Experience Level (optional: beginner/intermediate/experienced)",
             "Years of Experience (optional)",
             "Working Days (optional)",
             "Preferred Time Slot (optional)",
-            "Source (referral/campaign/walk-in/agent/other)",
+            "Source (optional: referral/campaign/walk-in/agent/other)",
             // 'Source Details',
             // 'Status'
         ];

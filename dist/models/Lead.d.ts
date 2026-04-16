@@ -28,7 +28,7 @@ export interface ILeadDocument {
 export interface ILeadSkill {
     name: string;
     category?: string;
-    level?: 'beginner' | 'experienced';
+    level?: 'beginner' | 'intermediate' | 'experienced';
     toolsAvailable?: boolean;
     assignedBy?: string;
     assignedAt?: Date;
@@ -73,11 +73,11 @@ export interface ILead extends Document {
     phone?: string;
     landline?: string;
     email?: string;
-    city: string;
+    city?: string;
     state?: string;
     address?: string;
     pincode?: string;
-    source: LeadSource;
+    source?: LeadSource;
     sourceDetails?: string;
     agentCampaignId?: string;
     secondarySkill?: string;

@@ -67,7 +67,6 @@ const LeadSchema = new mongoose_1.Schema({
     },
     city: {
         type: String,
-        required: true,
         trim: true,
         index: true
     },
@@ -86,7 +85,6 @@ const LeadSchema = new mongoose_1.Schema({
     source: {
         type: String,
         enum: ['referral', 'campaign', 'walk-in', 'agent', 'other'],
-        required: true,
         index: true
     },
     sourceDetails: {

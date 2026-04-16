@@ -5,9 +5,9 @@ export interface BulkLeadImportRow {
     phone?: string;
     landline?: string;
     email?: string;
-    city: string;
-    state: string;
-    address: string;
+    city?: string;
+    state?: string;
+    address?: string;
     pincode?: string;
     primaryCategory?: string;
     primarySkill?: string;
@@ -16,7 +16,7 @@ export interface BulkLeadImportRow {
     yearsOfExperience?: number;
     workingDays?: string;
     preferredTimeSlot?: string;
-    source: LeadSource;
+    source?: LeadSource;
     sourceDetails?: string;
 }
 export interface BulkLeadImportResult {

@@ -33,7 +33,7 @@ export interface CreateLeadData {
 export interface ILeadSkill {
   name: string;
   category?: string;
-  level?: 'beginner' | 'experienced';
+  level?: 'beginner' | 'intermediate' | 'experienced';
   toolsAvailable?: boolean;
   assignedBy?: string;
   assignedAt?: Date;

@@ -48,6 +48,13 @@ class CertificateReviewController {
             }
             const parsedPage = Math.max(parseInt(page, 10) || 1, 1);
             const parsedLimit = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 100);
+            const actorRole = (req.admin.role || '').trim().toLowerCase();
+            const restrictToOwnReviewedDecisions = actorRole === 'onboarder' && normalizedStatus !== 'pending';
+            const reviewerIdentities = [
+                req.admin.name?.trim(),
+                req.admin.email?.trim(),
+                actorUid,
+            ].filter((value) => !!value);
             const queue = await CertificateReviewService_1.CertificateReviewService.getQueueFromUserService({
                 actorUid,
                 uid: uid ? String(uid).trim() : undefined,
@@ -56,6 +63,11 @@ class CertificateReviewController {
                 city: city,
                 page: parsedPage,
                 limit: parsedLimit,
+                onlyOwnReviewedDecisions: restrictToOwnReviewedDecisions,
+                reviewerUserId: restrictToOwnReviewedDecisions ? actorUid : undefined,
+                reviewerIdentities: restrictToOwnReviewedDecisions && reviewerIdentities.length > 0
+                    ? reviewerIdentities
+                    : undefined,
             });
             res.json({
                 success: true,

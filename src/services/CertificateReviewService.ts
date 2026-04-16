@@ -111,6 +111,9 @@ export class CertificateReviewService {
     city?: string;
     page?: number;
     limit?: number;
+    onlyOwnReviewedDecisions?: boolean;
+    reviewerUserId?: string;
+    reviewerIdentities?: string[];
   }): Promise<{
     items: CertificateQueueItem[];
     pagination: { page: number; limit: number; total: number; totalPages: number };
@@ -130,6 +133,15 @@ export class CertificateReviewService {
         city: params.city,
         page: params.page || 1,
         limit: params.limit || 20,
+        ...(params.onlyOwnReviewedDecisions
+          ? { onlyOwnReviewedDecisions: 'true' }
+          : {}),
+        ...(params.reviewerUserId
+          ? { reviewerUserId: params.reviewerUserId }
+          : {}),
+        ...(params.reviewerIdentities && params.reviewerIdentities.length > 0
+          ? { reviewerIdentities: params.reviewerIdentities.join(',') }
+          : {}),
       },
     });
 

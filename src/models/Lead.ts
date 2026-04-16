@@ -51,7 +51,7 @@ export interface ILeadDocument {
 export interface ILeadSkill {
   name: string;
   category?: string;
-  level?: 'beginner' | 'experienced';
+  level?: 'beginner' | 'intermediate' | 'experienced';
   toolsAvailable?: boolean;
   assignedBy?: string;
   assignedAt?: Date;
@@ -101,13 +101,13 @@ export interface ILead extends Document {
   phone?: string;
   landline?: string;
   email?: string;
-  city: string;
+  city?: string;
   state?: string;
   address?: string; // Local Area
   pincode?: string;
   
   // Lead source & tracking
-  source: LeadSource;
+  source?: LeadSource;
   sourceDetails?: string;
   agentCampaignId?: string; // Agent / Campaign ID
   
@@ -200,7 +200,6 @@ const LeadSchema = new Schema<ILead>({
   },
   city: {
     type: String,
-    required: true,
     trim: true,
     index: true
   },
@@ -219,7 +218,6 @@ const LeadSchema = new Schema<ILead>({
   source: {
     type: String,
     enum: ['referral', 'campaign', 'walk-in', 'agent', 'other'],
-    required: true,
     index: true
   },
   sourceDetails: {

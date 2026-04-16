@@ -50,6 +50,15 @@ class CertificateReviewService {
                 city: params.city,
                 page: params.page || 1,
                 limit: params.limit || 20,
+                ...(params.onlyOwnReviewedDecisions
+                    ? { onlyOwnReviewedDecisions: 'true' }
+                    : {}),
+                ...(params.reviewerUserId
+                    ? { reviewerUserId: params.reviewerUserId }
+                    : {}),
+                ...(params.reviewerIdentities && params.reviewerIdentities.length > 0
+                    ? { reviewerIdentities: params.reviewerIdentities.join(',') }
+                    : {}),
             },
         });
         return {

@@ -64,6 +64,14 @@ export class CertificateReviewController {
         Math.max(parseInt(limit as string, 10) || 20, 1),
         100
       );
+      const actorRole = (req.admin.role || '').trim().toLowerCase();
+      const restrictToOwnReviewedDecisions =
+        actorRole === 'onboarder' && normalizedStatus !== 'pending';
+      const reviewerIdentities = [
+        req.admin.name?.trim(),
+        req.admin.email?.trim(),
+        actorUid,
+      ].filter((value): value is string => !!value);
 
       const queue = await CertificateReviewService.getQueueFromUserService({
         actorUid,
@@ -73,6 +81,12 @@ export class CertificateReviewController {
         city: city as string | undefined,
         page: parsedPage,
         limit: parsedLimit,
+        onlyOwnReviewedDecisions: restrictToOwnReviewedDecisions,
+        reviewerUserId: restrictToOwnReviewedDecisions ? actorUid : undefined,
+        reviewerIdentities:
+          restrictToOwnReviewedDecisions && reviewerIdentities.length > 0
+            ? reviewerIdentities
+            : undefined,
       });
 
       res.json({
