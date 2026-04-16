@@ -157,7 +157,7 @@ class BulkUploadService {
                 record["Primary Skill"] ||
                 record["Primary Skill (Service Category)"] ||
                 defaultPrimaryCategory ||
-                "other";
+                undefined;
             // Get secondary category from CSV or use default
             const secondaryCategoryValue = record.secondaryCategory ||
                 record.SecondaryCategory ||
@@ -390,7 +390,7 @@ class BulkUploadService {
                 phone: user.phone,
                 email: user.email,
                 city: user.city || "Unknown",
-                primaryCategory: user.primaryCategory || user.primarySkill || "other",
+                primaryCategory: user.primaryCategory || user.primarySkill || "",
                 secondaryCategory: user.secondaryCategory || user.secondarySkill || "",
                 experienceLevel: user.experienceLevel,
                 status: (rowErrors.length === 0 ? "valid" : "invalid"),
@@ -619,10 +619,10 @@ class BulkUploadService {
                     pincode: userToProcess.user.pincode,
                     primaryCategory: userToProcess.user.primaryCategory ||
                         userToProcess.user.primarySkill ||
-                        "other",
+                        undefined,
                     primarySkill: userToProcess.user.primaryCategory ||
                         userToProcess.user.primarySkill ||
-                        "other", // For backward compatibility
+                        undefined, // For backward compatibility
                     secondaryCategory: userToProcess.user.secondaryCategory ||
                         userToProcess.user.secondarySkill ||
                         "",

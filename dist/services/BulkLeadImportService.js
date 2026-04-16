@@ -508,17 +508,11 @@ class BulkLeadImportService {
                 };
             }
         }
-        // Check primary category - use row value or default
+        // Categories are optional.
         const primaryCategory = (row.primaryCategory ||
             row.primarySkill ||
             defaultPrimaryCategory ||
             "").trim();
-        if (!primaryCategory || primaryCategory.length < 2) {
-            return {
-                valid: false,
-                error: "Primary category is required (either in CSV or provided as default)",
-            };
-        }
         // Validate primary category is one of the allowed categories
         const validCategories = [
             "cleaning",
@@ -537,22 +531,13 @@ class BulkLeadImportService {
             "other",
         ];
         const normalizedCategory = primaryCategory.toLowerCase().trim();
-        if (!validCategories.includes(normalizedCategory)) {
+        if (normalizedCategory && !validCategories.includes(normalizedCategory)) {
             return {
                 valid: false,
                 error: `Invalid primary category. Must be one of: ${validCategories.join(", ")}`,
             };
         }
-        // Check secondary category - use row value or default (optional for water-tanker)
-        const secondaryCategory = (row.secondaryCategory ||
-            defaultSecondaryCategory ||
-            "").trim();
-        if ((!secondaryCategory || secondaryCategory.length < 1) && normalizedCategory !== "water-tanker") {
-            return {
-                valid: false,
-                error: "Secondary category is required (either in CSV or provided as default)",
-            };
-        }
+        // Secondary category is optional.
         const validExperienceLevels = ["beginner", "intermediate", "experienced"];
         if (row.experienceLevel &&
             !validExperienceLevels.includes(row.experienceLevel.toLowerCase())) {
@@ -638,24 +623,32 @@ class BulkLeadImportService {
             });
             const existingLeads = Array.from(existingLeadsMap.values());
             if (existingLeads.length > 0) {
-                // Check if any existing lead has the same category
-                const sameCategoryLead = existingLeads.find((lead) => {
-                    const leadPrimary = lead.primaryCategory || lead.primarySkill || '';
-                    const leadSecondary = lead.secondaryCategory || lead.secondarySkill || '';
-                    return leadPrimary === primaryCategory &&
-                        (leadSecondary === secondaryCategory || (!leadSecondary && !secondaryCategory));
-                });
-                if (sameCategoryLead) {
-                    // Exact duplicate - same contact and same category
-                    existingLead = sameCategoryLead;
+                if (!primaryCategory.trim()) {
+                    // If no category is provided, treat any existing contact as duplicate.
+                    existingLead = existingLeads[0];
                     isDuplicateInDb = true;
                     isDifferentCategory = false;
                 }
                 else {
-                    // Same contact but different category - this is allowed
-                    existingLead = existingLeads[0]; // Use first one for reference
-                    isDuplicateInDb = false;
-                    isDifferentCategory = true;
+                    // Check if any existing lead has the same category
+                    const sameCategoryLead = existingLeads.find((lead) => {
+                        const leadPrimary = lead.primaryCategory || lead.primarySkill || '';
+                        const leadSecondary = lead.secondaryCategory || lead.secondarySkill || '';
+                        return leadPrimary === primaryCategory &&
+                            (leadSecondary === secondaryCategory || (!leadSecondary && !secondaryCategory));
+                    });
+                    if (sameCategoryLead) {
+                        // Exact duplicate - same contact and same category
+                        existingLead = sameCategoryLead;
+                        isDuplicateInDb = true;
+                        isDifferentCategory = false;
+                    }
+                    else {
+                        // Same contact but different category - this is allowed
+                        existingLead = existingLeads[0]; // Use first one for reference
+                        isDuplicateInDb = false;
+                        isDifferentCategory = true;
+                    }
                 }
             }
             // Validate row (pass default categories for validation)
@@ -962,6 +955,14 @@ class BulkLeadImportService {
                     existingLeadsMap.set(lead.leadId, lead);
                 });
                 const existingLeads = Array.from(existingLeadsMap.values());
+                if (!primaryCategory.trim() && existingLeads.length > 0) {
+                    errors.push({
+                        row: rowNumber,
+                        phone: row.phone || row.landline || '',
+                        error: `This person already exists (Lead ID: ${existingLeads[0].leadId})`,
+                    });
+                    continue;
+                }
                 // Check if any existing lead has the same category
                 const sameCategoryLead = existingLeads.find((lead) => {
                     const leadPrimary = lead.primaryCategory || lead.primarySkill || '';
@@ -998,9 +999,12 @@ class BulkLeadImportService {
                     events: "Events & Entertainment",
                     other: "Other",
                 };
-                const primarySkillName = primarySkillNameMap[primarySkillCategory] || primarySkillCategory;
+                const effectivePrimarySkillCategory = primarySkillCategory || undefined;
+                const primarySkillName = effectivePrimarySkillCategory
+                    ? (primarySkillNameMap[effectivePrimarySkillCategory] || effectivePrimarySkillCategory)
+                    : undefined;
                 // Check if lead exists with different category - add skill to existing lead
-                if (existingLeads.length > 0) {
+                if (existingLeads.length > 0 && effectivePrimarySkillCategory && primarySkillName) {
                     const existingLead = existingLeads[0]; // Use first existing lead
                     // Normalize categories for comparison (case-insensitive, trim whitespace)
                     const normalizedNewCategory = primarySkillCategory.toLowerCase().trim();
@@ -1032,7 +1036,7 @@ class BulkLeadImportService {
                             existingLead: existingLead,
                             newSkill: {
                                 name: primarySkillName,
-                                category: primarySkillCategory,
+                                category: effectivePrimarySkillCategory,
                                 ...(experienceLevel
                                     ? {
                                         level: experienceLevel,
@@ -1083,8 +1087,8 @@ class BulkLeadImportService {
                     state: row.state?.trim() || "",
                     address: row.address?.trim() || "",
                     pincode: row.pincode?.trim() || undefined,
-                    primaryCategory: primarySkillCategory,
-                    primarySkill: primarySkillCategory, // Legacy field
+                    primaryCategory: effectivePrimarySkillCategory,
+                    primarySkill: effectivePrimarySkillCategory, // Legacy field
                     secondaryCategory: row.secondaryCategory?.trim() || "",
                     secondarySkill: row.secondaryCategory?.trim() || "", // Legacy field
                     experienceLevel: row.experienceLevel,
@@ -1105,20 +1109,22 @@ class BulkLeadImportService {
                             changedAt: new Date(),
                         },
                     ],
-                    skills: [
-                        {
-                            name: primarySkillName,
-                            category: primarySkillCategory,
-                            ...(row.experienceLevel
-                                ? {
-                                    level: row.experienceLevel,
-                                }
-                                : {}),
-                            toolsAvailable: false,
-                            assignedBy: userId,
-                            assignedAt: new Date(),
-                        },
-                    ],
+                    skills: effectivePrimarySkillCategory && primarySkillName
+                        ? [
+                            {
+                                name: primarySkillName,
+                                category: effectivePrimarySkillCategory,
+                                ...(row.experienceLevel
+                                    ? {
+                                        level: row.experienceLevel,
+                                    }
+                                    : {}),
+                                toolsAvailable: false,
+                                assignedBy: userId,
+                                assignedAt: new Date(),
+                            },
+                        ]
+                        : [],
                     documents: [],
                     verificationStatus: {},
                     communicationLog: [],

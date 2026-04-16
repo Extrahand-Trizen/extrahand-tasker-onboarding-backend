@@ -27,6 +27,10 @@ export interface IStatusHistory {
   changedByName?: string;
   changedAt: Date;
   notes?: string;
+  statusReasonCode?: string;
+  statusReasonText?: string;
+  callbackAt?: Date;
+  expectedOnboardingAt?: Date;
 }
 
 export interface ILeadDocument {
@@ -125,7 +129,7 @@ export interface ILead extends Document {
   statusHistory: IStatusHistory[];
   
   // Skills & services
-  primarySkill: string;  // Legacy field (for backward compatibility)
+  primarySkill?: string;  // Legacy field (for backward compatibility)
   primaryCategory?: string;  // New field name (preferred)
   secondaryCategory?: string;  // New field name (preferred)
   skills: ILeadSkill[];
@@ -139,6 +143,10 @@ export interface ILead extends Document {
   // Communication
   lastContactedAt?: Date;
   lastContactedBy?: string;
+  nextCallbackAt?: Date;
+  expectedOnboardingAt?: Date;
+  statusReasonCode?: string;
+  statusReasonText?: string;
   communicationLog: ICommunicationLog[];
   
   // Internal notes
@@ -295,11 +303,14 @@ const LeadSchema = new Schema<ILead>({
     changedBy: String,
     changedByName: String,
     changedAt: { type: Date, default: Date.now },
-    notes: String
+    notes: String,
+    statusReasonCode: String,
+    statusReasonText: String,
+    callbackAt: Date,
+    expectedOnboardingAt: Date
   }],
   primarySkill: {
     type: String,
-    required: true,
     trim: true,
     index: true
   },
@@ -374,6 +385,10 @@ const LeadSchema = new Schema<ILead>({
   },
   lastContactedAt: Date,
   lastContactedBy: String,
+  nextCallbackAt: Date,
+  expectedOnboardingAt: Date,
+  statusReasonCode: String,
+  statusReasonText: String,
   communicationLog: [{
     type: {
       type: String,
@@ -457,6 +472,8 @@ LeadSchema.index({ city: 1, status: 1 });
 LeadSchema.index({ source: 1, createdAt: -1 });
 LeadSchema.index({ primarySkill: 1, status: 1 });
 LeadSchema.index({ creationMethod: 1, status: 1 });
+LeadSchema.index({ nextCallbackAt: 1, addedBy: 1, status: 1 });
+LeadSchema.index({ status: 1, nextCallbackAt: 1 });
 
 export default mongoose.model<ILead>('Lead', LeadSchema);
 

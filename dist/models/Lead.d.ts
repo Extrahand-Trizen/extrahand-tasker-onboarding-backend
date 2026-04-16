@@ -9,6 +9,10 @@ export interface IStatusHistory {
     changedByName?: string;
     changedAt: Date;
     notes?: string;
+    statusReasonCode?: string;
+    statusReasonText?: string;
+    callbackAt?: Date;
+    expectedOnboardingAt?: Date;
 }
 export interface ILeadDocument {
     type: 'aadhaar' | 'pan' | 'address_proof' | 'skill_certificate' | 'photo' | 'other';
@@ -89,7 +93,7 @@ export interface ILead extends Document {
     status: LeadStatus;
     accountStatus: AccountStatus;
     statusHistory: IStatusHistory[];
-    primarySkill: string;
+    primarySkill?: string;
     primaryCategory?: string;
     secondaryCategory?: string;
     skills: ILeadSkill[];
@@ -97,6 +101,10 @@ export interface ILead extends Document {
     verificationStatus: IVerificationStatus;
     lastContactedAt?: Date;
     lastContactedBy?: string;
+    nextCallbackAt?: Date;
+    expectedOnboardingAt?: Date;
+    statusReasonCode?: string;
+    statusReasonText?: string;
     communicationLog: ICommunicationLog[];
     internalNotes: IInternalNote[];
     duplicateOf?: string;

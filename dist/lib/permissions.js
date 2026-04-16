@@ -141,13 +141,13 @@ function canUpdateStatus(role, currentStatus, newStatus) {
     // ❌ REMOVED: Special case for activation - activation is now separate from lead status
     // Activation is handled via canActivate permission and accountStatus field, not via status update
     if (Array.isArray(permissions.canUpdateStatus)) {
-        // Qualifier can only move forward in pipeline (up to 'contacted_interested')
+        // Qualifier can move within qualifier-owned pipeline statuses
+        // (lead_added, contacted_not_interested, contacted_interested), including backward transitions.
         if (role === 'qualifier') {
             const statusOrder = ['lead_added', 'contacted_not_interested', 'contacted_interested'];
             const currentIndex = statusOrder.indexOf(currentStatus);
             const newIndex = statusOrder.indexOf(newStatus);
-            // ✅ Allow moving forward in pipeline, or staying at same status
-            return currentIndex >= 0 && newIndex >= 0 && newIndex >= currentIndex && newIndex <= statusOrder.length - 1;
+            return currentIndex >= 0 && newIndex >= 0 && newIndex <= statusOrder.length - 1;
         }
         return permissions.canUpdateStatus.includes(newStatus);
     }

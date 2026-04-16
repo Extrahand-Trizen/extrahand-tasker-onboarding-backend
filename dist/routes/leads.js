@@ -16,12 +16,16 @@ router.post('/', (0, roleAuth_1.requirePermission)('canCreateLead'), LeadControl
 router.get('/', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.searchLeads);
 // Get unique users who have added leads (for filter dropdown)
 router.get('/creators', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getLeadCreators);
+// Shared status reason codes for lead status updates
+router.get('/status-reason-codes', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getStatusReasonCodes);
 // Check for duplicates
 router.post('/duplicate-check', (0, roleAuth_1.requirePermission)('canCreateLead'), LeadController_1.LeadController.checkDuplicate);
 // Activation queue (must be before /:leadId to avoid route conflict)
 router.get('/activation-queue', (0, roleAuth_1.requirePermission)('canActivate'), ActivationController_1.ActivationController.getActivationQueue);
 // Conversion status (lead registered on main website + Aadhaar verified)
 router.get('/:leadId/conversion-status', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getConversionStatus);
+// Verified skill certificates from platform profile
+router.get('/:leadId/verified-certificates', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getVerifiedCertificates);
 // Get lead by ID
 router.get('/:leadId', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getLead);
 // Update lead

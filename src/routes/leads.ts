@@ -32,6 +32,13 @@ router.get(
   LeadController.getLeadCreators
 );
 
+// Shared status reason codes for lead status updates
+router.get(
+  '/status-reason-codes',
+  requirePermission('canViewLeads'),
+  LeadController.getStatusReasonCodes
+);
+
 // Check for duplicates
 router.post(
   '/duplicate-check',
@@ -51,6 +58,13 @@ router.get(
   '/:leadId/conversion-status',
   requirePermission('canViewLeads'),
   LeadController.getConversionStatus
+);
+
+// Verified skill certificates from platform profile
+router.get(
+  '/:leadId/verified-certificates',
+  requirePermission('canViewLeads'),
+  LeadController.getVerifiedCertificates
 );
 
 // Get lead by ID

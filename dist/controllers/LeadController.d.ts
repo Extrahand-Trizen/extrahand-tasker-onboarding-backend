@@ -1,6 +1,8 @@
 import { Response } from 'express';
 import { AdminRequest } from '../middleware/adminAuth';
 export declare class LeadController {
+    static getStatusReasonCodes(req: AdminRequest, res: Response): Promise<void>;
+    private static extractVerifiedSkillCertificates;
     /**
      * Create a new lead
      * POST /api/v1/admin/caos/leads
@@ -17,6 +19,11 @@ export declare class LeadController {
      * GET /api/v1/onboarding/leads/:leadId/conversion-status
      */
     static getConversionStatus(req: AdminRequest, res: Response): Promise<void>;
+    /**
+     * Get verified skill certificates for a lead from platform profile.
+     * GET /api/v1/onboarding/leads/:leadId/verified-certificates
+     */
+    static getVerifiedCertificates(req: AdminRequest, res: Response): Promise<void>;
     /**
      * Get unique users who have added leads (for filter dropdown)
      * GET /api/v1/onboarding/leads/creators

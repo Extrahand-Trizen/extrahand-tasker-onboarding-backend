@@ -3,9 +3,11 @@ import { AdminRequest } from '../middleware/adminAuth';
 import { LeadService, CreateLeadData, UpdateLeadData, UpdateStatusData, SearchFilters } from '../services/LeadService';
 import { DuplicateCheckService } from '../services/DuplicateCheckService';
 import { getConversionStatusByPhone } from '../services/UserLookupService';
+import { CertificateReviewService } from '../services/CertificateReviewService';
 import Lead from '../models/Lead';
 import { UserRole } from '../lib/permissions';
 import logger from '../config/logger';
+import { LEAD_STATUS_REASON_CODES } from '../constants/leadContactTracking';
 
 /**
  * Helper function to get consistent userId from req.admin
@@ -40,6 +42,65 @@ function canAccessLead(req: AdminRequest, leadAddedBy: string): boolean {
 }
 
 export class LeadController {
+  static async getStatusReasonCodes(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      res.json({
+        success: true,
+        data: LEAD_STATUS_REASON_CODES
+      });
+    } catch (error: any) {
+      logger.error('Error in getStatusReasonCodes controller', {
+        error: error.message
+      });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to get status reason codes',
+        message: error.message
+      });
+    }
+  }
+
+  private static extractVerifiedSkillCertificates(profile: any): Array<{
+    skillName: string;
+    certificateType?: string;
+    issuingAuthority?: string;
+    certificateNumber?: string;
+    uploadedAt?: string;
+    reviewedAt?: string;
+  }> {
+    const skills = profile?.skills?.list || [];
+    const verifiedCertificates: Array<{
+      skillName: string;
+      certificateType?: string;
+      issuingAuthority?: string;
+      certificateNumber?: string;
+      uploadedAt?: string;
+      reviewedAt?: string;
+    }> = [];
+
+    skills.forEach((skill: any) => {
+      const skillName = skill?.name || 'Unknown Skill';
+      const certificates = Array.isArray(skill?.certificates) ? skill.certificates : [];
+
+      certificates.forEach((certificate: any) => {
+        if (certificate?.status !== 'verified') {
+          return;
+        }
+
+        verifiedCertificates.push({
+          skillName,
+          certificateType: certificate?.certificateType || certificate?.title,
+          issuingAuthority: certificate?.issuingAuthority || certificate?.issuedBy,
+          certificateNumber: certificate?.certificateNumber,
+          uploadedAt: certificate?.uploadedAt || certificate?.issueDate || certificate?.issuedDate,
+          reviewedAt: certificate?.reviewedAt,
+        });
+      });
+    });
+
+    return verifiedCertificates;
+  }
+
   /**
    * Create a new lead
    * POST /api/v1/admin/caos/leads
@@ -88,35 +149,17 @@ export class LeadController {
         return;
       }
       
-      if (!name || !city || !primaryCategoryValue || !source) {
+      if (!name?.trim()) {
         res.status(400).json({
           success: false,
           error: 'Missing required fields',
-          message: 'Name, city, primary category, and source are required'
-        });
-        return;
-      }
-      
-      if (!secondaryCategoryValue && primaryCategoryValue !== 'water-tanker') {
-        res.status(400).json({
-          success: false,
-          error: 'Missing required fields',
-          message: 'Secondary category is required'
-        });
-        return;
-      }
-
-      if (!experienceLevel) {
-        res.status(400).json({
-          success: false,
-          error: 'Missing required fields',
-          message: 'Experience level is required'
+          message: 'Name is required'
         });
         return;
       }
 
       const leadData: CreateLeadData = {
-        name,
+        name: name.trim(),
         phone: phone?.trim() || undefined,
         landline: landline?.trim() || undefined,
         email,
@@ -307,6 +350,109 @@ export class LeadController {
   }
 
   /**
+   * Get verified skill certificates for a lead from platform profile.
+   * GET /api/v1/onboarding/leads/:leadId/verified-certificates
+   */
+  static async getVerifiedCertificates(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      if (!req.admin) {
+        res.status(401).json({
+          success: false,
+          error: 'Authentication required'
+        });
+        return;
+      }
+
+      const { leadId } = req.params;
+      const lead = await LeadService.getLeadById(leadId);
+
+      if (!lead) {
+        res.status(404).json({
+          success: false,
+          error: 'Lead not found'
+        });
+        return;
+      }
+
+      if (!canAccessLead(req, lead.addedBy)) {
+        res.status(403).json({
+          success: false,
+          error: 'Forbidden',
+          message: 'You can only access leads that you have added.'
+        });
+        return;
+      }
+
+      const phone = lead.phone || (lead as any).landline;
+      if (!phone) {
+        res.json({
+          success: true,
+          data: {
+            platformUid: undefined,
+            certificates: []
+          }
+        });
+        return;
+      }
+
+      let platformUid = lead.conversionData?.platformUid;
+
+      if (!platformUid) {
+        const conversion = await getConversionStatusByPhone(phone);
+        platformUid = conversion.platformUid;
+
+        if (platformUid || conversion.isAadhaarVerified !== undefined) {
+          await Lead.findOneAndUpdate(
+            { leadId },
+            {
+              $set: {
+                conversionData: {
+                  platformUid,
+                  isAadhaarVerified: conversion.isAadhaarVerified,
+                  lastCheckedAt: new Date()
+                }
+              }
+            }
+          );
+        }
+      }
+
+      if (!platformUid) {
+        res.json({
+          success: true,
+          data: {
+            platformUid: undefined,
+            certificates: []
+          }
+        });
+        return;
+      }
+
+      const actorUid = req.admin.userId || req.admin.uid || 'system';
+      const profile = await CertificateReviewService.getProfileByUid(platformUid, actorUid);
+      const certificates = LeadController.extractVerifiedSkillCertificates(profile);
+
+      res.json({
+        success: true,
+        data: {
+          platformUid,
+          certificates
+        }
+      });
+    } catch (error: any) {
+      logger.error('Error in getVerifiedCertificates', {
+        error: error.message,
+        leadId: req.params.leadId
+      });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to get verified certificates',
+        message: error.message
+      });
+    }
+  }
+
+  /**
    * Get unique users who have added leads (for filter dropdown)
    * GET /api/v1/onboarding/leads/creators
    */
@@ -472,7 +618,7 @@ export class LeadController {
       }
 
       const { leadId } = req.params;
-      const { status, notes } = req.body;
+      const { status, notes, statusReasonCode, statusReasonText, callbackAt, expectedOnboardingAt } = req.body;
 
       if (!status) {
         res.status(400).json({
@@ -506,6 +652,10 @@ export class LeadController {
       const statusData: UpdateStatusData = {
         status,
         notes,
+        statusReasonCode,
+        statusReasonText,
+        callbackAt,
+        expectedOnboardingAt,
         changedBy: req.admin.uid || req.admin?.userId || "" ,
         changedByName: req.admin.name
       };

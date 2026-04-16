@@ -5,7 +5,7 @@ export interface CreateLeadData {
     phone?: string;
     landline?: string;
     email?: string;
-    city: string;
+    city?: string;
     state?: string;
     address?: string;
     pincode?: string;
@@ -13,10 +13,10 @@ export interface CreateLeadData {
     primarySkill?: string;
     secondaryCategory?: string;
     secondarySkill?: string;
-    experienceLevel: 'beginner' | 'intermediate' | 'experienced';
+    experienceLevel?: 'beginner' | 'intermediate' | 'experienced';
     workingDays?: string;
     preferredTimeSlot?: string;
-    source: LeadSource;
+    source?: LeadSource;
     sourceDetails?: string;
     agentCampaignId?: string;
     addedBy: string;
@@ -33,21 +33,28 @@ export interface ILeadSkill {
 }
 export interface UpdateLeadData {
     name?: string;
-    phone?: string;
-    landline?: string;
-    email?: string;
-    city?: string;
-    state?: string;
-    address?: string;
-    pincode?: string;
-    primarySkill?: string;
-    source?: LeadSource;
-    sourceDetails?: string;
+    phone?: string | null;
+    landline?: string | null;
+    email?: string | null;
+    city?: string | null;
+    state?: string | null;
+    address?: string | null;
+    pincode?: string | null;
+    primarySkill?: string | null;
+    primaryCategory?: string | null;
+    secondarySkill?: string | null;
+    secondaryCategory?: string | null;
+    source?: LeadSource | null;
+    sourceDetails?: string | null;
     skills?: ILeadSkill[];
 }
 export interface UpdateStatusData {
     status: LeadStatus;
     notes?: string;
+    statusReasonCode?: string;
+    statusReasonText?: string;
+    callbackAt?: Date | string;
+    expectedOnboardingAt?: Date | string;
     changedBy: string;
     changedByName?: string;
 }

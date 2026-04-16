@@ -162,11 +162,14 @@ const LeadSchema = new mongoose_1.Schema({
             changedBy: String,
             changedByName: String,
             changedAt: { type: Date, default: Date.now },
-            notes: String
+            notes: String,
+            statusReasonCode: String,
+            statusReasonText: String,
+            callbackAt: Date,
+            expectedOnboardingAt: Date
         }],
     primarySkill: {
         type: String,
-        required: true,
         trim: true,
         index: true
     },
@@ -241,6 +244,10 @@ const LeadSchema = new mongoose_1.Schema({
     },
     lastContactedAt: Date,
     lastContactedBy: String,
+    nextCallbackAt: Date,
+    expectedOnboardingAt: Date,
+    statusReasonCode: String,
+    statusReasonText: String,
     communicationLog: [{
             type: {
                 type: String,
@@ -320,5 +327,7 @@ LeadSchema.index({ city: 1, status: 1 });
 LeadSchema.index({ source: 1, createdAt: -1 });
 LeadSchema.index({ primarySkill: 1, status: 1 });
 LeadSchema.index({ creationMethod: 1, status: 1 });
+LeadSchema.index({ nextCallbackAt: 1, addedBy: 1, status: 1 });
+LeadSchema.index({ status: 1, nextCallbackAt: 1 });
 exports.default = mongoose_1.default.model('Lead', LeadSchema);
 //# sourceMappingURL=Lead.js.map

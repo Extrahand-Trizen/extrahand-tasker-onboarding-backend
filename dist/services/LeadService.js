@@ -11,6 +11,7 @@ const ApprovalService_1 = require("./ApprovalService");
 const permissions_1 = require("../lib/permissions");
 const logger_1 = __importDefault(require("../config/logger"));
 const uuid_1 = require("uuid");
+const leadStatusValidator_1 = require("../validators/leadStatusValidator");
 class LeadService {
     /**
      * Generate unique lead ID
@@ -38,20 +39,26 @@ class LeadService {
             if (options?.skipNameCityDuplicate) {
                 // Check phone duplicates if phone provided
                 if (normalizedPhone) {
-                    duplicateCheck = await DuplicateCheckService_1.DuplicateCheckService.checkPhoneCategoryDuplicate(normalizedPhone, primarySkillCategory, secondaryCategoryValue);
+                    duplicateCheck = primarySkillCategory
+                        ? await DuplicateCheckService_1.DuplicateCheckService.checkPhoneCategoryDuplicate(normalizedPhone, primarySkillCategory, secondaryCategoryValue)
+                        : await DuplicateCheckService_1.DuplicateCheckService.checkPhoneDuplicate(normalizedPhone);
                     if (duplicateCheck.isDuplicate && duplicateCheck.sameCategory) {
                         // Found duplicate, return it
                     }
                     else if (normalizedLandline) {
                         // Also check landline
-                        const landlineCheck = await DuplicateCheckService_1.DuplicateCheckService.checkPhoneCategoryDuplicate(normalizedLandline, primarySkillCategory, secondaryCategoryValue);
+                        const landlineCheck = primarySkillCategory
+                            ? await DuplicateCheckService_1.DuplicateCheckService.checkPhoneCategoryDuplicate(normalizedLandline, primarySkillCategory, secondaryCategoryValue)
+                            : await DuplicateCheckService_1.DuplicateCheckService.checkLandlineDuplicate(normalizedLandline);
                         if (landlineCheck.isDuplicate && landlineCheck.sameCategory) {
                             duplicateCheck = landlineCheck;
                         }
                     }
                 }
                 else if (normalizedLandline) {
-                    duplicateCheck = await DuplicateCheckService_1.DuplicateCheckService.checkPhoneCategoryDuplicate(normalizedLandline, primarySkillCategory, secondaryCategoryValue);
+                    duplicateCheck = primarySkillCategory
+                        ? await DuplicateCheckService_1.DuplicateCheckService.checkPhoneCategoryDuplicate(normalizedLandline, primarySkillCategory, secondaryCategoryValue)
+                        : await DuplicateCheckService_1.DuplicateCheckService.checkLandlineDuplicate(normalizedLandline);
                 }
                 else {
                     duplicateCheck = { isDuplicate: false };
@@ -59,27 +66,24 @@ class LeadService {
             }
             else {
                 // Use comprehensive duplicate check
-                duplicateCheck = await DuplicateCheckService_1.DuplicateCheckService.checkDuplicateWithCategory(normalizedPhone || normalizedLandline || '', primarySkillCategory, secondaryCategoryValue, data.name, data.city);
+                duplicateCheck = primarySkillCategory
+                    ? await DuplicateCheckService_1.DuplicateCheckService.checkDuplicateWithCategory(normalizedPhone || normalizedLandline || '', primarySkillCategory, secondaryCategoryValue, data.name, data.city || '')
+                    : await DuplicateCheckService_1.DuplicateCheckService.checkDuplicate(normalizedPhone || undefined, normalizedLandline || undefined, data.name, data.city || undefined);
             }
-            if (duplicateCheck.isDuplicate && duplicateCheck.sameCategory) {
-                throw new Error(`This person with this category already exists: ${duplicateCheck.existingLead?.leadId} (${duplicateCheck.matchType})`);
+            if (duplicateCheck.isDuplicate) {
+                if (!primarySkillCategory) {
+                    throw new Error(`This person already exists: ${duplicateCheck.existingLead?.leadId} (${duplicateCheck.matchType})`);
+                }
+                if (duplicateCheck.sameCategory) {
+                    throw new Error(`This person with this category already exists: ${duplicateCheck.existingLead?.leadId} (${duplicateCheck.matchType})`);
+                }
             }
-            // If sameCategory is false, allow it (different category for same person)
+            // For category-aware flows, same contact + different category is allowed.
             // Decide initial status (restricted set)
             const initialStatus = data.status && ['lead_added', 'contacted_not_interested', 'contacted_interested'].includes(data.status)
                 ? data.status
                 : 'lead_added';
-            // Validate categories (already extracted above)
-            if (!primarySkillCategory) {
-                throw new Error('Primary category is required');
-            }
-            // Secondary category required for all except water-tanker (generalized service)
-            if (!secondaryCategoryValue && primarySkillCategory !== 'water-tanker') {
-                throw new Error('Secondary category is required');
-            }
-            if (!data.experienceLevel) {
-                throw new Error('Experience level is required');
-            }
+            // Categories are optional.
             // Map primary skill category to human-readable name
             const primarySkillNameMap = {
                 'cleaning': 'Cleaning',
@@ -97,7 +101,9 @@ class LeadService {
                 'water-tanker': 'Water & Tanker Services',
                 'other': 'Other'
             };
-            const primarySkillName = primarySkillNameMap[primarySkillCategory] || primarySkillCategory;
+            const primarySkillName = primarySkillCategory
+                ? (primarySkillNameMap[primarySkillCategory] || primarySkillCategory)
+                : undefined;
             // Create lead with primary skill automatically added to skills array
             const leadId = this.generateLeadId();
             const lead = new Lead_1.default({
@@ -105,18 +111,18 @@ class LeadService {
                 name: data.name.trim(),
                 phone: normalizedPhone,
                 email: data.email?.trim().toLowerCase(),
-                city: data.city.trim(),
-                state: data.state?.trim(),
-                address: data.address?.trim(),
-                pincode: data.pincode?.trim(),
-                primarySkill: primarySkillCategory, // Legacy field
-                primaryCategory: primarySkillCategory, // New field
-                secondarySkill: secondaryCategoryValue || '', // Legacy field
-                secondaryCategory: secondaryCategoryValue || '', // New field
+                city: data.city?.trim() || undefined,
+                state: data.state?.trim() || undefined,
+                address: data.address?.trim() || undefined,
+                pincode: data.pincode?.trim() || undefined,
+                primarySkill: primarySkillCategory || undefined, // Legacy field
+                primaryCategory: primarySkillCategory || undefined, // New field
+                secondarySkill: secondaryCategoryValue || undefined, // Legacy field
+                secondaryCategory: secondaryCategoryValue || undefined, // New field
                 experienceLevel: data.experienceLevel,
                 workingDays: data.workingDays?.trim(),
                 preferredTimeSlot: data.preferredTimeSlot?.trim(),
-                source: data.source,
+                source: data.source || undefined,
                 sourceDetails: data.sourceDetails?.trim(),
                 agentCampaignId: data.agentCampaignId?.trim(),
                 addedBy: data.addedBy,
@@ -128,14 +134,16 @@ class LeadService {
                         changedByName: data.addedByName,
                         changedAt: new Date()
                     }],
-                skills: [{
-                        name: primarySkillName,
-                        category: primarySkillCategory,
-                        level: (data.experienceLevel || 'beginner'),
-                        toolsAvailable: false,
-                        assignedBy: data.addedBy,
-                        assignedAt: new Date()
-                    }],
+                skills: primarySkillCategory && primarySkillName
+                    ? [{
+                            name: primarySkillName,
+                            category: primarySkillCategory,
+                            level: data.experienceLevel,
+                            toolsAvailable: false,
+                            assignedBy: data.addedBy,
+                            assignedAt: new Date()
+                        }]
+                    : [],
                 documents: [],
                 verificationStatus: {},
                 communicationLog: [],
@@ -146,8 +154,10 @@ class LeadService {
             const savedLead = await lead.save();
             // Log activity for lead creation
             await this.logActivity(leadId, 'status_change', `Lead created with status: lead_added`, data.addedBy, data.addedByName);
-            // Log activity for primary skill assignment
-            await this.logActivity(leadId, 'skill_assigned', `Primary skill assigned: ${primarySkillName}`, data.addedBy, data.addedByName, { skillName: primarySkillName, category: primarySkillCategory });
+            // Log activity for primary skill assignment only when a skill is provided.
+            if (primarySkillCategory && primarySkillName) {
+                await this.logActivity(leadId, 'skill_assigned', `Primary skill assigned: ${primarySkillName}`, data.addedBy, data.addedByName, { skillName: primarySkillName, category: primarySkillCategory });
+            }
             logger_1.default.info('Lead created', {
                 leadId,
                 name: data.name,
@@ -371,47 +381,122 @@ class LeadService {
      */
     static async updateLead(leadId, data) {
         try {
-            const updateData = {};
-            if (data.name)
-                updateData.name = data.name.trim();
-            if (data.phone !== undefined) {
-                updateData.phone = data.phone?.trim() ? DuplicateCheckService_1.DuplicateCheckService.normalizePhone(data.phone.trim()) : undefined;
+            const setData = {};
+            const unsetData = {};
+            const has = (key) => Object.prototype.hasOwnProperty.call(data, key);
+            if (has('name') && typeof data.name === 'string' && data.name.trim()) {
+                setData.name = data.name.trim();
             }
-            if (data.landline !== undefined) {
-                updateData.landline = data.landline?.trim() ? DuplicateCheckService_1.DuplicateCheckService.normalizeLandline(data.landline.trim()) : undefined;
+            if (has('phone')) {
+                const rawPhone = typeof data.phone === 'string' ? data.phone.trim() : '';
+                if (rawPhone) {
+                    setData.phone = DuplicateCheckService_1.DuplicateCheckService.normalizePhone(rawPhone);
+                }
+                else {
+                    unsetData.phone = 1;
+                }
             }
-            // Ensure at least one contact number remains after update
-            // Get existing lead to check current phone/landline values
+            if (has('landline')) {
+                const rawLandline = typeof data.landline === 'string' ? data.landline.trim() : '';
+                if (rawLandline) {
+                    setData.landline = DuplicateCheckService_1.DuplicateCheckService.normalizeLandline(rawLandline);
+                }
+                else {
+                    unsetData.landline = 1;
+                }
+            }
+            // Ensure at least one contact number remains after update.
             const existingLead = await Lead_1.default.findOne({ leadId }).lean();
             if (!existingLead) {
                 throw new Error('Lead not found');
             }
-            // Determine final values after update
-            const finalPhone = updateData.phone !== undefined ? updateData.phone : existingLead.phone;
-            const finalLandline = updateData.landline !== undefined ? updateData.landline : existingLead.landline;
-            // Validate at least one contact number exists after update
+            const finalPhone = Object.prototype.hasOwnProperty.call(setData, 'phone')
+                ? setData.phone
+                : (unsetData.phone ? undefined : existingLead.phone);
+            const finalLandline = Object.prototype.hasOwnProperty.call(setData, 'landline')
+                ? setData.landline
+                : (unsetData.landline ? undefined : existingLead.landline);
             if (!finalPhone?.trim() && !finalLandline?.trim()) {
                 throw new Error('At least one contact number (phone or landline) must be present');
             }
-            if (data.email !== undefined)
-                updateData.email = data.email?.trim().toLowerCase();
-            if (data.city)
-                updateData.city = data.city.trim();
-            if (data.state !== undefined)
-                updateData.state = data.state?.trim();
-            if (data.address !== undefined)
-                updateData.address = data.address?.trim();
-            if (data.pincode !== undefined)
-                updateData.pincode = data.pincode?.trim();
-            if (data.primarySkill)
-                updateData.primarySkill = data.primarySkill.trim();
-            if (data.source)
-                updateData.source = data.source;
-            if (data.sourceDetails !== undefined)
-                updateData.sourceDetails = data.sourceDetails?.trim();
-            if (data.skills)
-                updateData.skills = data.skills;
-            const lead = await Lead_1.default.findOneAndUpdate({ leadId }, { $set: updateData }, { new: true }).lean();
+            if (has('email')) {
+                const email = typeof data.email === 'string' ? data.email.trim().toLowerCase() : '';
+                if (email)
+                    setData.email = email;
+                else
+                    unsetData.email = 1;
+            }
+            if (has('city')) {
+                const city = typeof data.city === 'string' ? data.city.trim() : '';
+                if (city)
+                    setData.city = city;
+                else
+                    unsetData.city = 1;
+            }
+            if (has('state')) {
+                const state = typeof data.state === 'string' ? data.state.trim() : '';
+                if (state)
+                    setData.state = state;
+                else
+                    unsetData.state = 1;
+            }
+            if (has('address')) {
+                const address = typeof data.address === 'string' ? data.address.trim() : '';
+                if (address)
+                    setData.address = address;
+                else
+                    unsetData.address = 1;
+            }
+            if (has('pincode')) {
+                const pincode = typeof data.pincode === 'string' ? data.pincode.trim() : '';
+                if (pincode)
+                    setData.pincode = pincode;
+                else
+                    unsetData.pincode = 1;
+            }
+            if (has('primarySkill')) {
+                const primarySkill = typeof data.primarySkill === 'string' ? data.primarySkill.trim() : '';
+                if (primarySkill) {
+                    setData.primarySkill = primarySkill;
+                    setData.primaryCategory = primarySkill;
+                }
+                else {
+                    unsetData.primarySkill = 1;
+                    unsetData.primaryCategory = 1;
+                }
+            }
+            if (has('secondarySkill')) {
+                const secondarySkill = typeof data.secondarySkill === 'string' ? data.secondarySkill.trim() : '';
+                if (secondarySkill) {
+                    setData.secondarySkill = secondarySkill;
+                    setData.secondaryCategory = secondarySkill;
+                }
+                else {
+                    unsetData.secondarySkill = 1;
+                    unsetData.secondaryCategory = 1;
+                }
+            }
+            if (has('source')) {
+                if (data.source)
+                    setData.source = data.source;
+                else
+                    unsetData.source = 1;
+            }
+            if (has('sourceDetails')) {
+                const sourceDetails = typeof data.sourceDetails === 'string' ? data.sourceDetails.trim() : '';
+                if (sourceDetails)
+                    setData.sourceDetails = sourceDetails;
+                else
+                    unsetData.sourceDetails = 1;
+            }
+            if (has('skills') && data.skills)
+                setData.skills = data.skills;
+            const updateQuery = {};
+            if (Object.keys(setData).length > 0)
+                updateQuery.$set = setData;
+            if (Object.keys(unsetData).length > 0)
+                updateQuery.$unset = unsetData;
+            const lead = await Lead_1.default.findOneAndUpdate({ leadId }, updateQuery, { new: true }).lean();
             return lead;
         }
         catch (error) {
@@ -449,20 +534,46 @@ class LeadService {
                     changedBy: data.changedBy
                 });
             }
+            const normalizedStatusUpdate = (0, leadStatusValidator_1.validateAndNormalizeLeadStatusUpdate)(data);
             // Update status
+            const isContactStatus = ['contacted_not_interested', 'contacted_interested'].includes(finalStatus);
+            const statusReasonCode = normalizedStatusUpdate.statusReasonCode;
+            const statusReasonText = normalizedStatusUpdate.statusReasonText;
+            const callbackAt = normalizedStatusUpdate.callbackAt;
+            const expectedOnboardingAt = normalizedStatusUpdate.expectedOnboardingAt;
             lead.status = finalStatus;
+            if (isContactStatus) {
+                lead.lastContactedAt = new Date();
+                lead.lastContactedBy = data.changedBy;
+            }
+            lead.statusReasonCode = statusReasonCode || undefined;
+            lead.statusReasonText = statusReasonText || undefined;
+            lead.nextCallbackAt = callbackAt || undefined;
+            lead.expectedOnboardingAt = expectedOnboardingAt || undefined;
             lead.statusHistory.push({
                 status: finalStatus,
                 changedBy: data.changedBy,
                 changedByName: data.changedByName,
                 changedAt: new Date(),
+                statusReasonCode: statusReasonCode || undefined,
+                statusReasonText: statusReasonText || undefined,
+                callbackAt: callbackAt || undefined,
+                expectedOnboardingAt: expectedOnboardingAt || undefined,
                 notes: newStatus === 'documents_submitted' && finalStatus === 'under_verification'
-                    ? (data.notes || '') + ' (Auto-transitioned to verification queue)'
-                    : data.notes
+                    ? (normalizedStatusUpdate.notes || '') + ' (Auto-transitioned to verification queue)'
+                    : normalizedStatusUpdate.notes
             });
             const updatedLead = await lead.save();
             // Log activity
-            await this.logActivity(leadId, 'status_change', `Status changed from ${currentStatus} to ${finalStatus}${finalStatus !== newStatus ? ` (requested: ${newStatus})` : ''}`, data.changedBy, data.changedByName, { oldStatus: currentStatus, newStatus: finalStatus, requestedStatus: newStatus });
+            await this.logActivity(leadId, 'status_change', `Status changed from ${currentStatus} to ${finalStatus}${finalStatus !== newStatus ? ` (requested: ${newStatus})` : ''}`, data.changedBy, data.changedByName, {
+                oldStatus: currentStatus,
+                newStatus: finalStatus,
+                requestedStatus: newStatus,
+                statusReasonCode: statusReasonCode || undefined,
+                statusReasonText: statusReasonText || undefined,
+                callbackAt: callbackAt || undefined,
+                expectedOnboardingAt: expectedOnboardingAt || undefined
+            });
             logger_1.default.info('Lead status updated', {
                 leadId,
                 oldStatus: currentStatus,

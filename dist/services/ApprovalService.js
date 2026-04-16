@@ -43,7 +43,7 @@ class ApprovalService {
             missingRequirements.push('Address proof verification pending');
         }
         // Check if skills are assigned
-        const hasSkills = lead.skills.length > 0 || lead.primarySkill.length > 0;
+        const hasSkills = lead.skills.length > 0 || (lead.primarySkill?.length || 0) > 0;
         if (!hasSkills) {
             missingRequirements.push('At least one skill');
         }
