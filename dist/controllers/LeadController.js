@@ -19,24 +19,26 @@ function getUserId(req) {
     return req.admin?.userId || req.admin?.uid;
 }
 /**
- * Helper function to check if user can access a lead (for qualifiers)
- * Qualifiers can only access leads they added
- * Lead Access Managers and Onboarders can access all leads
+ * Read access for lead data.
+ * Qualifier/Onboarder/Lead Access Manager can view all leads.
  */
-function canAccessLead(req, leadAddedBy) {
+function canViewLead(req) {
+    const role = req.admin?.role;
+    return role === 'lead_access_manager' || role === 'onboarder' || role === 'qualifier' || role === 'support' || role === 'trust';
+}
+/**
+ * Mutating access for lead records.
+ * Qualifier can mutate only own leads.
+ * Onboarder/Lead Access Manager can mutate all leads.
+ */
+function canManageLead(req, leadAddedBy) {
     const role = req.admin?.role;
     const userId = getUserId(req);
-    // Lead Access Managers and Onboarders can access all leads
-    if (role === 'lead_access_manager' || role === 'onboarder') {
+    if (role === 'lead_access_manager' || role === 'onboarder')
         return true;
-    }
-    // Qualifiers can only access their own leads
-    if (role === 'qualifier') {
+    if (role === 'qualifier')
         return userId === leadAddedBy;
-    }
-    // Support and Trust roles - check permissions (they might have read-only access to all)
-    // For now, allow them to see all (can be restricted later if needed)
-    return true;
+    return false;
 }
 class LeadController {
     static async getStatusReasonCodes(req, res) {
@@ -98,8 +100,10 @@ class LeadController {
             // Validation - support both new and legacy field names
             const primaryCategoryValue = primaryCategory || primarySkill;
             const secondaryCategoryValue = secondaryCategory || secondarySkill;
+            const phoneValue = typeof phone === 'string' ? phone.trim() : (phone ? String(phone).trim() : '');
+            const landlineValue = typeof landline === 'string' ? landline.trim() : (landline ? String(landline).trim() : '');
             // Validate at least one contact number is provided
-            if (!phone?.trim() && !landline?.trim()) {
+            if (!phoneValue && !landlineValue) {
                 res.status(400).json({
                     success: false,
                     error: 'Missing required fields',
@@ -117,8 +121,8 @@ class LeadController {
             }
             const leadData = {
                 name: name.trim(),
-                phone: phone?.trim() || undefined,
-                landline: landline?.trim() || undefined,
+                phone: phoneValue || undefined,
+                landline: landlineValue || undefined,
                 email,
                 city,
                 state,
@@ -192,11 +196,11 @@ class LeadController {
                 return;
             }
             // ✅ ISOLATION: Check if qualifier can access this lead
-            if (!canAccessLead(req, lead.addedBy)) {
+            if (!canViewLead(req)) {
                 res.status(403).json({
                     success: false,
                     error: 'Forbidden',
-                    message: 'You can only access leads that you have added.'
+                    message: 'You are not allowed to access this lead.'
                 });
                 return;
             }
@@ -239,11 +243,11 @@ class LeadController {
                 });
                 return;
             }
-            if (!canAccessLead(req, lead.addedBy)) {
+            if (!canViewLead(req)) {
                 res.status(403).json({
                     success: false,
                     error: 'Forbidden',
-                    message: 'You can only access leads that you have added.'
+                    message: 'You are not allowed to access this lead.'
                 });
                 return;
             }
@@ -313,11 +317,11 @@ class LeadController {
                 });
                 return;
             }
-            if (!canAccessLead(req, lead.addedBy)) {
+            if (!canViewLead(req)) {
                 res.status(403).json({
                     success: false,
                     error: 'Forbidden',
-                    message: 'You can only access leads that you have added.'
+                    message: 'You are not allowed to access this lead.'
                 });
                 return;
             }
@@ -441,16 +445,6 @@ class LeadController {
                 limit: limit ? parseInt(limit) : undefined,
                 registrationStatus: registrationStatus
             };
-            // ✅ ISOLATION: Qualifiers can only see leads they added
-            // Lead Access Managers and Onboarders can see all leads
-            if (role === 'qualifier' && userId) {
-                filters.addedBy = userId; // Override any client-supplied addedBy
-                logger_1.default.debug('Qualifier isolation applied', {
-                    userId,
-                    role,
-                    filteredBy: userId
-                });
-            }
             const result = await LeadService_1.LeadService.searchLeads(filters);
             res.json({
                 success: true,
@@ -851,7 +845,7 @@ class LeadController {
                 });
                 return;
             }
-            if (!canAccessLead(req, existingLead.addedBy)) {
+            if (!canManageLead(req, existingLead.addedBy)) {
                 res.status(403).json({
                     success: false,
                     error: 'Forbidden',
@@ -1050,7 +1044,7 @@ class LeadController {
                 return;
             }
             // Check access permissions
-            if (!canAccessLead(req, existingLead.addedBy)) {
+            if (!canManageLead(req, existingLead.addedBy)) {
                 res.status(403).json({
                     success: false,
                     error: 'Forbidden',
