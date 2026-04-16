@@ -175,6 +175,14 @@ class BulkUploadService {
             const phoneValue = directPhone && directPhone.toString().trim() !== ""
                 ? directPhone.toString().trim()
                 : detectPhoneFromAnyKey();
+            const landlineValue = record.landline ||
+                record.Landline ||
+                record["Landline Number"] ||
+                record["Landline Number (Optional)"] ||
+                record["Landline"] ||
+                record["Tel"] ||
+                record["Telephone"] ||
+                undefined;
             // Debug logging for the first few rows to help diagnose header/phone issues
             if (index < 5) {
                 try {
@@ -195,6 +203,7 @@ class BulkUploadService {
                 name: (record.name || record.Name || record["Full Name"] || "").toString().trim() ||
                     "Unknown Tasker",
                 phone: phoneValue || undefined,
+                landline: landlineValue ? String(landlineValue).trim() : undefined,
                 email: record.email || record.Email || undefined,
                 address: record.address ||
                     record.Address ||
@@ -284,11 +293,16 @@ class BulkUploadService {
                 if (!user.name || user.name.trim() === "") {
                     errors.push(`Row ${row}: Full Name is required for create operation`);
                 }
-                if (!user.phone) {
-                    errors.push(`Row ${row}: Mobile Number is required for create operation (debug user=${JSON.stringify(user)})`);
+                const hasPhone = !!user.phone && user.phone.trim().length > 0;
+                const hasLandline = !!user.landline && user.landline.trim().length > 0;
+                if (!hasPhone && !hasLandline) {
+                    errors.push(`Row ${row}: At least one contact number (Mobile or Landline) is required for create operation (debug user=${JSON.stringify(user)})`);
                 }
-                else if (!this.isValidPhone(user.phone)) {
-                    errors.push(`Row ${row}: Invalid phone format: ${user.phone}. Expected a 10-digit Indian number (e.g., 9876543210)`);
+                else if (hasPhone && !this.isValidPhone(user.phone)) {
+                    errors.push(`Row ${row}: Invalid phone format: ${user.phone}. Expected a 10-digit number`);
+                }
+                if (hasLandline && !this.isValidLandline(user.landline)) {
+                    errors.push(`Row ${row}: Invalid landline format: ${user.landline}. Expected 6-15 digits`);
                 }
                 // if (!user.city || user.city.trim() === "") {
                 //   errors.push(`Row ${row}: City is required for create operation`);
@@ -549,7 +563,7 @@ class BulkUploadService {
         };
         logger_1.default.info(`Processing ${users.length} lead creations from bulk upload (NO accounts will be created)`);
         // STEP 1: Bulk duplicate check - Check ALL phones at once (single MongoDB query)
-        const allPhoneNumbers = users.map((user) => user.phone).filter(Boolean);
+        const allPhoneNumbers = users.map((user) => user.phone).filter((v) => Boolean(v));
         const normalizedPhoneNumbers = allPhoneNumbers.map((phone) => DuplicateCheckService_1.DuplicateCheckService.normalizePhone(phone));
         logger_1.default.info(`Performing bulk duplicate check for ${normalizedPhoneNumbers.length} phone numbers`);
         const existingLeadsByPhoneMap = await DuplicateCheckService_1.DuplicateCheckService.checkPhonesBulk(allPhoneNumbers);
@@ -559,9 +573,11 @@ class BulkUploadService {
         const seenPhonesInFile = new Set();
         users.forEach((user, index) => {
             const csvRowNumber = index + 2; // +2 for header row and 0-index
-            const normalizedPhone = DuplicateCheckService_1.DuplicateCheckService.normalizePhone(user.phone);
+            const normalizedPhone = user.phone
+                ? DuplicateCheckService_1.DuplicateCheckService.normalizePhone(user.phone)
+                : "";
             // Check for duplicate within this file first
-            if (seenPhonesInFile.has(normalizedPhone)) {
+            if (normalizedPhone && seenPhonesInFile.has(normalizedPhone)) {
                 duplicateErrors.push({
                     row: csvRowNumber,
                     phone: user.phone,
@@ -573,9 +589,11 @@ class BulkUploadService {
                 });
                 return;
             }
-            seenPhonesInFile.add(normalizedPhone);
+            if (normalizedPhone) {
+                seenPhonesInFile.add(normalizedPhone);
+            }
             // Check if lead already exists in database
-            if (existingLeadsByPhoneMap.has(normalizedPhone)) {
+            if (normalizedPhone && existingLeadsByPhoneMap.has(normalizedPhone)) {
                 const existingLead = existingLeadsByPhoneMap.get(normalizedPhone);
                 duplicateErrors.push({
                     row: csvRowNumber,
@@ -612,6 +630,7 @@ class BulkUploadService {
                 const createdLead = await LeadService_1.LeadService.createLead({
                     name: userToProcess.user.name,
                     phone: userToProcess.user.phone,
+                    landline: userToProcess.user.landline,
                     email: userToProcess.user.email,
                     city: userToProcess.user.city || "Unknown",
                     state: userToProcess.user.state,
@@ -832,9 +851,13 @@ class BulkUploadService {
         return result;
     }
     static isValidPhone(phone) {
-        // E.164 format: +[country code][number]
-        const cleaned = phone.replace(/\s+/g, "").replace(/-/g, "");
-        return /^\+?[1-9]\d{1,14}$/.test(cleaned);
+        const digitsOnly = phone.replace(/\D/g, "");
+        const last10Digits = digitsOnly.slice(-10);
+        return /^\d{10}$/.test(last10Digits);
+    }
+    static isValidLandline(landline) {
+        const digitsOnly = landline.replace(/\D/g, "");
+        return digitsOnly.length >= 6 && digitsOnly.length <= 15;
     }
 }
 exports.BulkUploadService = BulkUploadService;

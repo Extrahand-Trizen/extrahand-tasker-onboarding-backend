@@ -3,6 +3,7 @@ export interface ParsedUser {
     uid?: string;
     name?: string;
     phone?: string;
+    landline?: string;
     email?: string;
     address?: string;
     city?: string;
@@ -101,5 +102,6 @@ export declare class BulkUploadService {
      */
     private static processDeletes;
     private static isValidPhone;
+    private static isValidLandline;
 }
 //# sourceMappingURL=BulkUploadService.d.ts.map

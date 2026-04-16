@@ -637,11 +637,11 @@ export class BulkLeadImportService {
       const phoneDigits = phone.replace(/\D/g, ""); // Remove all non-digits
       const last10Digits = phoneDigits.slice(-10); // Get last 10 digits
 
-      if (!/^[6-9]\d{9}$/.test(last10Digits)) {
+      if (!/^\d{10}$/.test(last10Digits)) {
         return {
           valid: false,
           error:
-            "Invalid phone number (10 digits, starting with 6-9). Can be +91-XXXXXXXXXX or just XXXXXXXXXX",
+            "Invalid phone number (must resolve to exactly 10 digits). Can be +91-XXXXXXXXXX or just XXXXXXXXXX",
         };
       }
     }

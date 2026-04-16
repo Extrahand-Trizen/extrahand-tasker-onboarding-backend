@@ -296,6 +296,7 @@ export class LeadService {
         leadId,
         name: data.name.trim(),
         phone: normalizedPhone,
+        landline: normalizedLandline || undefined,
         email: data.email?.trim().toLowerCase(),
         city: data.city?.trim() || undefined,
         state: data.state?.trim() || undefined,

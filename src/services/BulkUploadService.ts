@@ -14,6 +14,7 @@ export interface ParsedUser {
   uid?: string;
   name?: string;
   phone?: string;
+  landline?: string;
   email?: string;
   address?: string; // Local Area
   city?: string;
@@ -218,6 +219,16 @@ export class BulkUploadService {
           ? directPhone.toString().trim()
           : detectPhoneFromAnyKey();
 
+      const landlineValue =
+        record.landline ||
+        record.Landline ||
+        record["Landline Number"] ||
+        record["Landline Number (Optional)"] ||
+        record["Landline"] ||
+        record["Tel"] ||
+        record["Telephone"] ||
+        undefined;
+
       // Debug logging for the first few rows to help diagnose header/phone issues
       if (index < 5) {
         try {
@@ -239,6 +250,7 @@ export class BulkUploadService {
           (record.name || record.Name || record["Full Name"] || "").toString().trim() ||
           "Unknown Tasker",
         phone: phoneValue || undefined,
+        landline: landlineValue ? String(landlineValue).trim() : undefined,
         email: record.email || record.Email || undefined,
         address:
           record.address ||
@@ -352,15 +364,24 @@ export class BulkUploadService {
           errors.push(`Row ${row}: Full Name is required for create operation`);
         }
 
-        if (!user.phone) {
+        const hasPhone = !!user.phone && user.phone.trim().length > 0;
+        const hasLandline = !!user.landline && user.landline.trim().length > 0;
+
+        if (!hasPhone && !hasLandline) {
           errors.push(
-            `Row ${row}: Mobile Number is required for create operation (debug user=${JSON.stringify(
+            `Row ${row}: At least one contact number (Mobile or Landline) is required for create operation (debug user=${JSON.stringify(
               user
             )})`
           );
-        } else if (!this.isValidPhone(user.phone)) {
+        } else if (hasPhone && !this.isValidPhone(user.phone!)) {
           errors.push(
-            `Row ${row}: Invalid phone format: ${user.phone}. Expected a 10-digit Indian number (e.g., 9876543210)`
+            `Row ${row}: Invalid phone format: ${user.phone}. Expected a 10-digit number`
+          );
+        }
+
+        if (hasLandline && !this.isValidLandline(user.landline!)) {
+          errors.push(
+            `Row ${row}: Invalid landline format: ${user.landline}. Expected 6-15 digits`
           );
         }
 
@@ -771,7 +792,7 @@ export class BulkUploadService {
     );
 
     // STEP 1: Bulk duplicate check - Check ALL phones at once (single MongoDB query)
-    const allPhoneNumbers = users.map((user) => user.phone!).filter(Boolean);
+    const allPhoneNumbers = users.map((user) => user.phone).filter((v): v is string => Boolean(v));
     const normalizedPhoneNumbers = allPhoneNumbers.map((phone) =>
       DuplicateCheckService.normalizePhone(phone)
     );
@@ -802,10 +823,12 @@ export class BulkUploadService {
 
     users.forEach((user, index) => {
       const csvRowNumber = index + 2; // +2 for header row and 0-index
-      const normalizedPhone = DuplicateCheckService.normalizePhone(user.phone!);
+      const normalizedPhone = user.phone
+        ? DuplicateCheckService.normalizePhone(user.phone)
+        : "";
 
       // Check for duplicate within this file first
-      if (seenPhonesInFile.has(normalizedPhone)) {
+      if (normalizedPhone && seenPhonesInFile.has(normalizedPhone)) {
         duplicateErrors.push({
           row: csvRowNumber,
           phone: user.phone,
@@ -817,10 +840,12 @@ export class BulkUploadService {
         });
         return;
       }
-      seenPhonesInFile.add(normalizedPhone);
+      if (normalizedPhone) {
+        seenPhonesInFile.add(normalizedPhone);
+      }
 
       // Check if lead already exists in database
-      if (existingLeadsByPhoneMap.has(normalizedPhone)) {
+      if (normalizedPhone && existingLeadsByPhoneMap.has(normalizedPhone)) {
         const existingLead = existingLeadsByPhoneMap.get(normalizedPhone);
         duplicateErrors.push({
           row: csvRowNumber,
@@ -867,7 +892,8 @@ export class BulkUploadService {
           const createdLead = await LeadService.createLead(
             {
               name: userToProcess.user.name!,
-              phone: userToProcess.user.phone!,
+              phone: userToProcess.user.phone,
+              landline: userToProcess.user.landline,
               email: userToProcess.user.email,
               city: userToProcess.user.city || "Unknown",
               state: userToProcess.user.state,
@@ -1147,8 +1173,13 @@ export class BulkUploadService {
   }
 
   private static isValidPhone(phone: string): boolean {
-    // E.164 format: +[country code][number]
-    const cleaned = phone.replace(/\s+/g, "").replace(/-/g, "");
-    return /^\+?[1-9]\d{1,14}$/.test(cleaned);
+    const digitsOnly = phone.replace(/\D/g, "");
+    const last10Digits = digitsOnly.slice(-10);
+    return /^\d{10}$/.test(last10Digits);
+  }
+
+  private static isValidLandline(landline: string): boolean {
+    const digitsOnly = landline.replace(/\D/g, "");
+    return digitsOnly.length >= 6 && digitsOnly.length <= 15;
   }
 }
