@@ -70,6 +70,11 @@ router.get(
   requirePermission('canViewLeads'),
   LeadController.exportStatusReport
 );
+router.get(
+  '/dashboard-metrics',
+  requirePermission('canViewLeads'),
+  LeadController.getDashboardMetrics
+);
 
 // Check for duplicates
 router.post(

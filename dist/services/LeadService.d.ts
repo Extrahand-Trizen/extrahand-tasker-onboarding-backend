@@ -65,6 +65,7 @@ export interface SearchFilters {
     primarySkill?: string;
     source?: LeadSource;
     addedBy?: string;
+    addedByAny?: string[];
     search?: string;
     startDate?: Date;
     endDate?: Date;
@@ -77,6 +78,7 @@ export interface CallbackQueueFilters {
     city?: string;
     primarySkill?: string;
     addedBy?: string;
+    addedByAny?: string[];
     startDate?: Date;
     endDate?: Date;
     page?: number;
@@ -93,6 +95,7 @@ export interface FollowUpQueueFilters {
     city?: string;
     primarySkill?: string;
     addedBy?: string;
+    addedByAny?: string[];
     startDate?: Date;
     endDate?: Date;
     dueType?: FollowUpDueType;
@@ -173,7 +176,7 @@ export declare class LeadService {
         limit: number;
         totalPages: number;
     }>;
-    static getCallbackQueueStats(filters: Pick<CallbackQueueFilters, 'addedBy'>): Promise<CallbackQueueStats>;
+    static getCallbackQueueStats(filters: Pick<CallbackQueueFilters, 'addedBy' | 'addedByAny'>): Promise<CallbackQueueStats>;
     static getFollowUpQueue(filters: FollowUpQueueFilters): Promise<{
         leads: FollowUpQueueItem[];
         total: number;
@@ -181,7 +184,7 @@ export declare class LeadService {
         limit: number;
         totalPages: number;
     }>;
-    static getFollowUpQueueStats(filters: Pick<FollowUpQueueFilters, 'addedBy'>): Promise<FollowUpQueueStats>;
+    static getFollowUpQueueStats(filters: Pick<FollowUpQueueFilters, 'addedBy' | 'addedByAny'>): Promise<FollowUpQueueStats>;
     static getStatusAnalytics(filters: StatusAnalyticsFilters): Promise<{
         touchedLeads: number;
         interested: number;

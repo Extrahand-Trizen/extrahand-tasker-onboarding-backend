@@ -25,6 +25,7 @@ router.get('/creators', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadC
 router.get('/status-reason-codes', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getStatusReasonCodes);
 router.get('/status-analytics', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getStatusAnalytics);
 router.get('/status-reports/export', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.exportStatusReport);
+router.get('/dashboard-metrics', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getDashboardMetrics);
 // Check for duplicates
 router.post('/duplicate-check', (0, roleAuth_1.requirePermission)('canCreateLead'), LeadController_1.LeadController.checkDuplicate);
 // Activation queue (must be before /:leadId to avoid route conflict)

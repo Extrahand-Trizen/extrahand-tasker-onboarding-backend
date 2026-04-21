@@ -11,12 +11,18 @@ const CertificateReviewService_1 = require("../services/CertificateReviewService
 const Lead_1 = __importDefault(require("../models/Lead"));
 const logger_1 = __importDefault(require("../config/logger"));
 const leadContactTracking_1 = require("../constants/leadContactTracking");
+const axios_1 = __importDefault(require("axios"));
+const env_1 = require("../config/env");
 /**
  * Helper function to get consistent userId from req.admin
  * Handles both JWT (userId) and Firebase (uid) authentication
  */
 function getUserId(req) {
     return req.admin?.userId || req.admin?.uid;
+}
+function getScopedAddedByIds(req) {
+    const ids = [req.admin?.userId, req.admin?.uid].filter((id) => typeof id === 'string' && id.trim().length > 0);
+    return Array.from(new Set(ids));
 }
 /**
  * Read access for lead data.
@@ -41,6 +47,46 @@ function canManageLead(req, leadAddedBy) {
     return false;
 }
 class LeadController {
+    static async getDashboardMetrics(req, res) {
+        try {
+            if (!req.admin) {
+                res.status(401).json({
+                    success: false,
+                    error: 'Authentication required'
+                });
+                return;
+            }
+            if (!env_1.env.USER_SERVICE_URL) {
+                throw new Error('USER_SERVICE_URL is not configured');
+            }
+            const actorUid = getUserId(req) || 'system';
+            const response = await axios_1.default.get(`${env_1.env.USER_SERVICE_URL}/api/v1/profiles/internal/stats/taskers/aadhaar-verified`, {
+                headers: {
+                    'X-Service-Auth': env_1.env.SERVICE_AUTH_TOKEN,
+                    'X-Service-Name': 'admin-service',
+                    'X-User-Id': actorUid,
+                    'Content-Type': 'application/json',
+                },
+                timeout: 10000,
+            });
+            res.json({
+                success: true,
+                data: {
+                    taskersAadhaarVerified: response.data?.data?.taskersAadhaarVerified ?? 0,
+                },
+            });
+        }
+        catch (error) {
+            logger_1.default.error('Error in getDashboardMetrics controller', {
+                error: error.message
+            });
+            res.status(500).json({
+                success: false,
+                error: 'Failed to fetch dashboard metrics',
+                message: error.message
+            });
+        }
+    }
     static async getStatusReasonCodes(req, res) {
         try {
             res.json({
@@ -431,7 +477,7 @@ class LeadController {
             }
             const { status, city, primarySkill, source, addedBy, search, startDate, endDate, page, limit, registrationStatus } = req.query;
             const role = req.admin.role;
-            const userId = getUserId(req);
+            const scopedIds = getScopedAddedByIds(req);
             const filters = {
                 status: status,
                 city: city,
@@ -445,6 +491,9 @@ class LeadController {
                 limit: limit ? parseInt(limit) : undefined,
                 registrationStatus: registrationStatus
             };
+            if (role === 'qualifier' && scopedIds.length > 0) {
+                filters.addedByAny = scopedIds;
+            }
             const result = await LeadService_1.LeadService.searchLeads(filters);
             res.json({
                 success: true,
@@ -485,7 +534,7 @@ class LeadController {
             }
             const { city, primarySkill, startDate, endDate, page, limit } = req.query;
             const role = req.admin.role;
-            const userId = getUserId(req);
+            const scopedIds = getScopedAddedByIds(req);
             const filters = {
                 city: city,
                 primarySkill: primarySkill,
@@ -494,8 +543,8 @@ class LeadController {
                 page: page ? parseInt(page) : undefined,
                 limit: limit ? parseInt(limit) : undefined,
             };
-            if (role === 'qualifier' && userId) {
-                filters.addedBy = userId;
+            if (role === 'qualifier' && scopedIds.length > 0) {
+                filters.addedByAny = scopedIds;
             }
             const result = await LeadService_1.LeadService.getCallbackQueue(filters);
             res.json({
@@ -534,10 +583,10 @@ class LeadController {
                 return;
             }
             const role = req.admin.role;
-            const userId = getUserId(req);
+            const scopedIds = getScopedAddedByIds(req);
             const filters = {};
-            if (role === 'qualifier' && userId) {
-                filters.addedBy = userId;
+            if (role === 'qualifier' && scopedIds.length > 0) {
+                filters.addedByAny = scopedIds;
             }
             const stats = await LeadService_1.LeadService.getCallbackQueueStats(filters);
             res.json({
@@ -571,7 +620,7 @@ class LeadController {
             }
             const { city, primarySkill, startDate, endDate, dueType, bucket, page, limit, } = req.query;
             const role = req.admin.role;
-            const userId = getUserId(req);
+            const scopedIds = getScopedAddedByIds(req);
             const filters = {
                 city: city,
                 primarySkill: primarySkill,
@@ -582,8 +631,8 @@ class LeadController {
                 page: page ? parseInt(page) : undefined,
                 limit: limit ? parseInt(limit) : undefined,
             };
-            if (role === 'qualifier' && userId) {
-                filters.addedBy = userId;
+            if (role === 'qualifier' && scopedIds.length > 0) {
+                filters.addedByAny = scopedIds;
             }
             const result = await LeadService_1.LeadService.getFollowUpQueue(filters);
             res.json({
@@ -622,10 +671,10 @@ class LeadController {
                 return;
             }
             const role = req.admin.role;
-            const userId = getUserId(req);
+            const scopedIds = getScopedAddedByIds(req);
             const filters = {};
-            if (role === 'qualifier' && userId) {
-                filters.addedBy = userId;
+            if (role === 'qualifier' && scopedIds.length > 0) {
+                filters.addedByAny = scopedIds;
             }
             const stats = await LeadService_1.LeadService.getFollowUpQueueStats(filters);
             res.json({

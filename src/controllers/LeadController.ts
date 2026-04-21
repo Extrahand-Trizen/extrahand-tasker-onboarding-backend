@@ -8,6 +8,8 @@ import Lead from '../models/Lead';
 import { UserRole } from '../lib/permissions';
 import logger from '../config/logger';
 import { LEAD_STATUS_REASON_CODES } from '../constants/leadContactTracking';
+import axios from 'axios';
+import { env } from '../config/env';
 
 /**
  * Helper function to get consistent userId from req.admin
@@ -15,6 +17,13 @@ import { LEAD_STATUS_REASON_CODES } from '../constants/leadContactTracking';
  */
 function getUserId(req: AdminRequest): string | undefined {
   return req.admin?.userId || req.admin?.uid;
+}
+
+function getScopedAddedByIds(req: AdminRequest): string[] {
+  const ids = [req.admin?.userId, req.admin?.uid].filter(
+    (id): id is string => typeof id === 'string' && id.trim().length > 0
+  );
+  return Array.from(new Set(ids));
 }
 
 /**
@@ -41,6 +50,52 @@ function canManageLead(req: AdminRequest, leadAddedBy: string): boolean {
 }
 
 export class LeadController {
+  static async getDashboardMetrics(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      if (!req.admin) {
+        res.status(401).json({
+          success: false,
+          error: 'Authentication required'
+        });
+        return;
+      }
+
+      if (!env.USER_SERVICE_URL) {
+        throw new Error('USER_SERVICE_URL is not configured');
+      }
+
+      const actorUid = getUserId(req) || 'system';
+      const response = await axios.get(
+        `${env.USER_SERVICE_URL}/api/v1/profiles/internal/stats/taskers/aadhaar-verified`,
+        {
+          headers: {
+            'X-Service-Auth': env.SERVICE_AUTH_TOKEN,
+            'X-Service-Name': 'admin-service',
+            'X-User-Id': actorUid,
+            'Content-Type': 'application/json',
+          },
+          timeout: 10000,
+        }
+      );
+
+      res.json({
+        success: true,
+        data: {
+          taskersAadhaarVerified: response.data?.data?.taskersAadhaarVerified ?? 0,
+        },
+      });
+    } catch (error: any) {
+      logger.error('Error in getDashboardMetrics controller', {
+        error: error.message
+      });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch dashboard metrics',
+        message: error.message
+      });
+    }
+  }
+
   static async getStatusReasonCodes(req: AdminRequest, res: Response): Promise<void> {
     try {
       res.json({
@@ -516,7 +571,7 @@ export class LeadController {
       } = req.query;
 
       const role = req.admin.role as UserRole;
-      const userId = getUserId(req);
+      const scopedIds = getScopedAddedByIds(req);
 
       const filters: SearchFilters = {
         status: status as any,
@@ -531,6 +586,10 @@ export class LeadController {
         limit: limit ? parseInt(limit as string) : undefined,
         registrationStatus: registrationStatus as SearchFilters['registrationStatus']
       };
+
+      if (role === 'qualifier' && scopedIds.length > 0) {
+        filters.addedByAny = scopedIds;
+      }
 
       const result = await LeadService.searchLeads(filters);
 
@@ -574,7 +633,7 @@ export class LeadController {
 
       const { city, primarySkill, startDate, endDate, page, limit } = req.query;
       const role = req.admin.role as UserRole;
-      const userId = getUserId(req);
+      const scopedIds = getScopedAddedByIds(req);
 
       const filters: CallbackQueueFilters = {
         city: city as string,
@@ -585,8 +644,8 @@ export class LeadController {
         limit: limit ? parseInt(limit as string) : undefined,
       };
 
-      if (role === 'qualifier' && userId) {
-        filters.addedBy = userId;
+      if (role === 'qualifier' && scopedIds.length > 0) {
+        filters.addedByAny = scopedIds;
       }
 
       const result = await LeadService.getCallbackQueue(filters);
@@ -628,11 +687,11 @@ export class LeadController {
       }
 
       const role = req.admin.role as UserRole;
-      const userId = getUserId(req);
+      const scopedIds = getScopedAddedByIds(req);
 
-      const filters: Pick<CallbackQueueFilters, 'addedBy'> = {};
-      if (role === 'qualifier' && userId) {
-        filters.addedBy = userId;
+      const filters: Pick<CallbackQueueFilters, 'addedBy' | 'addedByAny'> = {};
+      if (role === 'qualifier' && scopedIds.length > 0) {
+        filters.addedByAny = scopedIds;
       }
 
       const stats = await LeadService.getCallbackQueueStats(filters);
@@ -678,7 +737,7 @@ export class LeadController {
         limit,
       } = req.query;
       const role = req.admin.role as UserRole;
-      const userId = getUserId(req);
+      const scopedIds = getScopedAddedByIds(req);
 
       const filters: FollowUpQueueFilters = {
         city: city as string,
@@ -691,8 +750,8 @@ export class LeadController {
         limit: limit ? parseInt(limit as string) : undefined,
       };
 
-      if (role === 'qualifier' && userId) {
-        filters.addedBy = userId;
+      if (role === 'qualifier' && scopedIds.length > 0) {
+        filters.addedByAny = scopedIds;
       }
 
       const result = await LeadService.getFollowUpQueue(filters);
@@ -734,11 +793,11 @@ export class LeadController {
       }
 
       const role = req.admin.role as UserRole;
-      const userId = getUserId(req);
+      const scopedIds = getScopedAddedByIds(req);
 
-      const filters: Pick<FollowUpQueueFilters, 'addedBy'> = {};
-      if (role === 'qualifier' && userId) {
-        filters.addedBy = userId;
+      const filters: Pick<FollowUpQueueFilters, 'addedBy' | 'addedByAny'> = {};
+      if (role === 'qualifier' && scopedIds.length > 0) {
+        filters.addedByAny = scopedIds;
       }
 
       const stats = await LeadService.getFollowUpQueueStats(filters);

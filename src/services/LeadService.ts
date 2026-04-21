@@ -78,6 +78,7 @@ export interface SearchFilters {
   primarySkill?: string;
   source?: LeadSource;
   addedBy?: string;
+  addedByAny?: string[];
   search?: string; // Name or phone search
   startDate?: Date;
   endDate?: Date;
@@ -91,6 +92,7 @@ export interface CallbackQueueFilters {
   city?: string;
   primarySkill?: string;
   addedBy?: string;
+  addedByAny?: string[];
   startDate?: Date;
   endDate?: Date;
   page?: number;
@@ -110,6 +112,7 @@ export interface FollowUpQueueFilters {
   city?: string;
   primarySkill?: string;
   addedBy?: string;
+  addedByAny?: string[];
   startDate?: Date;
   endDate?: Date;
   dueType?: FollowUpDueType;
@@ -515,7 +518,9 @@ export class LeadService {
         query.source = filters.source;
       }
 
-      if (filters.addedBy) {
+      if (filters.addedByAny && filters.addedByAny.length > 0) {
+        query.addedBy = { $in: filters.addedByAny };
+      } else if (filters.addedBy) {
         query.addedBy = filters.addedBy;
       }
 
@@ -630,7 +635,9 @@ export class LeadService {
         ];
       }
 
-      if (filters.addedBy) {
+      if (filters.addedByAny && filters.addedByAny.length > 0) {
+        query.addedBy = { $in: filters.addedByAny };
+      } else if (filters.addedBy) {
         query.addedBy = filters.addedBy;
       }
 
@@ -667,7 +674,9 @@ export class LeadService {
     }
   }
 
-  static async getCallbackQueueStats(filters: Pick<CallbackQueueFilters, 'addedBy'>): Promise<CallbackQueueStats> {
+  static async getCallbackQueueStats(
+    filters: Pick<CallbackQueueFilters, 'addedBy' | 'addedByAny'>
+  ): Promise<CallbackQueueStats> {
     try {
       const now = new Date();
       const startOfToday = new Date(now);
@@ -679,7 +688,9 @@ export class LeadService {
         nextCallbackAt: { $exists: true, $ne: null },
       };
 
-      if (filters.addedBy) {
+      if (filters.addedByAny && filters.addedByAny.length > 0) {
+        baseQuery.addedBy = { $in: filters.addedByAny };
+      } else if (filters.addedBy) {
         baseQuery.addedBy = filters.addedBy;
       }
 
@@ -736,7 +747,9 @@ export class LeadService {
           { primaryCategory: { $regex: new RegExp(filters.primarySkill, 'i') } },
         ];
       }
-      if (filters.addedBy) {
+      if (filters.addedByAny && filters.addedByAny.length > 0) {
+        query.addedBy = { $in: filters.addedByAny };
+      } else if (filters.addedBy) {
         query.addedBy = filters.addedBy;
       }
 
@@ -809,7 +822,9 @@ export class LeadService {
     }
   }
 
-  static async getFollowUpQueueStats(filters: Pick<FollowUpQueueFilters, 'addedBy'>): Promise<FollowUpQueueStats> {
+  static async getFollowUpQueueStats(
+    filters: Pick<FollowUpQueueFilters, 'addedBy' | 'addedByAny'>
+  ): Promise<FollowUpQueueStats> {
     try {
       const now = new Date();
       const startOfToday = new Date(now);
@@ -818,7 +833,11 @@ export class LeadService {
       endOfToday.setHours(23, 59, 59, 999);
 
       const scope: any = {};
-      if (filters.addedBy) scope.addedBy = filters.addedBy;
+      if (filters.addedByAny && filters.addedByAny.length > 0) {
+        scope.addedBy = { $in: filters.addedByAny };
+      } else if (filters.addedBy) {
+        scope.addedBy = filters.addedBy;
+      }
 
       const [
         callbackDueToday,

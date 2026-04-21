@@ -310,7 +310,10 @@ class LeadService {
             if (filters.source) {
                 query.source = filters.source;
             }
-            if (filters.addedBy) {
+            if (filters.addedByAny && filters.addedByAny.length > 0) {
+                query.addedBy = { $in: filters.addedByAny };
+            }
+            else if (filters.addedBy) {
                 query.addedBy = filters.addedBy;
             }
             if (filters.startDate || filters.endDate) {
@@ -409,7 +412,10 @@ class LeadService {
                     { primaryCategory: { $regex: new RegExp(filters.primarySkill, 'i') } },
                 ];
             }
-            if (filters.addedBy) {
+            if (filters.addedByAny && filters.addedByAny.length > 0) {
+                query.addedBy = { $in: filters.addedByAny };
+            }
+            else if (filters.addedBy) {
                 query.addedBy = filters.addedBy;
             }
             if (filters.startDate || filters.endDate) {
@@ -454,7 +460,10 @@ class LeadService {
             const baseQuery = {
                 nextCallbackAt: { $exists: true, $ne: null },
             };
-            if (filters.addedBy) {
+            if (filters.addedByAny && filters.addedByAny.length > 0) {
+                baseQuery.addedBy = { $in: filters.addedByAny };
+            }
+            else if (filters.addedBy) {
                 baseQuery.addedBy = filters.addedBy;
             }
             const [totalScheduled, overdue, dueToday] = await Promise.all([
@@ -502,7 +511,10 @@ class LeadService {
                     { primaryCategory: { $regex: new RegExp(filters.primarySkill, 'i') } },
                 ];
             }
-            if (filters.addedBy) {
+            if (filters.addedByAny && filters.addedByAny.length > 0) {
+                query.addedBy = { $in: filters.addedByAny };
+            }
+            else if (filters.addedBy) {
                 query.addedBy = filters.addedBy;
             }
             if (filters.dueType === 'callback') {
@@ -586,8 +598,12 @@ class LeadService {
             const endOfToday = new Date(now);
             endOfToday.setHours(23, 59, 59, 999);
             const scope = {};
-            if (filters.addedBy)
+            if (filters.addedByAny && filters.addedByAny.length > 0) {
+                scope.addedBy = { $in: filters.addedByAny };
+            }
+            else if (filters.addedBy) {
                 scope.addedBy = filters.addedBy;
+            }
             const [callbackDueToday, callbackOverdue, onboardingDueToday, onboardingOverdue, callbackTotal, onboardingTotal,] = await Promise.all([
                 Lead_1.default.countDocuments({
                     ...scope,

@@ -59,6 +59,7 @@ export const adminAuthMiddleware = async (
       }
 
       req.admin = {
+        uid: adminUser.uid,
         userId: adminUser.userId,
         email: adminUser.email,
         name: adminUser.name,

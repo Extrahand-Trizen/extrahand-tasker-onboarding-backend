@@ -33,6 +33,7 @@ const adminAuthMiddleware = async (req, res, next) => {
                 throw new Error('User not found or inactive');
             }
             req.admin = {
+                uid: adminUser.uid,
                 userId: adminUser.userId,
                 email: adminUser.email,
                 name: adminUser.name,
