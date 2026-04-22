@@ -594,7 +594,6 @@ export class LeadController {
       } = req.query;
 
       const role = req.admin.role as UserRole;
-      const scopedIds = getScopedAddedByIds(req);
 
       const filters: SearchFilters = {
         status: status as any,
@@ -610,9 +609,8 @@ export class LeadController {
         registrationStatus: registrationStatus as SearchFilters['registrationStatus']
       };
 
-      if (role === 'qualifier' && scopedIds.length > 0) {
-        filters.addedByAny = scopedIds;
-      }
+      // Keep search generic; caller (UI/page) decides whether to scope by addedBy.
+      // This is required so "All Leads" can remain truly global for allowed roles.
 
       const result = await LeadService.searchLeads(filters);
 
