@@ -61,32 +61,55 @@ export class LeadController {
       }
 
       if (!env.USER_SERVICE_URL) {
-        throw new Error('USER_SERVICE_URL is not configured');
+        logger.warn('USER_SERVICE_URL is not configured; returning fallback dashboard metrics', {
+          actor: getUserId(req) || 'system',
+        });
+        res.json({
+          success: true,
+          data: {
+            taskersAadhaarVerified: 0,
+          },
+        });
+        return;
       }
 
       const actorUid = getUserId(req) || 'system';
-      const response = await axios.get(
-        `${env.USER_SERVICE_URL}/api/v1/profiles/internal/stats/taskers/aadhaar-verified`,
-        {
-          headers: {
-            'X-Service-Auth': env.SERVICE_AUTH_TOKEN,
-            'X-Service-Name': 'admin-service',
-            'X-User-Id': actorUid,
-            'Content-Type': 'application/json',
-          },
-          timeout: 10000,
-        }
-      );
+      let taskersAadhaarVerified = 0;
+      try {
+        const response = await axios.get(
+          `${env.USER_SERVICE_URL}/api/v1/profiles/internal/stats/taskers/aadhaar-verified`,
+          {
+            headers: {
+              'X-Service-Auth': env.SERVICE_AUTH_TOKEN,
+              'X-Service-Name': 'admin-service',
+              'X-User-Id': actorUid,
+              'Content-Type': 'application/json',
+            },
+            timeout: 10000,
+          }
+        );
+        taskersAadhaarVerified = response.data?.data?.taskersAadhaarVerified ?? 0;
+      } catch (error: any) {
+        logger.error('Dashboard metrics upstream call failed; returning fallback value', {
+          actorUid,
+          userServiceUrl: env.USER_SERVICE_URL,
+          error: error?.message,
+          status: axios.isAxiosError(error) ? error.response?.status : undefined,
+          responseData: axios.isAxiosError(error) ? error.response?.data : undefined,
+          code: axios.isAxiosError(error) ? error.code : undefined,
+        });
+      }
 
       res.json({
         success: true,
         data: {
-          taskersAadhaarVerified: response.data?.data?.taskersAadhaarVerified ?? 0,
+          taskersAadhaarVerified,
         },
       });
     } catch (error: any) {
       logger.error('Error in getDashboardMetrics controller', {
-        error: error.message
+        error: error.message,
+        stack: error.stack,
       });
       res.status(500).json({
         success: false,

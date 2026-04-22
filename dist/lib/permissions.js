@@ -27,7 +27,7 @@ exports.PERMISSIONS = {
         canAddNotes: true,
         canViewAllNotes: true,
         canCommunicate: true,
-        canVerifyUserCertificates: false,
+        canVerifyUserCertificates: true,
     },
     onboarder: {
         canViewLeads: true,

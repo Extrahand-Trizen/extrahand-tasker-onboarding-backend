@@ -66,7 +66,7 @@ export const PERMISSIONS: Record<UserRole, Permissions> = {
     canAddNotes: true,
     canViewAllNotes: true,
     canCommunicate: true,
-    canVerifyUserCertificates: false,
+    canVerifyUserCertificates: true,
   },
   onboarder: {
     canViewLeads: true,
