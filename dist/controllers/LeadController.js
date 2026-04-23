@@ -13,6 +13,7 @@ const logger_1 = __importDefault(require("../config/logger"));
 const leadContactTracking_1 = require("../constants/leadContactTracking");
 const axios_1 = __importDefault(require("axios"));
 const env_1 = require("../config/env");
+const CONVERSION_STATUS_CACHE_MS = 60 * 1000;
 /**
  * Helper function to get consistent userId from req.admin
  * Handles both JWT (userId) and Firebase (uid) authentication
@@ -45,6 +46,22 @@ function canManageLead(req, leadAddedBy) {
     if (role === 'qualifier')
         return userId === leadAddedBy;
     return false;
+}
+function shouldRefreshConversionSnapshot(lead) {
+    const hasPhone = !!(lead.phone || lead.landline);
+    if (!hasPhone) {
+        return false;
+    }
+    if (lead.conversionData?.platformUid && lead.conversionData?.isAadhaarVerified !== true) {
+        return true;
+    }
+    const lastCheckedAt = lead.conversionData?.lastCheckedAt
+        ? new Date(lead.conversionData.lastCheckedAt).getTime()
+        : 0;
+    const isSnapshotStale = !lastCheckedAt ||
+        Number.isNaN(lastCheckedAt) ||
+        Date.now() - lastCheckedAt >= CONVERSION_STATUS_CACHE_MS;
+    return isSnapshotStale && !lead.conversionData?.platformUid;
 }
 class LeadController {
     static async getDashboardMetrics(req, res) {
@@ -274,9 +291,28 @@ class LeadController {
                 });
                 return;
             }
+            let leadToReturn = lead;
+            if (shouldRefreshConversionSnapshot(lead)) {
+                const phone = lead.phone || lead.landline;
+                const status = await (0, UserLookupService_1.getConversionStatusByPhone)(phone);
+                if (status.converted && (status.platformUid || status.isAadhaarVerified !== undefined)) {
+                    const refreshedLead = await Lead_1.default.findOneAndUpdate({ leadId }, {
+                        $set: {
+                            conversionData: {
+                                platformUid: status.platformUid,
+                                isAadhaarVerified: status.isAadhaarVerified,
+                                lastCheckedAt: new Date()
+                            }
+                        }
+                    }, { new: true });
+                    if (refreshedLead) {
+                        leadToReturn = refreshedLead;
+                    }
+                }
+            }
             res.json({
                 success: true,
-                data: lead
+                data: leadToReturn
             });
         }
         catch (error) {
