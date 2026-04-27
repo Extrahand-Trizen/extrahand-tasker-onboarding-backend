@@ -547,33 +547,39 @@ export class LeadService {
 
       // Registration/conversion status (main website)
       if (filters.registrationStatus) {
+        const registeredPredicate = {
+          $or: [
+            { 'conversionData.platformUid': { $exists: true, $nin: [null, ''] } },
+            { 'activationData.firebaseUid': { $exists: true, $nin: [null, ''] } },
+            { accountStatus: { $in: ['invited', 'activated', 'suspended'] } }
+          ]
+        };
+        const aadhaarVerifiedPredicate = {
+          $or: [
+            { 'conversionData.isAadhaarVerified': true },
+            { 'verificationStatus.aadhaar.status': 'verified' }
+          ]
+        };
+
         switch (filters.registrationStatus) {
           case 'not_registered':
             query.$and = query.$and || [];
             query.$and.push({
-              $or: [
-                { conversionData: { $exists: false } },
-                { 'conversionData.platformUid': { $exists: false } },
-                { 'conversionData.platformUid': null },
-                { 'conversionData.platformUid': '' }
-              ]
+              $nor: [registeredPredicate]
             });
             break;
           case 'registered':
             query.$and = query.$and || [];
             query.$and.push({
-              'conversionData.platformUid': { $exists: true, $nin: [null, ''] },
-              $or: [
-                { 'conversionData.isAadhaarVerified': { $ne: true } },
-                { 'conversionData.isAadhaarVerified': { $exists: false } }
-              ]
+              ...registeredPredicate,
+              $nor: [aadhaarVerifiedPredicate]
             });
             break;
           case 'registered_verified':
             query.$and = query.$and || [];
             query.$and.push({
-              'conversionData.platformUid': { $exists: true, $nin: [null, ''] },
-              'conversionData.isAadhaarVerified': true
+              ...registeredPredicate,
+              ...aadhaarVerifiedPredicate
             });
             break;
         }
