@@ -148,6 +148,10 @@ export interface ILead extends Document {
   expectedOnboardingAt?: Date;
   statusReasonCode?: string;
   statusReasonText?: string;
+  // Tracks who most recently moved lead into each contact bucket.
+  lastInterestedBy?: string;
+  lastNotInterestedBy?: string;
+  lastNotLiftedBy?: string;
   communicationLog: ICommunicationLog[];
   
   // Internal notes
@@ -392,6 +396,18 @@ const LeadSchema = new Schema<ILead>({
   expectedOnboardingAt: Date,
   statusReasonCode: String,
   statusReasonText: String,
+  lastInterestedBy: {
+    type: String,
+    index: true
+  },
+  lastNotInterestedBy: {
+    type: String,
+    index: true
+  },
+  lastNotLiftedBy: {
+    type: String,
+    index: true
+  },
   communicationLog: [{
     type: {
       type: String,

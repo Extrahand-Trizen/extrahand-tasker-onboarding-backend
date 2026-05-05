@@ -664,7 +664,8 @@ export class LeadController {
         endDate,
         page,
         limit,
-        registrationStatus
+        registrationStatus,
+        statusChangedBy
       } = req.query;
 
       const role = req.admin.role as UserRole;
@@ -680,7 +681,8 @@ export class LeadController {
         endDate: endDate ? new Date(endDate as string) : undefined,
         page: page ? parseInt(page as string) : undefined,
         limit: limit ? parseInt(limit as string) : undefined,
-        registrationStatus: registrationStatus as SearchFilters['registrationStatus']
+        registrationStatus: registrationStatus as SearchFilters['registrationStatus'],
+        statusChangedBy: statusChangedBy as string
       };
 
       // Keep search generic; caller (UI/page) decides whether to scope by addedBy.

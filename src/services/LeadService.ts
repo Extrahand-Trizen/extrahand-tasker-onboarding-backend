@@ -86,6 +86,8 @@ export interface SearchFilters {
   limit?: number;
   /** Filter by conversion/registration on main website */
   registrationStatus?: RegistrationStatusFilter;
+  /** Filter by user who moved lead into current contact status */
+  statusChangedBy?: string;
 }
 
 export interface CallbackQueueFilters {
@@ -565,9 +567,20 @@ export class LeadService {
         query.$or = [
           { name: searchRegex },
           { phone: searchRegex },
+          { landline: searchRegex },
           { city: searchRegex },
           { leadId: searchRegex }
         ];
+      }
+
+      if (filters.statusChangedBy) {
+        if (filters.status === 'contacted_interested') {
+          query.lastInterestedBy = filters.statusChangedBy;
+        } else if (filters.status === 'contacted_not_interested') {
+          query.lastNotInterestedBy = filters.statusChangedBy;
+        } else if (filters.status === 'contacted_not_lifted') {
+          query.lastNotLiftedBy = filters.statusChangedBy;
+        }
       }
 
       // Registration/conversion status (main website)
@@ -1301,6 +1314,13 @@ export class LeadService {
       lead.statusReasonText = statusReasonText || undefined;
       lead.nextCallbackAt = callbackAt || undefined;
       lead.expectedOnboardingAt = expectedOnboardingAt || undefined;
+      if (finalStatus === 'contacted_interested') {
+        lead.lastInterestedBy = data.changedBy;
+      } else if (finalStatus === 'contacted_not_interested') {
+        lead.lastNotInterestedBy = data.changedBy;
+      } else if (finalStatus === 'contacted_not_lifted') {
+        lead.lastNotLiftedBy = data.changedBy;
+      }
 
       lead.statusHistory.push({
         status: finalStatus,
