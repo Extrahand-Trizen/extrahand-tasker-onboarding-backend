@@ -167,6 +167,31 @@ export class LeadService {
     }).format(date);
   }
 
+  private static getISTDayBounds(reference = new Date()): { startOfToday: Date; endOfToday: Date } {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(reference);
+
+    const values = Object.fromEntries(
+      parts
+        .filter((part) => part.type !== 'literal')
+        .map((part) => [part.type, part.value])
+    ) as { year?: string; month?: string; day?: string };
+
+    const year = Number(values.year);
+    const month = Number(values.month);
+    const day = Number(values.day);
+    const istOffsetMs = 5.5 * 60 * 60 * 1000;
+
+    return {
+      startOfToday: new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0) - istOffsetMs),
+      endOfToday: new Date(Date.UTC(year, month - 1, day, 23, 59, 59, 999) - istOffsetMs),
+    };
+  }
+
   /**
    * Generate unique lead ID
    */
@@ -738,10 +763,7 @@ export class LeadService {
       const limit = filters.limit || 20;
       const skip = (page - 1) * limit;
       const now = new Date();
-      const startOfToday = new Date(now);
-      startOfToday.setHours(0, 0, 0, 0);
-      const endOfToday = new Date(now);
-      endOfToday.setHours(23, 59, 59, 999);
+      const { startOfToday, endOfToday } = this.getISTDayBounds(now);
 
       const query: any = {};
       if (filters.city) {
@@ -833,10 +855,7 @@ export class LeadService {
   ): Promise<FollowUpQueueStats> {
     try {
       const now = new Date();
-      const startOfToday = new Date(now);
-      startOfToday.setHours(0, 0, 0, 0);
-      const endOfToday = new Date(now);
-      endOfToday.setHours(23, 59, 59, 999);
+      const { startOfToday, endOfToday } = this.getISTDayBounds(now);
 
       const scope: any = {};
       if (filters.addedByAny && filters.addedByAny.length > 0) {

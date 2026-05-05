@@ -51,6 +51,22 @@ function canManageLead(req: AdminRequest, leadAddedBy: string): boolean {
   return false;
 }
 
+function parseISTDateOnly(value: string, endOfDay = false): Date | undefined {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) {
+    return undefined;
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const istOffsetMs = 5.5 * 60 * 60 * 1000;
+
+  return endOfDay
+    ? new Date(Date.UTC(year, month - 1, day, 23, 59, 59, 999) - istOffsetMs)
+    : new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0) - istOffsetMs);
+}
+
 function shouldRefreshConversionSnapshot(lead: {
   phone?: string;
   landline?: string;
@@ -818,11 +834,20 @@ export class LeadController {
       const role = req.admin.role as UserRole;
       const scopedIds = getScopedAddedByIds(req);
 
+      const rawStartDate = startDate as string | undefined;
+      const rawEndDate = endDate as string | undefined;
+      const parsedStartDate = rawStartDate
+        ? (rawStartDate.includes('T') ? new Date(rawStartDate) : parseISTDateOnly(rawStartDate))
+        : undefined;
+      const parsedEndDate = rawEndDate
+        ? (rawEndDate.includes('T') ? new Date(rawEndDate) : parseISTDateOnly(rawEndDate, true))
+        : undefined;
+
       const filters: FollowUpQueueFilters = {
         city: city as string,
         primarySkill: primarySkill as string,
-        startDate: startDate ? new Date(startDate as string) : undefined,
-        endDate: endDate ? new Date(endDate as string) : undefined,
+        startDate: parsedStartDate,
+        endDate: parsedEndDate,
         dueType: (dueType as FollowUpQueueFilters['dueType']) || 'all',
         bucket: (bucket as FollowUpQueueFilters['bucket']) || 'all',
         page: page ? parseInt(page as string) : undefined,
