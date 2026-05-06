@@ -336,10 +336,10 @@ export class BulkLeadImportController {
 
       const filename =
         primaryCategory && secondaryCategory
-          ? `tasker-import-${primaryCategory}-${secondaryCategory.replace(/\s+/g, "-")}-template.csv`
+          ? `helper-import-${primaryCategory}-${secondaryCategory.replace(/\s+/g, "-")}-template.csv`
           : primaryCategory
-            ? `tasker-import-${primaryCategory}-template.csv`
-            : "tasker-import-template.csv";
+            ? `helper-import-${primaryCategory}-template.csv`
+            : "helper-import-template.csv";
 
       res.setHeader("Content-Type", "text/csv");
       res.setHeader(

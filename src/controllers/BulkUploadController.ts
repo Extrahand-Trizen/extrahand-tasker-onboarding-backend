@@ -100,7 +100,7 @@ export class BulkUploadController {
           ...result,
           note: "Accounts will only be created when users accept invites. This ensures proper consent and data integrity.",
           nextSteps: [
-            "Review and qualify leads in the Tasker List",
+            "Review and qualify leads in the Helper List",
             "Send invites to qualified leads",
             "Accounts will be created when users accept invites"
           ]
@@ -211,7 +211,7 @@ Raj Kumar,9876543211,raj@example.com,Mumbai,Maharashtra,456 Worker Lane Andheri 
     res.setHeader("Content-Type", "text/csv");
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename=tasker-${operationType}-template.csv`
+      `attachment; filename=helper-${operationType}-template.csv`
     );
     res.send(csv);
   }

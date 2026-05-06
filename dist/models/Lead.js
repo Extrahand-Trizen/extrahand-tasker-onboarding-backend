@@ -250,6 +250,18 @@ const LeadSchema = new mongoose_1.Schema({
     expectedOnboardingAt: Date,
     statusReasonCode: String,
     statusReasonText: String,
+    lastInterestedBy: {
+        type: String,
+        index: true
+    },
+    lastNotInterestedBy: {
+        type: String,
+        index: true
+    },
+    lastNotLiftedBy: {
+        type: String,
+        index: true
+    },
     communicationLog: [{
             type: {
                 type: String,

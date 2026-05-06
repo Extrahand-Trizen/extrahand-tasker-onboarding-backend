@@ -148,13 +148,36 @@ export interface StatusAnalyticsFilters {
   qualifierId?: string;
 }
 
+export type StatusReportCategory =
+  | 'touched_leads'
+  | 'interested'
+  | 'callback_scheduled'
+  | 'callback_overdue';
+
 export interface StatusReportExportFilters extends StatusAnalyticsFilters {
   format: 'csv' | 'xlsx';
   template: 'eod' | 'detailed';
+  reportCategory: StatusReportCategory;
   includeNotes?: boolean;
 }
 
 export class LeadService {
+  private static readonly STATUS_REPORT_LABELS: Record<string, string> = {
+    lead_added: 'New Lead',
+    contacted_not_lifted: 'Contacted & Not Lifted',
+    contacted_not_interested: 'Contacted & Not Interested',
+    contacted_interested: 'Contacted & Interested',
+    documents_submitted: 'Documents Received',
+    under_verification: 'Under Verification',
+    approved: 'Approved',
+    inactive: 'Inactive',
+    callback_requested: 'Callback Requested',
+    interested_onboarding_later: 'Interested - Onboarding Later',
+    not_interested: 'Not Interested',
+    wrong_number: 'Wrong Number',
+    other: 'Other',
+  };
+
   private static formatIST(date?: Date): string {
     if (!date) return '';
     return new Intl.DateTimeFormat('en-IN', {
@@ -167,6 +190,87 @@ export class LeadService {
       second: '2-digit',
       hour12: true,
     }).format(date);
+  }
+
+  private static labelForReport(value?: string | null): string {
+    if (!value) return '';
+    return this.STATUS_REPORT_LABELS[value] || value.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
+  }
+
+  private static textForSpreadsheet(value?: string | number | null): string {
+    if (value === null || value === undefined) return '';
+    return String(value).trim();
+  }
+
+  private static applyWorksheetLayout(
+    worksheet: XLSX.WorkSheet,
+    rows: Array<Record<string, string>>
+  ): void {
+    if (!rows.length) {
+      return;
+    }
+
+    const widthHints: Record<string, { min: number; max: number }> = {
+      Date: { min: 24, max: 28 },
+      'Qualifier Name': { min: 24, max: 35 },
+      'Lead ID': { min: 16, max: 20 },
+      'Lead Name': { min: 24, max: 40 },
+      'Phone/Landline': { min: 18, max: 25 },
+      City: { min: 18, max: 28 },
+      State: { min: 16, max: 22 },
+      'Current Status': { min: 24, max: 35 },
+      'Status Reason': { min: 24, max: 45 },
+      'Callback Date': { min: 24, max: 28 },
+      'Expected Onboarding Date': { min: 26, max: 35 },
+      'Last Updated At': { min: 24, max: 28 },
+      'Last Updated By': { min: 28, max: 42 },
+      'Primary Category': { min: 20, max: 32 },
+      'Secondary Category': { min: 20, max: 32 },
+      Source: { min: 16, max: 24 },
+      'Source Details': { min: 20, max: 40 },
+      'Created At': { min: 24, max: 28 },
+      'Updated At': { min: 24, max: 28 },
+      Notes: { min: 30, max: 55 },
+      'Is Duplicate': { min: 16, max: 18 },
+      Blacklisted: { min: 14, max: 16 },
+    };
+
+    const headers = Object.keys(rows[0]);
+
+    worksheet['!cols'] = headers.map((header) => {
+      const hint = widthHints[header] || { min: 16, max: 35 };
+      const longestValue = rows.reduce((max, row) => {
+        const cellValue = row[header] || '';
+        const lineLength = cellValue
+          .split('\n')
+          .reduce((lineMax, line) => Math.max(lineMax, line.length), 0);
+        return Math.max(max, lineLength);
+      }, header.length);
+
+      return {
+        wch: Math.min(hint.max, Math.max(hint.min, longestValue + 3)),
+      };
+    });
+
+    worksheet['!rows'] = [{ hpt: 28 }];
+
+    if (worksheet['!ref']) {
+      worksheet['!autofilter'] = { ref: worksheet['!ref'] };
+    }
+
+    // Apply text wrapping and formatting to all cells
+    for (const cell in worksheet) {
+      if (cell[0] !== '!' && worksheet[cell]) {
+        if (!worksheet[cell].s) {
+          worksheet[cell].s = {};
+        }
+        worksheet[cell].s.alignment = {
+          wrap: true,
+          vertical: 'top',
+          horizontal: 'left',
+        };
+      }
+    }
   }
 
   private static getISTDayBounds(reference = new Date()): { startOfToday: Date; endOfToday: Date } {
@@ -1037,11 +1141,25 @@ export class LeadService {
       if (filters.qualifierId) {
         leadMatch.addedBy = filters.qualifierId;
       }
+      const now = new Date();
+
+      const statusHistoryMatch: any = {
+        'statusHistory.changedAt': { $gte: filters.from, $lte: filters.to },
+      };
+
+      if (filters.reportCategory === 'interested') {
+        statusHistoryMatch['statusHistory.status'] = 'contacted_interested';
+      }
+
+      if (filters.reportCategory === 'callback_scheduled' || filters.reportCategory === 'callback_overdue') {
+        statusHistoryMatch['statusHistory.status'] = 'contacted_interested';
+        statusHistoryMatch['statusHistory.callbackAt'] = { $exists: true, $ne: null };
+      }
 
       const rows = await Lead.aggregate([
         { $match: leadMatch },
         { $unwind: '$statusHistory' },
-        { $match: { 'statusHistory.changedAt': { $gte: filters.from, $lte: filters.to } } },
+        { $match: statusHistoryMatch },
         { $sort: { 'statusHistory.changedAt': -1 } },
         {
           $group: {
@@ -1059,6 +1177,7 @@ export class LeadService {
             createdAt: { $first: '$createdAt' },
             updatedAt: { $first: '$updatedAt' },
             currentStatus: { $first: '$status' },
+            nextCallbackAt: { $first: '$nextCallbackAt' },
             qualifierName: { $first: '$addedByName' },
             qualifierId: { $first: '$addedBy' },
             isDuplicate: { $first: '$isDuplicate' },
@@ -1066,35 +1185,43 @@ export class LeadService {
             latestHistory: { $first: '$statusHistory' },
           },
         },
+        ...(filters.reportCategory === 'callback_scheduled'
+          ? [{ $match: { nextCallbackAt: { $exists: true, $ne: null, $gte: now } } }]
+          : []),
+        ...(filters.reportCategory === 'callback_overdue'
+          ? [{ $match: { nextCallbackAt: { $lt: now } } }]
+          : []),
         { $sort: { updatedAt: -1 } },
       ]);
 
       const reportRows = rows.map((row: any) => {
-        const base: Record<string, any> = {
+        const base: Record<string, string> = {
           Date: this.formatIST(row.latestHistory?.changedAt),
-          'Qualifier Name': row.qualifierName || 'Unknown',
-          'Lead ID': row.leadId,
-          'Lead Name': row.name || '',
-          'Phone/Landline': row.phone || row.landline || '',
-          City: row.city || '',
-          'Current Status': row.currentStatus || '',
-          'Status Reason': row.latestHistory?.statusReasonText || row.latestHistory?.statusReasonCode || '',
+          'Qualifier Name': this.textForSpreadsheet(row.qualifierName || 'Unknown'),
+          'Lead ID': this.textForSpreadsheet(row.leadId),
+          'Lead Name': this.textForSpreadsheet(row.name),
+          'Phone/Landline': this.textForSpreadsheet(row.phone || row.landline || ''),
+          City: this.textForSpreadsheet(row.city),
+          'Current Status': this.labelForReport(row.latestHistory?.status || row.currentStatus),
+          'Status Reason': this.textForSpreadsheet(
+            row.latestHistory?.statusReasonText || this.labelForReport(row.latestHistory?.statusReasonCode)
+          ),
           'Callback Date': this.formatIST(row.latestHistory?.callbackAt),
           'Expected Onboarding Date': this.formatIST(row.latestHistory?.expectedOnboardingAt),
           'Last Updated At': this.formatIST(row.updatedAt),
-          'Last Updated By': row.latestHistory?.changedByName || row.latestHistory?.changedBy || '',
+          'Last Updated By': this.textForSpreadsheet(row.latestHistory?.changedByName || row.latestHistory?.changedBy || ''),
         };
 
         if (filters.template === 'detailed') {
-          base.State = row.state || '';
-          base['Primary Category'] = row.primaryCategory || '';
-          base['Secondary Category'] = row.secondaryCategory || '';
-          base.Source = row.source || '';
-          base['Source Details'] = row.sourceDetails || '';
+          base.State = this.textForSpreadsheet(row.state);
+          base['Primary Category'] = this.textForSpreadsheet(row.primaryCategory);
+          base['Secondary Category'] = this.textForSpreadsheet(row.secondaryCategory);
+          base.Source = this.textForSpreadsheet(row.source);
+          base['Source Details'] = this.textForSpreadsheet(row.sourceDetails);
           base['Created At'] = this.formatIST(row.createdAt);
           base['Updated At'] = this.formatIST(row.updatedAt);
           if (filters.includeNotes) {
-            base.Notes = row.latestHistory?.notes || '';
+            base.Notes = this.textForSpreadsheet(row.latestHistory?.notes);
           }
           base['Is Duplicate'] = row.isDuplicate ? 'Yes' : 'No';
           base.Blacklisted = row.blacklisted ? 'Yes' : 'No';
@@ -1103,11 +1230,13 @@ export class LeadService {
       });
 
       const worksheet = XLSX.utils.json_to_sheet(reportRows);
+      this.applyWorksheetLayout(worksheet, reportRows);
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, 'Status Report');
 
       const dateStamp = new Date().toISOString().slice(0, 10);
-      const filename = `lead-status-report-${filters.template}-${dateStamp}.${filters.format}`;
+      const categorySlug = filters.reportCategory.replace(/_/g, '-');
+      const filename = `lead-status-report-${filters.template}-${categorySlug}-${dateStamp}.${filters.format}`;
       const mimeType =
         filters.format === 'xlsx'
           ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'

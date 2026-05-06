@@ -43,8 +43,8 @@ export const BUILT_IN_VARIABLES: Record<string, BuiltInVariable> = {
   },
   userRole: {
     name: 'userRole',
-    description: "User's role (tasker, requester, both)",
-    example: 'tasker',
+    description: "User's role (helper, requester, both)",
+    example: 'helper',
     category: 'user'
   },
   userType: {

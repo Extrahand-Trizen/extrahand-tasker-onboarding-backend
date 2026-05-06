@@ -73,6 +73,8 @@ export interface SearchFilters {
     limit?: number;
     /** Filter by conversion/registration on main website */
     registrationStatus?: RegistrationStatusFilter;
+    /** Filter by user who moved lead into current contact status */
+    statusChangedBy?: string;
 }
 export interface CallbackQueueFilters {
     city?: string;
@@ -125,13 +127,16 @@ export interface StatusAnalyticsFilters {
     to: Date;
     qualifierId?: string;
 }
+export type StatusReportCategory = 'touched_leads' | 'interested' | 'callback_scheduled' | 'callback_overdue';
 export interface StatusReportExportFilters extends StatusAnalyticsFilters {
     format: 'csv' | 'xlsx';
     template: 'eod' | 'detailed';
+    reportCategory: StatusReportCategory;
     includeNotes?: boolean;
 }
 export declare class LeadService {
     private static formatIST;
+    private static getISTDayBounds;
     /**
      * Generate unique lead ID
      */

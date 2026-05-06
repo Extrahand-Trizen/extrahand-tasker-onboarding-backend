@@ -1002,6 +1002,7 @@ export class LeadController {
         qualifierId,
         format = 'csv',
         template = 'eod',
+        reportCategory = 'touched_leads',
         includeNotes = 'false',
       } = req.query;
 
@@ -1019,6 +1020,15 @@ export class LeadController {
           success: false,
           error: 'Invalid template',
           message: 'template must be eod or detailed'
+        });
+        return;
+      }
+
+      if (!['touched_leads', 'interested', 'callback_scheduled', 'callback_overdue'].includes(String(reportCategory))) {
+        res.status(400).json({
+          success: false,
+          error: 'Invalid report category',
+          message: 'reportCategory must be touched_leads, interested, callback_scheduled, or callback_overdue'
         });
         return;
       }
@@ -1041,12 +1051,14 @@ export class LeadController {
         qualifierId?: string;
         format: 'csv' | 'xlsx';
         template: 'eod' | 'detailed';
+        reportCategory: 'touched_leads' | 'interested' | 'callback_scheduled' | 'callback_overdue';
         includeNotes?: boolean;
       } = {
         from: fromDate,
         to: toDate,
         format: format as 'csv' | 'xlsx',
         template: template as 'eod' | 'detailed',
+        reportCategory: reportCategory as 'touched_leads' | 'interested' | 'callback_scheduled' | 'callback_overdue',
         includeNotes: String(includeNotes) === 'true',
       };
 
@@ -1061,7 +1073,7 @@ export class LeadController {
       await LeadService.logActivity(
         'SYSTEM',
         'report_export',
-        `Status report export (${report.rowCount} rows)`,
+        `Status report export (${filters.reportCategory}, ${report.rowCount} rows)`,
         userId || 'unknown',
         req.admin.name,
         {
@@ -1073,6 +1085,7 @@ export class LeadController {
             qualifierId: filters.qualifierId,
             format: filters.format,
             template: filters.template,
+            reportCategory: filters.reportCategory,
             includeNotes: filters.includeNotes,
           },
           rowCount: report.rowCount

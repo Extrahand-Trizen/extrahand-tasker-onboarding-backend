@@ -105,6 +105,9 @@ export interface ILead extends Document {
     expectedOnboardingAt?: Date;
     statusReasonCode?: string;
     statusReasonText?: string;
+    lastInterestedBy?: string;
+    lastNotInterestedBy?: string;
+    lastNotLiftedBy?: string;
     communicationLog: ICommunicationLog[];
     internalNotes: IInternalNote[];
     duplicateOf?: string;

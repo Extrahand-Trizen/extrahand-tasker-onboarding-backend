@@ -47,6 +47,19 @@ function canManageLead(req, leadAddedBy) {
         return userId === leadAddedBy;
     return false;
 }
+function parseISTDateOnly(value, endOfDay = false) {
+    const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) {
+        return undefined;
+    }
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const istOffsetMs = 5.5 * 60 * 60 * 1000;
+    return endOfDay
+        ? new Date(Date.UTC(year, month - 1, day, 23, 59, 59, 999) - istOffsetMs)
+        : new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0) - istOffsetMs);
+}
 function shouldRefreshConversionSnapshot(lead) {
     const hasPhone = !!(lead.phone || lead.landline);
     if (!hasPhone) {
@@ -535,7 +548,7 @@ class LeadController {
                 });
                 return;
             }
-            const { status, city, primarySkill, source, addedBy, search, startDate, endDate, page, limit, registrationStatus } = req.query;
+            const { status, city, primarySkill, source, addedBy, search, startDate, endDate, page, limit, registrationStatus, statusChangedBy } = req.query;
             const role = req.admin.role;
             const filters = {
                 status: status,
@@ -548,7 +561,8 @@ class LeadController {
                 endDate: endDate ? new Date(endDate) : undefined,
                 page: page ? parseInt(page) : undefined,
                 limit: limit ? parseInt(limit) : undefined,
-                registrationStatus: registrationStatus
+                registrationStatus: registrationStatus,
+                statusChangedBy: statusChangedBy
             };
             // Keep search generic; caller (UI/page) decides whether to scope by addedBy.
             // This is required so "All Leads" can remain truly global for allowed roles.
@@ -679,11 +693,19 @@ class LeadController {
             const { city, primarySkill, startDate, endDate, dueType, bucket, page, limit, } = req.query;
             const role = req.admin.role;
             const scopedIds = getScopedAddedByIds(req);
+            const rawStartDate = startDate;
+            const rawEndDate = endDate;
+            const parsedStartDate = rawStartDate
+                ? (rawStartDate.includes('T') ? new Date(rawStartDate) : parseISTDateOnly(rawStartDate))
+                : undefined;
+            const parsedEndDate = rawEndDate
+                ? (rawEndDate.includes('T') ? new Date(rawEndDate) : parseISTDateOnly(rawEndDate, true))
+                : undefined;
             const filters = {
                 city: city,
                 primarySkill: primarySkill,
-                startDate: startDate ? new Date(startDate) : undefined,
-                endDate: endDate ? new Date(endDate) : undefined,
+                startDate: parsedStartDate,
+                endDate: parsedEndDate,
                 dueType: dueType || 'all',
                 bucket: bucket || 'all',
                 page: page ? parseInt(page) : undefined,
@@ -817,7 +839,7 @@ class LeadController {
             }
             const role = req.admin.role;
             const userId = getUserId(req);
-            const { from, to, qualifierId, format = 'csv', template = 'eod', includeNotes = 'false', } = req.query;
+            const { from, to, qualifierId, format = 'csv', template = 'eod', reportCategory = 'touched_leads', includeNotes = 'false', } = req.query;
             if (!['csv', 'xlsx'].includes(String(format))) {
                 res.status(400).json({
                     success: false,
@@ -831,6 +853,14 @@ class LeadController {
                     success: false,
                     error: 'Invalid template',
                     message: 'template must be eod or detailed'
+                });
+                return;
+            }
+            if (!['touched_leads', 'interested', 'callback_scheduled', 'callback_overdue'].includes(String(reportCategory))) {
+                res.status(400).json({
+                    success: false,
+                    error: 'Invalid report category',
+                    message: 'reportCategory must be touched_leads, interested, callback_scheduled, or callback_overdue'
                 });
                 return;
             }
@@ -849,6 +879,7 @@ class LeadController {
                 to: toDate,
                 format: format,
                 template: template,
+                reportCategory: reportCategory,
                 includeNotes: String(includeNotes) === 'true',
             };
             if (role === 'qualifier' && userId) {
@@ -858,7 +889,7 @@ class LeadController {
                 filters.qualifierId = qualifierId;
             }
             const report = await LeadService_1.LeadService.exportStatusReport(filters);
-            await LeadService_1.LeadService.logActivity('SYSTEM', 'report_export', `Status report export (${report.rowCount} rows)`, userId || 'unknown', req.admin.name, {
+            await LeadService_1.LeadService.logActivity('SYSTEM', 'report_export', `Status report export (${filters.reportCategory}, ${report.rowCount} rows)`, userId || 'unknown', req.admin.name, {
                 reportType: 'lead-status-report',
                 role,
                 filters: {
@@ -867,6 +898,7 @@ class LeadController {
                     qualifierId: filters.qualifierId,
                     format: filters.format,
                     template: filters.template,
+                    reportCategory: filters.reportCategory,
                     includeNotes: filters.includeNotes,
                 },
                 rowCount: report.rowCount
