@@ -96,6 +96,10 @@ export interface ILead extends Document {
     lastTransferredBy?: string;
     lastTransferredByName?: string;
     lastTransferredAt?: Date;
+    lastTransferDecision?: 'accepted' | 'rejected';
+    lastTransferDecisionBy?: string;
+    lastTransferDecisionByName?: string;
+    lastTransferDecisionAt?: Date;
     transferPendingTo?: string;
     transferPendingToName?: string;
     transferPendingAt?: Date;

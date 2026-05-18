@@ -164,6 +164,7 @@ export declare class LeadService {
      * (fallback to primarySkill for backward compatibility)
      */
     private static normalizeLeadData;
+    private static applyOwnerScope;
     /**
      * Get lead by ID
      */
@@ -193,7 +194,7 @@ export declare class LeadService {
         limit: number;
         totalPages: number;
     }>;
-    static getCallbackQueueStats(filters: Pick<CallbackQueueFilters, 'addedBy' | 'addedByAny'>): Promise<CallbackQueueStats>;
+    static getCallbackQueueStats(filters: Pick<CallbackQueueFilters, 'addedBy' | 'addedByAny' | 'ownerBy' | 'ownerByAny'>): Promise<CallbackQueueStats>;
     static getFollowUpQueue(filters: FollowUpQueueFilters): Promise<{
         leads: FollowUpQueueItem[];
         total: number;
@@ -201,7 +202,7 @@ export declare class LeadService {
         limit: number;
         totalPages: number;
     }>;
-    static getFollowUpQueueStats(filters: Pick<FollowUpQueueFilters, 'addedBy' | 'addedByAny'>): Promise<FollowUpQueueStats>;
+    static getFollowUpQueueStats(filters: Pick<FollowUpQueueFilters, 'addedBy' | 'addedByAny' | 'ownerBy' | 'ownerByAny'>): Promise<FollowUpQueueStats>;
     static getStatusAnalytics(filters: StatusAnalyticsFilters): Promise<{
         touchedLeads: number;
         interested: number;

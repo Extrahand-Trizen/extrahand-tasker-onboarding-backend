@@ -297,6 +297,24 @@ class LeadService {
         }
         return lead;
     }
+    static applyOwnerScope(query, ownerBy, ownerByAny) {
+        const ownerIds = ownerByAny && ownerByAny.length > 0
+            ? ownerByAny
+            : ownerBy
+                ? [ownerBy]
+                : [];
+        if (!ownerIds.length) {
+            return;
+        }
+        query.$and = query.$and || [];
+        query.$and.push({
+            $or: [
+                { pickedBy: { $in: ownerIds } },
+                { pickedBy: { $exists: false }, addedBy: { $in: ownerIds } },
+                { pickedBy: null, addedBy: { $in: ownerIds } }
+            ]
+        });
+    }
     /**
      * Get lead by ID
      */
@@ -405,6 +423,14 @@ class LeadService {
             else if (filters.addedBy) {
                 query.addedBy = filters.addedBy;
             }
+            this.applyOwnerScope(query, filters.ownerBy, filters.ownerByAny);
+            if (filters.pickedBy) {
+                query.pickedBy = filters.pickedBy;
+            }
+            if (filters.transferPendingTo) {
+                query.transferPendingTo = filters.transferPendingTo;
+            }
+            this.applyOwnerScope(query, filters.ownerBy, filters.ownerByAny);
             if (filters.startDate || filters.endDate) {
                 query.createdAt = {};
                 if (filters.startDate) {
@@ -572,6 +598,7 @@ class LeadService {
             else if (filters.addedBy) {
                 baseQuery.addedBy = filters.addedBy;
             }
+            this.applyOwnerScope(baseQuery, filters.ownerBy, filters.ownerByAny);
             const [totalScheduled, overdue, dueToday] = await Promise.all([
                 Lead_1.default.countDocuments(baseQuery),
                 Lead_1.default.countDocuments({
@@ -620,6 +647,7 @@ class LeadService {
             else if (filters.addedBy) {
                 query.addedBy = filters.addedBy;
             }
+            this.applyOwnerScope(query, filters.ownerBy, filters.ownerByAny);
             if (filters.dueType === 'callback') {
                 query.nextCallbackAt = { $exists: true, $ne: null };
             }
@@ -704,6 +732,7 @@ class LeadService {
             else if (filters.addedBy) {
                 scope.addedBy = filters.addedBy;
             }
+            this.applyOwnerScope(scope, filters.ownerBy, filters.ownerByAny);
             const [callbackDueToday, callbackOverdue, onboardingDueToday, onboardingOverdue, callbackTotal, onboardingTotal,] = await Promise.all([
                 Lead_1.default.countDocuments({
                     ...scope,
@@ -752,7 +781,11 @@ class LeadService {
         try {
             const leadMatch = {};
             if (filters.qualifierId) {
-                leadMatch.addedBy = filters.qualifierId;
+                leadMatch.$or = [
+                    { pickedBy: filters.qualifierId },
+                    { pickedBy: { $exists: false }, addedBy: filters.qualifierId },
+                    { pickedBy: null, addedBy: filters.qualifierId },
+                ];
             }
             const dateMatch = {
                 'statusHistory.changedAt': { $gte: filters.from, $lte: filters.to },
@@ -761,33 +794,40 @@ class LeadService {
                 { $match: leadMatch },
                 { $unwind: '$statusHistory' },
                 { $match: dateMatch },
+                { $sort: { 'statusHistory.changedAt': 1 } },
             ];
-            const [statusCountsRaw, touchedRaw, qualifierRaw] = await Promise.all([
+            const latestStatusPipeline = [
+                ...basePipeline,
+                {
+                    $group: {
+                        _id: '$leadId',
+                        latestStatus: { $last: '$statusHistory' },
+                        ownerId: { $last: { $ifNull: ['$pickedBy', '$addedBy'] } },
+                        ownerName: { $last: { $ifNull: ['$pickedByName', '$addedByName'] } },
+                    },
+                },
+            ];
+            const [statusCountsRaw, touchedRaw, qualifierRaw, callbackScheduledRaw] = await Promise.all([
                 Lead_1.default.aggregate([
-                    ...basePipeline,
+                    ...latestStatusPipeline,
                     {
                         $group: {
-                            _id: '$statusHistory.status',
+                            _id: '$latestStatus.status',
                             count: { $sum: 1 },
                         },
                     },
                 ]),
                 Lead_1.default.aggregate([
-                    ...basePipeline,
-                    {
-                        $group: {
-                            _id: '$leadId',
-                        },
-                    },
+                    ...latestStatusPipeline,
                     { $count: 'count' },
                 ]),
                 Lead_1.default.aggregate([
-                    ...basePipeline,
+                    ...latestStatusPipeline,
                     {
                         $group: {
-                            _id: '$addedBy',
-                            qualifierName: { $last: '$addedByName' },
-                            leadIds: { $addToSet: '$leadId' },
+                            _id: '$ownerId',
+                            qualifierName: { $last: '$ownerName' },
+                            leadIds: { $addToSet: '$_id' },
                         },
                     },
                     {
@@ -799,6 +839,16 @@ class LeadService {
                     },
                     { $sort: { touchedLeads: -1 } },
                 ]),
+                Lead_1.default.aggregate([
+                    ...latestStatusPipeline,
+                    {
+                        $match: {
+                            'latestStatus.status': 'contacted_interested',
+                            'latestStatus.callbackAt': { $exists: true, $ne: null },
+                        },
+                    },
+                    { $count: 'count' },
+                ]),
             ]);
             const statusCounts = statusCountsRaw.map((row) => ({
                 status: row._id,
@@ -806,14 +856,22 @@ class LeadService {
             }));
             const statusCountMap = new Map(statusCounts.map((row) => [row.status, row.count]));
             const callbackOverdue = await Lead_1.default.countDocuments({
-                ...(filters.qualifierId ? { addedBy: filters.qualifierId } : {}),
+                ...(filters.qualifierId
+                    ? {
+                        $or: [
+                            { pickedBy: filters.qualifierId },
+                            { pickedBy: { $exists: false }, addedBy: filters.qualifierId },
+                            { pickedBy: null, addedBy: filters.qualifierId },
+                        ],
+                    }
+                    : {}),
                 nextCallbackAt: { $lt: new Date() },
             });
             return {
                 touchedLeads: touchedRaw[0]?.count || 0,
                 interested: statusCountMap.get('contacted_interested') || 0,
                 notInterested: statusCountMap.get('contacted_not_interested') || 0,
-                callbackScheduled: statusCountMap.get('contacted_interested') || 0,
+                callbackScheduled: callbackScheduledRaw[0]?.count || 0,
                 callbackOverdue,
                 statusCounts,
                 qualifierBreakdown: qualifierRaw.map((row) => ({
@@ -835,7 +893,11 @@ class LeadService {
         try {
             const leadMatch = {};
             if (filters.qualifierId) {
-                leadMatch.addedBy = filters.qualifierId;
+                leadMatch.$or = [
+                    { pickedBy: filters.qualifierId },
+                    { pickedBy: { $exists: false }, addedBy: filters.qualifierId },
+                    { pickedBy: null, addedBy: filters.qualifierId },
+                ];
             }
             const now = new Date();
             const statusHistoryMatch = {
@@ -870,8 +932,8 @@ class LeadService {
                         updatedAt: { $first: '$updatedAt' },
                         currentStatus: { $first: '$status' },
                         nextCallbackAt: { $first: '$nextCallbackAt' },
-                        qualifierName: { $first: '$addedByName' },
-                        qualifierId: { $first: '$addedBy' },
+                        qualifierName: { $first: { $ifNull: ['$pickedByName', '$addedByName'] } },
+                        qualifierId: { $first: { $ifNull: ['$pickedBy', '$addedBy'] } },
                         isDuplicate: { $first: '$isDuplicate' },
                         blacklisted: { $first: '$blacklisted' },
                         latestHistory: { $first: '$statusHistory' },

@@ -23,6 +23,12 @@ router.get('/follow-up-queue/stats', (0, roleAuth_1.requirePermission)('canViewL
 router.get('/creators', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getLeadCreators);
 // Get qualifiers list (for pick/transfer)
 router.get('/qualifiers', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getQualifiers);
+// Get onboarders list (for transfer)
+router.get('/onboarders', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getOnboarders);
+// Transfer notifications for current user
+router.get('/transfer-notifications', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getTransferNotifications);
+// Get transfer recipients list (all active admin users)
+router.get('/transfer-recipients', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getTransferRecipients);
 // Shared status reason codes for lead status updates
 router.get('/status-reason-codes', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getStatusReasonCodes);
 router.get('/status-analytics', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getStatusAnalytics);
@@ -38,9 +44,9 @@ router.get('/:leadId/conversion-status', (0, roleAuth_1.requirePermission)('canV
 router.get('/:leadId/verified-certificates', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getVerifiedCertificates);
 // Get lead by ID
 router.get('/:leadId', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getLead);
-// Pick lead (qualifier only)
+// Pick lead (qualifier/onboarder)
 router.post('/:leadId/pick', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.pickLead);
-// Transfer picked lead (qualifier only)
+// Transfer picked lead (qualifier/onboarder)
 router.post('/:leadId/transfer', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.transferLead);
 // Accept lead transfer (qualifier/onboarder only)
 router.post('/:leadId/accept-transfer', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.acceptTransferLead);

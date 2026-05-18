@@ -864,7 +864,7 @@ export class LeadService {
   }
 
   static async getCallbackQueueStats(
-    filters: Pick<CallbackQueueFilters, 'addedBy' | 'addedByAny'>
+    filters: Pick<CallbackQueueFilters, 'addedBy' | 'addedByAny' | 'ownerBy' | 'ownerByAny'>
   ): Promise<CallbackQueueStats> {
     try {
       const now = new Date();
@@ -1013,7 +1013,7 @@ export class LeadService {
   }
 
   static async getFollowUpQueueStats(
-    filters: Pick<FollowUpQueueFilters, 'addedBy' | 'addedByAny'>
+    filters: Pick<FollowUpQueueFilters, 'addedBy' | 'addedByAny' | 'ownerBy' | 'ownerByAny'>
   ): Promise<FollowUpQueueStats> {
     try {
       const now = new Date();

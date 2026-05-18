@@ -142,6 +142,23 @@ const LeadSchema = new mongoose_1.Schema({
     lastTransferredAt: {
         type: Date
     },
+    lastTransferDecision: {
+        type: String,
+        enum: ['accepted', 'rejected'],
+        default: undefined
+    },
+    lastTransferDecisionBy: {
+        type: String,
+        default: undefined
+    },
+    lastTransferDecisionByName: {
+        type: String,
+        default: undefined
+    },
+    lastTransferDecisionAt: {
+        type: Date,
+        default: undefined
+    },
     transferPendingTo: {
         type: String,
         index: true

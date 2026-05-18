@@ -577,6 +577,109 @@ class LeadController {
         }
     }
     /**
+     * Get active transfer recipients (all active admin users)
+     * GET /api/v1/onboarding/leads/transfer-recipients
+     */
+    static async getTransferRecipients(req, res) {
+        try {
+            const recipients = await AdminUser_1.default.find({ status: 'active' })
+                .sort({ name: 1, email: 1 })
+                .lean();
+            res.json({
+                success: true,
+                data: recipients.map((u) => ({
+                    userId: u.userId || u.uid,
+                    uid: u.uid,
+                    name: u.name || u.firstName || u.lastName || u.email,
+                    email: u.email,
+                    role: u.role,
+                })),
+            });
+        }
+        catch (error) {
+            logger_1.default.error('Error in getTransferRecipients controller', { error: error.message });
+            res.status(500).json({
+                success: false,
+                error: 'Failed to fetch transfer recipients',
+                message: error.message,
+            });
+        }
+    }
+    /**
+     * Get active onboarders for transfer
+     * GET /api/v1/onboarding/leads/onboarders
+     */
+    static async getOnboarders(req, res) {
+        try {
+            const onboarders = await AdminUser_1.default.find({ role: 'onboarder', status: 'active' })
+                .sort({ name: 1, email: 1 })
+                .lean();
+            res.json({
+                success: true,
+                data: onboarders.map((o) => ({
+                    userId: o.userId || o.uid,
+                    uid: o.uid,
+                    name: o.name || o.firstName || o.lastName || o.email,
+                    email: o.email,
+                })),
+            });
+        }
+        catch (error) {
+            logger_1.default.error('Error in getOnboarders controller', { error: error.message });
+            res.status(500).json({
+                success: false,
+                error: 'Failed to fetch onboarders',
+                message: error.message,
+            });
+        }
+    }
+    /**
+     * Get transfer decision notifications for current user
+     * GET /api/v1/onboarding/leads/transfer-notifications
+     */
+    static async getTransferNotifications(req, res) {
+        try {
+            if (!req.admin) {
+                res.status(401).json({ success: false, error: 'Authentication required' });
+                return;
+            }
+            const userId = getUserId(req) || '';
+            const { since } = req.query;
+            const sinceDate = since ? new Date(since) : undefined;
+            const filters = {
+                lastTransferDecisionAt: { $exists: true },
+                $or: [{ lastTransferredBy: userId }, { lastTransferDecisionBy: userId }],
+            };
+            if (sinceDate && !Number.isNaN(sinceDate.getTime())) {
+                filters.lastTransferDecisionAt.$gt = sinceDate;
+            }
+            const leads = await Lead_1.default.find(filters)
+                .select('leadId lastTransferDecision lastTransferDecisionAt lastTransferredBy lastTransferredByName lastTransferDecisionBy lastTransferDecisionByName')
+                .sort({ lastTransferDecisionAt: -1 })
+                .lean();
+            res.json({
+                success: true,
+                data: leads.map((lead) => ({
+                    leadId: lead.leadId,
+                    decision: lead.lastTransferDecision,
+                    decidedAt: lead.lastTransferDecisionAt,
+                    fromUserId: lead.lastTransferredBy,
+                    fromUserName: lead.lastTransferredByName,
+                    toUserId: lead.lastTransferDecisionBy,
+                    toUserName: lead.lastTransferDecisionByName,
+                })),
+            });
+        }
+        catch (error) {
+            logger_1.default.error('Error in getTransferNotifications controller', { error: error.message });
+            res.status(500).json({
+                success: false,
+                error: 'Failed to fetch transfer notifications',
+                message: error.message,
+            });
+        }
+    }
+    /**
      * Search and filter leads
      * GET /api/v1/admin/caos/leads
      * ✅ ISOLATION: Qualifiers only see leads they added
@@ -1297,7 +1400,7 @@ class LeadController {
         }
     }
     /**
-     * Pick a lead (qualifier only)
+     * Pick a lead (qualifier or onboarder)
      * POST /api/v1/onboarding/leads/:leadId/pick
      */
     static async pickLead(req, res) {
@@ -1307,8 +1410,8 @@ class LeadController {
                 return;
             }
             const role = req.admin.role;
-            if (role !== 'qualifier') {
-                res.status(403).json({ success: false, error: 'Only qualifiers can pick leads' });
+            if (role !== 'qualifier' && role !== 'onboarder') {
+                res.status(403).json({ success: false, error: 'Only qualifiers and onboarders can pick leads' });
                 return;
             }
             const { leadId } = req.params;
@@ -1340,7 +1443,7 @@ class LeadController {
         }
     }
     /**
-     * Transfer a picked lead to another qualifier
+     * Request transfer of a picked lead to another admin user
      * POST /api/v1/onboarding/leads/:leadId/transfer
      */
     static async transferLead(req, res) {
@@ -1350,8 +1453,8 @@ class LeadController {
                 return;
             }
             const role = req.admin.role;
-            if (role !== 'qualifier') {
-                res.status(403).json({ success: false, error: 'Only qualifiers can transfer leads' });
+            if (role !== 'qualifier' && role !== 'onboarder') {
+                res.status(403).json({ success: false, error: 'Only qualifiers and onboarders can transfer leads' });
                 return;
             }
             const { leadId } = req.params;
@@ -1371,30 +1474,33 @@ class LeadController {
                 res.status(403).json({
                     success: false,
                     error: 'Permission denied',
-                    message: 'Only the picked qualifier can transfer this lead.'
+                    message: 'Only the picked user can transfer this lead.'
                 });
                 return;
             }
             const target = await AdminUser_1.default.findOne({
                 $or: [{ userId: targetUserId }, { uid: targetUserId }],
-                role: 'qualifier',
                 status: 'active'
             }).lean();
             if (!target) {
-                res.status(404).json({ success: false, error: 'Target qualifier not found' });
+                res.status(404).json({ success: false, error: 'Target user not found' });
                 return;
             }
             const targetId = target.userId || target.uid || targetUserId;
             const targetName = target.name || target.firstName || target.lastName || target.email;
-            lead.pickedBy = targetId;
-            lead.pickedByName = targetName;
-            lead.pickedAt = new Date();
+            lead.transferPendingTo = targetId;
+            lead.transferPendingToName = targetName;
+            lead.transferPendingAt = new Date();
+            lead.lastTransferDecision = undefined;
+            lead.lastTransferDecisionBy = undefined;
+            lead.lastTransferDecisionByName = undefined;
+            lead.lastTransferDecisionAt = undefined;
             lead.lastTransferredBy = userId;
             lead.lastTransferredByName = userName;
             lead.lastTransferredAt = new Date();
             await lead.save();
-            await LeadService_1.LeadService.logActivity(leadId, 'lead_transfer', `Lead transferred to ${targetName || targetId}`, userId, userName, { targetUserId: targetId, targetUserName: targetName });
-            res.json({ success: true, data: lead, message: 'Lead transferred successfully' });
+            await LeadService_1.LeadService.logActivity(leadId, 'lead_transfer_request', `Transfer requested for ${targetName || targetId}`, userId, userName, { targetUserId: targetId, targetUserName: targetName });
+            res.json({ success: true, data: lead, message: 'Transfer request sent successfully' });
         }
         catch (error) {
             logger_1.default.error('Error in transferLead controller', { error: error.message, leadId: req.params.leadId });
@@ -1436,6 +1542,10 @@ class LeadController {
             lead.transferPendingTo = undefined;
             lead.transferPendingToName = undefined;
             lead.transferPendingAt = undefined;
+            lead.lastTransferDecision = 'accepted';
+            lead.lastTransferDecisionBy = userId;
+            lead.lastTransferDecisionByName = userName;
+            lead.lastTransferDecisionAt = new Date();
             await lead.save();
             await LeadService_1.LeadService.logActivity(leadId, 'transfer_accept', `Lead transfer accepted by ${userName}. New owner: ${userName}`, userId, userName, { fromUserId: senderId, fromUserName: senderName });
             res.json({ success: true, data: lead, message: 'Lead transfer accepted successfully' });
@@ -1477,6 +1587,10 @@ class LeadController {
             lead.transferPendingTo = undefined;
             lead.transferPendingToName = undefined;
             lead.transferPendingAt = undefined;
+            lead.lastTransferDecision = 'rejected';
+            lead.lastTransferDecisionBy = userId;
+            lead.lastTransferDecisionByName = userName;
+            lead.lastTransferDecisionAt = new Date();
             await lead.save();
             await LeadService_1.LeadService.logActivity(leadId, 'transfer_reject', `Lead transfer rejected by ${userName}`, userId, userName, { fromUserId: senderId, fromUserName: senderName });
             res.json({ success: true, data: lead, message: 'Lead transfer rejected successfully' });

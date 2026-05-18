@@ -36,6 +36,21 @@ export declare class LeadController {
      */
     static getQualifiers(req: AdminRequest, res: Response): Promise<void>;
     /**
+     * Get active transfer recipients (all active admin users)
+     * GET /api/v1/onboarding/leads/transfer-recipients
+     */
+    static getTransferRecipients(req: AdminRequest, res: Response): Promise<void>;
+    /**
+     * Get active onboarders for transfer
+     * GET /api/v1/onboarding/leads/onboarders
+     */
+    static getOnboarders(req: AdminRequest, res: Response): Promise<void>;
+    /**
+     * Get transfer decision notifications for current user
+     * GET /api/v1/onboarding/leads/transfer-notifications
+     */
+    static getTransferNotifications(req: AdminRequest, res: Response): Promise<void>;
+    /**
      * Search and filter leads
      * GET /api/v1/admin/caos/leads
      * ✅ ISOLATION: Qualifiers only see leads they added
@@ -102,12 +117,12 @@ export declare class LeadController {
      */
     static deleteLead(req: AdminRequest, res: Response): Promise<void>;
     /**
-     * Pick a lead (qualifier only)
+     * Pick a lead (qualifier or onboarder)
      * POST /api/v1/onboarding/leads/:leadId/pick
      */
     static pickLead(req: AdminRequest, res: Response): Promise<void>;
     /**
-     * Transfer a picked lead to another qualifier
+     * Request transfer of a picked lead to another admin user
      * POST /api/v1/onboarding/leads/:leadId/transfer
      */
     static transferLead(req: AdminRequest, res: Response): Promise<void>;
