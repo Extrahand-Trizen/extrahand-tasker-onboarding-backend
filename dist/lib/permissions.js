@@ -31,7 +31,7 @@ exports.PERMISSIONS = {
     },
     onboarder: {
         canViewLeads: true,
-        canCreateLead: false,
+        canCreateLead: true,
         canUpdateLead: true,
         canDeleteLead: false,
         canUpdateStatus: 'all',

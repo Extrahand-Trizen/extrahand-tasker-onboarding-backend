@@ -844,7 +844,7 @@ class LeadController {
                 });
                 return;
             }
-            const { city, primarySkill, startDate, endDate, dueType, bucket, page, limit, } = req.query;
+            const { city, primarySkill, startDate, endDate, dueType, bucket, page, limit, pickedBy, ownerBy, } = req.query;
             const role = req.admin.role;
             const scopedIds = getScopedAddedByIds(req);
             const rawStartDate = startDate;
@@ -865,8 +865,17 @@ class LeadController {
                 page: page ? parseInt(page) : undefined,
                 limit: limit ? parseInt(limit) : undefined,
             };
+            if (role === 'onboarder') {
+                filters.pickedBy = (getUserId(req) || '');
+            }
+            else if (pickedBy) {
+                filters.pickedBy = pickedBy;
+            }
             if (role === 'qualifier' && scopedIds.length > 0) {
                 filters.ownerByAny = scopedIds;
+            }
+            else if (ownerBy) {
+                filters.ownerBy = ownerBy;
             }
             else if (req.query.addedBy) {
                 filters.ownerBy = req.query.addedBy;
@@ -910,7 +919,10 @@ class LeadController {
             const role = req.admin.role;
             const scopedIds = getScopedAddedByIds(req);
             const filters = {};
-            if (role === 'qualifier' && scopedIds.length > 0) {
+            if (role === 'onboarder') {
+                filters.pickedBy = getUserId(req) || undefined;
+            }
+            else if (role === 'qualifier' && scopedIds.length > 0) {
                 filters.ownerByAny = scopedIds;
             }
             else if (req.query.addedBy) {
@@ -947,7 +959,7 @@ class LeadController {
             }
             const role = req.admin.role;
             const userId = getUserId(req);
-            const { from, to, qualifierId } = req.query;
+            const { from, to, qualifierId, pickedBy, category } = req.query;
             const fromDate = from ? new Date(from) : new Date(Date.now() - 6 * 24 * 60 * 60 * 1000);
             const toDate = to ? new Date(to) : new Date();
             if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime())) {
@@ -961,12 +973,19 @@ class LeadController {
             const filters = {
                 from: fromDate,
                 to: toDate,
+                category: category ? String(category) : undefined,
             };
             if (role === 'qualifier' && userId) {
                 filters.qualifierId = userId;
             }
-            else if (qualifierId && (role === 'onboarder' || role === 'lead_access_manager')) {
+            else if (role === 'onboarder' && userId) {
+                filters.pickedBy = userId;
+            }
+            else if (qualifierId && role === 'lead_access_manager') {
                 filters.qualifierId = qualifierId;
+            }
+            else if (pickedBy && role === 'lead_access_manager') {
+                filters.pickedBy = pickedBy;
             }
             const analytics = await LeadService_1.LeadService.getStatusAnalytics(filters);
             res.json({
@@ -999,7 +1018,7 @@ class LeadController {
             }
             const role = req.admin.role;
             const userId = getUserId(req);
-            const { from, to, qualifierId, format = 'csv', template = 'eod', reportCategory = 'touched_leads', includeNotes = 'false', } = req.query;
+            const { from, to, qualifierId, pickedBy, format = 'csv', template = 'eod', reportCategory = 'touched_leads', includeNotes = 'false', category, exportLayout, } = req.query;
             if (!['csv', 'xlsx'].includes(String(format))) {
                 res.status(400).json({
                     success: false,
@@ -1041,12 +1060,21 @@ class LeadController {
                 template: template,
                 reportCategory: reportCategory,
                 includeNotes: String(includeNotes) === 'true',
+                category: category ? String(category) : undefined,
+                exportLayout: exportLayout === 'qualifier' ? 'qualifier' : 'standard',
             };
             if (role === 'qualifier' && userId) {
                 filters.qualifierId = userId;
+                filters.exportLayout = 'qualifier';
             }
-            else if (qualifierId && (role === 'onboarder' || role === 'lead_access_manager')) {
+            else if (role === 'onboarder' && userId) {
+                filters.pickedBy = userId;
+            }
+            else if (qualifierId && role === 'lead_access_manager') {
                 filters.qualifierId = qualifierId;
+            }
+            else if (pickedBy && role === 'lead_access_manager') {
+                filters.pickedBy = pickedBy;
             }
             const report = await LeadService_1.LeadService.exportStatusReport(filters);
             await LeadService_1.LeadService.logActivity('SYSTEM', 'report_export', `Status report export (${filters.reportCategory}, ${report.rowCount} rows)`, userId || 'unknown', req.admin.name, {
@@ -1060,6 +1088,8 @@ class LeadController {
                     template: filters.template,
                     reportCategory: filters.reportCategory,
                     includeNotes: filters.includeNotes,
+                    category: filters.category,
+                    exportLayout: filters.exportLayout,
                 },
                 rowCount: report.rowCount
             });

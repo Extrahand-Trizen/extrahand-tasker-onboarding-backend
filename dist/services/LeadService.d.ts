@@ -106,6 +106,7 @@ export interface FollowUpQueueFilters {
     addedByAny?: string[];
     ownerBy?: string;
     ownerByAny?: string[];
+    pickedBy?: string;
     startDate?: Date;
     endDate?: Date;
     dueType?: FollowUpDueType;
@@ -134,6 +135,8 @@ export interface StatusAnalyticsFilters {
     from: Date;
     to: Date;
     qualifierId?: string;
+    pickedBy?: string;
+    category?: string;
 }
 export type StatusReportCategory = 'touched_leads' | 'interested' | 'callback_scheduled' | 'callback_overdue';
 export interface StatusReportExportFilters extends StatusAnalyticsFilters {
@@ -141,11 +144,20 @@ export interface StatusReportExportFilters extends StatusAnalyticsFilters {
     template: 'eod' | 'detailed';
     reportCategory: StatusReportCategory;
     includeNotes?: boolean;
+    /** Primary category slug filter for exports */
+    category?: string;
+    /** Qualifier-friendly column layout */
+    exportLayout?: 'standard' | 'qualifier';
 }
 export declare class LeadService {
     private static readonly STATUS_REPORT_LABELS;
     private static formatIST;
     private static labelForReport;
+    private static readonly PRIMARY_CATEGORY_LABELS;
+    private static categoryLabelForExport;
+    private static contactStatusForExport;
+    private static registrationStatusForExport;
+    private static buildCategoryMatch;
     private static textForSpreadsheet;
     private static applyWorksheetLayout;
     private static getISTDayBounds;
@@ -202,8 +214,9 @@ export declare class LeadService {
         limit: number;
         totalPages: number;
     }>;
-    static getFollowUpQueueStats(filters: Pick<FollowUpQueueFilters, 'addedBy' | 'addedByAny' | 'ownerBy' | 'ownerByAny'>): Promise<FollowUpQueueStats>;
+    static getFollowUpQueueStats(filters: Pick<FollowUpQueueFilters, 'addedBy' | 'addedByAny' | 'ownerBy' | 'ownerByAny' | 'pickedBy'>): Promise<FollowUpQueueStats>;
     static getStatusAnalytics(filters: StatusAnalyticsFilters): Promise<{
+        leadsAdded: number;
         touchedLeads: number;
         interested: number;
         notInterested: number;
@@ -218,6 +231,10 @@ export declare class LeadService {
             qualifierName: string;
             touchedLeads: number;
         }>;
+        categoryBreakdown: Array<{
+            category: string;
+            count: number;
+        }>;
     }>;
     static exportStatusReport(filters: StatusReportExportFilters): Promise<{
         filename: string;
@@ -225,6 +242,7 @@ export declare class LeadService {
         buffer: Buffer;
         rowCount: number;
     }>;
+    private static exportQualifierStatusReport;
     /**
      * Update lead
      */

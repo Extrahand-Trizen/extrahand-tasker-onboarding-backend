@@ -123,6 +123,7 @@ export interface FollowUpQueueFilters {
   addedByAny?: string[];
   ownerBy?: string;
   ownerByAny?: string[];
+  pickedBy?: string;
   startDate?: Date;
   endDate?: Date;
   dueType?: FollowUpDueType;
@@ -154,6 +155,8 @@ export interface StatusAnalyticsFilters {
   from: Date;
   to: Date;
   qualifierId?: string;
+  pickedBy?: string;
+  category?: string;
 }
 
 export type StatusReportCategory =
@@ -167,6 +170,10 @@ export interface StatusReportExportFilters extends StatusAnalyticsFilters {
   template: 'eod' | 'detailed';
   reportCategory: StatusReportCategory;
   includeNotes?: boolean;
+  /** Primary category slug filter for exports */
+  category?: string;
+  /** Qualifier-friendly column layout */
+  exportLayout?: 'standard' | 'qualifier';
 }
 
 export class LeadService {
@@ -203,6 +210,65 @@ export class LeadService {
   private static labelForReport(value?: string | null): string {
     if (!value) return '';
     return this.STATUS_REPORT_LABELS[value] || value.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
+  }
+
+  private static readonly PRIMARY_CATEGORY_LABELS: Record<string, string> = {
+    cleaning: 'Cleaning',
+    handyperson: 'Handyperson',
+    moving: 'Moving & Delivery',
+    gardening: 'Gardening',
+    business: 'Business Services',
+    marketing: 'Marketing & Design',
+    tech: 'Tech Support',
+    tutoring: 'Tutoring',
+    photography: 'Photography',
+    beauty: 'Beauty & Wellness',
+    'pet-care': 'Pet Care',
+    events: 'Events & Entertainment',
+    'water-tanker': 'Water & Tanker Services',
+    'ac-repair-service': 'AC Repair & Service',
+    'security-services': 'Security Services',
+    'senior-care': 'Senior Care / Elder Care',
+    'driver-chauffeur': 'Driver / Chauffeur Services',
+    'cooking-home-chef': 'Cooking / Home Chef',
+    'laundry-ironing': 'Laundry & Ironing',
+    other: 'Other',
+  };
+
+  private static categoryLabelForExport(value?: string | null): string {
+    if (!value) return '';
+    return this.PRIMARY_CATEGORY_LABELS[value] || value;
+  }
+
+  private static contactStatusForExport(lead: {
+    status?: string;
+    nextCallbackAt?: Date | null;
+  }): string {
+    if (lead.status === 'contacted_interested' && lead.nextCallbackAt) {
+      return 'Callback Scheduled';
+    }
+    if (lead.status === 'contacted_interested') return 'Interested';
+    if (lead.status === 'contacted_not_interested') return 'Not Interested';
+    if (lead.status === 'contacted_not_lifted') return 'Not Lifted';
+    return '';
+  }
+
+  private static registrationStatusForExport(lead: {
+    conversionData?: { platformUid?: string; isAadhaarVerified?: boolean };
+  }): string {
+    const conversion = lead.conversionData;
+    if (!conversion?.platformUid) return 'Not Registered';
+    if (conversion.isAadhaarVerified) return 'Verified';
+    return 'Registered';
+  }
+
+  private static buildCategoryMatch(category: string): Record<string, unknown> {
+    return {
+      $or: [
+        { primaryCategory: category },
+        { primarySkill: category },
+      ],
+    };
   }
 
   private static textForSpreadsheet(value?: string | number | null): string {
@@ -671,7 +737,13 @@ export class LeadService {
       }
 
       if (filters.primarySkill) {
-        query.primarySkill = { $regex: new RegExp(filters.primarySkill, 'i') };
+        query.$and = query.$and || [];
+        query.$and.push({
+          $or: [
+            { primaryCategory: filters.primarySkill },
+            { primarySkill: filters.primarySkill },
+          ],
+        });
       }
 
       if (filters.source) {
@@ -684,7 +756,13 @@ export class LeadService {
         query.addedBy = filters.addedBy;
       }
 
-      this.applyOwnerScope(query, filters.ownerBy, filters.ownerByAny);
+      if (filters.pickedBy) {
+        query.pickedBy = filters.pickedBy;
+      }
+
+      if (!filters.pickedBy) {
+        this.applyOwnerScope(query, filters.ownerBy, filters.ownerByAny);
+      }
 
       if (filters.pickedBy) {
         query.pickedBy = filters.pickedBy;
@@ -709,13 +787,16 @@ export class LeadService {
       // Text search (name, phone, city, or leadId)
       if (filters.search) {
         const searchRegex = new RegExp(filters.search, 'i');
-        query.$or = [
-          { name: searchRegex },
-          { phone: searchRegex },
-          { landline: searchRegex },
-          { city: searchRegex },
-          { leadId: searchRegex }
-        ];
+        query.$and = query.$and || [];
+        query.$and.push({
+          $or: [
+            { name: searchRegex },
+            { phone: searchRegex },
+            { landline: searchRegex },
+            { city: searchRegex },
+            { leadId: searchRegex },
+          ],
+        });
       }
 
       if (filters.statusChangedBy) {
@@ -941,7 +1022,11 @@ export class LeadService {
         query.addedBy = filters.addedBy;
       }
 
-      this.applyOwnerScope(query, filters.ownerBy, filters.ownerByAny);
+      if (filters.pickedBy) {
+        query.pickedBy = filters.pickedBy;
+      } else {
+        this.applyOwnerScope(query, filters.ownerBy, filters.ownerByAny);
+      }
 
       if (filters.dueType === 'callback') {
         query.nextCallbackAt = { $exists: true, $ne: null };
@@ -1013,7 +1098,7 @@ export class LeadService {
   }
 
   static async getFollowUpQueueStats(
-    filters: Pick<FollowUpQueueFilters, 'addedBy' | 'addedByAny' | 'ownerBy' | 'ownerByAny'>
+    filters: Pick<FollowUpQueueFilters, 'addedBy' | 'addedByAny' | 'ownerBy' | 'ownerByAny' | 'pickedBy'>
   ): Promise<FollowUpQueueStats> {
     try {
       const now = new Date();
@@ -1026,7 +1111,11 @@ export class LeadService {
         scope.addedBy = filters.addedBy;
       }
 
-      this.applyOwnerScope(scope, filters.ownerBy, filters.ownerByAny);
+      if (filters.pickedBy) {
+        scope.pickedBy = filters.pickedBy;
+      } else {
+        this.applyOwnerScope(scope, filters.ownerBy, filters.ownerByAny);
+      }
 
       const [
         callbackDueToday,
@@ -1081,6 +1170,7 @@ export class LeadService {
   }
 
   static async getStatusAnalytics(filters: StatusAnalyticsFilters): Promise<{
+    leadsAdded: number;
     touchedLeads: number;
     interested: number;
     notInterested: number;
@@ -1088,10 +1178,13 @@ export class LeadService {
     callbackOverdue: number;
     statusCounts: Array<{ status: string; count: number }>;
     qualifierBreakdown: Array<{ qualifierId: string; qualifierName: string; touchedLeads: number }>;
+    categoryBreakdown: Array<{ category: string; count: number }>;
   }> {
     try {
       const leadMatch: any = {};
-      if (filters.qualifierId) {
+      if (filters.pickedBy) {
+        leadMatch.pickedBy = filters.pickedBy;
+      } else if (filters.qualifierId) {
         leadMatch.$or = [
           { pickedBy: filters.qualifierId },
           { pickedBy: { $exists: false }, addedBy: filters.qualifierId },
@@ -1172,20 +1265,55 @@ export class LeadService {
       }));
       const statusCountMap = new Map(statusCounts.map((row) => [row.status, row.count]));
 
-      const callbackOverdue = await Lead.countDocuments({
-        ...(filters.qualifierId
-          ? {
-              $or: [
-                { pickedBy: filters.qualifierId },
-                { pickedBy: { $exists: false }, addedBy: filters.qualifierId },
-                { pickedBy: null, addedBy: filters.qualifierId },
-              ],
-            }
-          : {}),
+      const callbackOverdueMatch: Record<string, unknown> = {
         nextCallbackAt: { $lt: new Date() },
-      });
+      };
+      if (filters.pickedBy) {
+        callbackOverdueMatch.pickedBy = filters.pickedBy;
+      } else if (filters.qualifierId) {
+        callbackOverdueMatch.$or = [
+          { pickedBy: filters.qualifierId },
+          { pickedBy: { $exists: false }, addedBy: filters.qualifierId },
+          { pickedBy: null, addedBy: filters.qualifierId },
+        ];
+      }
+
+      const callbackOverdue = await Lead.countDocuments(callbackOverdueMatch);
+
+      const leadsAddedMatch: Record<string, unknown> = {
+        createdAt: { $gte: filters.from, $lte: filters.to },
+      };
+      if (filters.pickedBy) {
+        leadsAddedMatch.pickedBy = filters.pickedBy;
+        delete leadsAddedMatch.createdAt;
+        leadsAddedMatch.pickedAt = { $gte: filters.from, $lte: filters.to };
+      } else if (filters.qualifierId) {
+        leadsAddedMatch.addedBy = filters.qualifierId;
+      }
+      if (filters.category) {
+        Object.assign(leadsAddedMatch, this.buildCategoryMatch(filters.category));
+      }
+
+      const categoryBreakdownRaw = await Lead.aggregate([
+        { $match: leadsAddedMatch },
+        {
+          $group: {
+            _id: { $ifNull: ['$primaryCategory', { $ifNull: ['$primarySkill', 'other'] }] },
+            count: { $sum: 1 },
+          },
+        },
+        { $sort: { count: -1 } },
+      ]);
+
+      const categoryBreakdown = categoryBreakdownRaw.map((row: any) => ({
+        category: row._id,
+        count: row.count,
+      }));
+
+      const leadsAdded = await Lead.countDocuments(leadsAddedMatch);
 
       return {
+        leadsAdded,
         touchedLeads: touchedRaw[0]?.count || 0,
         interested: statusCountMap.get('contacted_interested') || 0,
         notInterested: statusCountMap.get('contacted_not_interested') || 0,
@@ -1197,6 +1325,7 @@ export class LeadService {
           qualifierName: row.qualifierName,
           touchedLeads: row.touchedLeads,
         })),
+        categoryBreakdown,
       };
     } catch (error: any) {
       logger.error('Error fetching status analytics', {
@@ -1214,14 +1343,26 @@ export class LeadService {
     rowCount: number;
   }> {
     try {
+      if (filters.exportLayout === 'qualifier' && filters.qualifierId) {
+        return this.exportQualifierStatusReport(filters);
+      }
+
       const leadMatch: any = {};
-      if (filters.qualifierId) {
+      if (filters.pickedBy) {
+        leadMatch.pickedBy = filters.pickedBy;
+      } else if (filters.qualifierId) {
         leadMatch.$or = [
           { pickedBy: filters.qualifierId },
           { pickedBy: { $exists: false }, addedBy: filters.qualifierId },
           { pickedBy: null, addedBy: filters.qualifierId },
         ];
       }
+
+      if (filters.category) {
+        leadMatch.$and = leadMatch.$and || [];
+        leadMatch.$and.push(this.buildCategoryMatch(filters.category));
+      }
+
       const now = new Date();
 
       const statusHistoryMatch: any = {
@@ -1345,6 +1486,73 @@ export class LeadService {
       });
       throw error;
     }
+  }
+
+  private static async exportQualifierStatusReport(
+    filters: StatusReportExportFilters
+  ): Promise<{ filename: string; mimeType: string; buffer: Buffer; rowCount: number }> {
+    const leadMatch: Record<string, unknown> = filters.category
+      ? {
+          $and: [
+            { addedBy: filters.qualifierId },
+            { createdAt: { $gte: filters.from, $lte: filters.to } },
+            this.buildCategoryMatch(filters.category),
+          ],
+        }
+      : {
+          addedBy: filters.qualifierId,
+          createdAt: { $gte: filters.from, $lte: filters.to },
+        };
+
+    const leads = await Lead.find(leadMatch)
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const reportRows = leads.map((lead) => {
+      const row: Record<string, string> = {
+        Name: this.textForSpreadsheet(lead.name),
+        Phone: this.textForSpreadsheet(lead.phone || lead.landline || ''),
+        Category: this.categoryLabelForExport(lead.primaryCategory || lead.primarySkill),
+        'Sub Category': this.textForSpreadsheet(lead.secondaryCategory || lead.secondarySkill),
+        City: this.textForSpreadsheet(lead.city),
+        'Added Date': this.formatIST(lead.createdAt),
+        'Picked By': this.textForSpreadsheet(lead.pickedByName || ''),
+        'Contact Status': this.contactStatusForExport(lead),
+        'Registration Status': this.registrationStatusForExport(lead),
+      };
+
+      if (lead.email) row.Email = this.textForSpreadsheet(lead.email);
+      if (lead.state) row.State = this.textForSpreadsheet(lead.state);
+      if (lead.address) row['Local Area'] = this.textForSpreadsheet(lead.address);
+      if (lead.pincode) row.Pincode = this.textForSpreadsheet(lead.pincode);
+
+      return row;
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(reportRows);
+    this.applyWorksheetLayout(worksheet, reportRows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Leads Report');
+
+    const dateStamp = new Date().toISOString().slice(0, 10);
+    const categorySlug = filters.category ? `-${filters.category}` : '';
+    const filename = `leads-report${categorySlug}-${dateStamp}.${filters.format}`;
+    const mimeType =
+      filters.format === 'xlsx'
+        ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        : 'text/csv';
+
+    const buffer =
+      filters.format === 'xlsx'
+        ? XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer
+        : Buffer.from(XLSX.utils.sheet_to_csv(worksheet), 'utf-8');
+
+    return {
+      filename,
+      mimeType,
+      buffer,
+      rowCount: reportRows.length,
+    };
   }
 
   /**

@@ -1001,6 +1001,8 @@ export class LeadController {
         bucket,
         page,
         limit,
+        pickedBy,
+        ownerBy,
       } = req.query;
       const role = req.admin.role as UserRole;
       const scopedIds = getScopedAddedByIds(req);
@@ -1025,8 +1027,16 @@ export class LeadController {
         limit: limit ? parseInt(limit as string) : undefined,
       };
 
+      if (role === 'onboarder') {
+        filters.pickedBy = (getUserId(req) || '') as string;
+      } else if (pickedBy) {
+        filters.pickedBy = pickedBy as string;
+      }
+
       if (role === 'qualifier' && scopedIds.length > 0) {
         filters.ownerByAny = scopedIds;
+      } else if (ownerBy) {
+        filters.ownerBy = ownerBy as string;
       } else if (req.query.addedBy) {
         filters.ownerBy = req.query.addedBy as string;
       }
@@ -1072,11 +1082,13 @@ export class LeadController {
       const role = req.admin.role as UserRole;
       const scopedIds = getScopedAddedByIds(req);
 
-      const filters: Pick<FollowUpQueueFilters, 'addedBy' | 'addedByAny'> = {};
-      if (role === 'qualifier' && scopedIds.length > 0) {
-        (filters as any).ownerByAny = scopedIds;
+      const filters: Pick<FollowUpQueueFilters, 'addedBy' | 'addedByAny' | 'ownerBy' | 'ownerByAny' | 'pickedBy'> = {};
+      if (role === 'onboarder') {
+        filters.pickedBy = getUserId(req) || undefined;
+      } else if (role === 'qualifier' && scopedIds.length > 0) {
+        filters.ownerByAny = scopedIds;
       } else if (req.query.addedBy) {
-        (filters as any).ownerBy = req.query.addedBy as string;
+        filters.ownerBy = req.query.addedBy as string;
       }
 
       const stats = await LeadService.getFollowUpQueueStats(filters);
@@ -1112,7 +1124,7 @@ export class LeadController {
 
       const role = req.admin.role as UserRole;
       const userId = getUserId(req);
-      const { from, to, qualifierId } = req.query;
+      const { from, to, qualifierId, pickedBy, category } = req.query;
 
       const fromDate = from ? new Date(from as string) : new Date(Date.now() - 6 * 24 * 60 * 60 * 1000);
       const toDate = to ? new Date(to as string) : new Date();
@@ -1126,15 +1138,20 @@ export class LeadController {
         return;
       }
 
-      const filters: { from: Date; to: Date; qualifierId?: string } = {
+      const filters: { from: Date; to: Date; qualifierId?: string; pickedBy?: string; category?: string } = {
         from: fromDate,
         to: toDate,
+        category: category ? String(category) : undefined,
       };
 
       if (role === 'qualifier' && userId) {
         filters.qualifierId = userId;
-      } else if (qualifierId && (role === 'onboarder' || role === 'lead_access_manager')) {
+      } else if (role === 'onboarder' && userId) {
+        filters.pickedBy = userId;
+      } else if (qualifierId && role === 'lead_access_manager') {
         filters.qualifierId = qualifierId as string;
+      } else if (pickedBy && role === 'lead_access_manager') {
+        filters.pickedBy = pickedBy as string;
       }
 
       const analytics = await LeadService.getStatusAnalytics(filters);
@@ -1173,10 +1190,13 @@ export class LeadController {
         from,
         to,
         qualifierId,
+        pickedBy,
         format = 'csv',
         template = 'eod',
         reportCategory = 'touched_leads',
         includeNotes = 'false',
+        category,
+        exportLayout,
       } = req.query;
 
       if (!['csv', 'xlsx'].includes(String(format))) {
@@ -1222,10 +1242,13 @@ export class LeadController {
         from: Date;
         to: Date;
         qualifierId?: string;
+        pickedBy?: string;
         format: 'csv' | 'xlsx';
         template: 'eod' | 'detailed';
         reportCategory: 'touched_leads' | 'interested' | 'callback_scheduled' | 'callback_overdue';
         includeNotes?: boolean;
+        category?: string;
+        exportLayout?: 'standard' | 'qualifier';
       } = {
         from: fromDate,
         to: toDate,
@@ -1233,12 +1256,19 @@ export class LeadController {
         template: template as 'eod' | 'detailed',
         reportCategory: reportCategory as 'touched_leads' | 'interested' | 'callback_scheduled' | 'callback_overdue',
         includeNotes: String(includeNotes) === 'true',
+        category: category ? String(category) : undefined,
+        exportLayout: exportLayout === 'qualifier' ? 'qualifier' : 'standard',
       };
 
       if (role === 'qualifier' && userId) {
         filters.qualifierId = userId;
-      } else if (qualifierId && (role === 'onboarder' || role === 'lead_access_manager')) {
+        filters.exportLayout = 'qualifier';
+      } else if (role === 'onboarder' && userId) {
+        filters.pickedBy = userId;
+      } else if (qualifierId && role === 'lead_access_manager') {
         filters.qualifierId = qualifierId as string;
+      } else if (pickedBy && role === 'lead_access_manager') {
+        filters.pickedBy = pickedBy as string;
       }
 
       const report = await LeadService.exportStatusReport(filters);
@@ -1260,6 +1290,8 @@ export class LeadController {
             template: filters.template,
             reportCategory: filters.reportCategory,
             includeNotes: filters.includeNotes,
+            category: filters.category,
+            exportLayout: filters.exportLayout,
           },
           rowCount: report.rowCount
         }
