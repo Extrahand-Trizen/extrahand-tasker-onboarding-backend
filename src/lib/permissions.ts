@@ -70,7 +70,7 @@ export const PERMISSIONS: Record<UserRole, Permissions> = {
   },
   onboarder: {
     canViewLeads: true,
-    canCreateLead: false,
+    canCreateLead: true,
     canUpdateLead: true,
     canDeleteLead: false,
     canUpdateStatus: 'all',
