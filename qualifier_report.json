@@ -1,0 +1,475 @@
+{
+  "qualifierStats": [
+    {
+      "id": "ADM-1776411092102-380022BB",
+      "name": "TADEMBHARATH7@GMAIL.COM",
+      "total": 104,
+      "registered": 15,
+      "verified": 4
+    },
+    {
+      "id": "ADM-1776413054383-D4656795",
+      "name": "sdurgam751@gmail.com",
+      "total": 158,
+      "registered": 15,
+      "verified": 3
+    },
+    {
+      "id": "ADM-1776410284855-458F0C5B",
+      "name": "santhoshumareddy@gmail.com",
+      "total": 269,
+      "registered": 7,
+      "verified": 1
+    },
+    {
+      "id": "ADM-1768826151553-1D83BC79",
+      "name": "shivakumar lalkota",
+      "total": 1254,
+      "registered": 6,
+      "verified": 1
+    },
+    {
+      "id": "ADM-1768979550622-C9AB0281",
+      "name": "bharathreddy",
+      "total": 657,
+      "registered": 5,
+      "verified": 0
+    },
+    {
+      "id": "ADM-1768826185642-4B876AB0",
+      "name": "Nallavolu saikumar",
+      "total": 709,
+      "registered": 3,
+      "verified": 2
+    },
+    {
+      "id": "ADM-1768804594248-1FA54557",
+      "name": "Harish Kumar",
+      "total": 187,
+      "registered": 3,
+      "verified": 1
+    },
+    {
+      "id": "ADM-1776336019282-A9DBB689",
+      "name": "TADEM BHARATH KUMAR",
+      "total": 1,
+      "registered": 1,
+      "verified": 1
+    },
+    {
+      "id": "ADM-1776314253299-03497F12",
+      "name": "U Santhosh reddy",
+      "total": 6,
+      "registered": 0,
+      "verified": 0
+    },
+    {
+      "id": "ADM-1778748712374-F4CF8219",
+      "name": "Asish",
+      "total": 3,
+      "registered": 0,
+      "verified": 0
+    },
+    {
+      "id": "ADM-1768464022539-099AB971",
+      "name": "Tarun",
+      "total": 1,
+      "registered": 0,
+      "verified": 0
+    },
+    {
+      "id": "ADM-1768462598237-20111DAA",
+      "name": "Lead Access Manager",
+      "total": 29,
+      "registered": 0,
+      "verified": 0
+    }
+  ],
+  "leadDetails": [
+    {
+      "name": "Shiva Ganesha Water tanks cleaning services",
+      "phone": "8333023500",
+      "addedBy": "ADM-1768826185642-4B876AB0",
+      "addedByName": "Nallavolu saikumar",
+      "verified": false
+    },
+    {
+      "name": "Global tech HVAC engineer's",
+      "phone": "9391363783",
+      "addedBy": "ADM-1768979550622-C9AB0281",
+      "addedByName": "bharathreddy",
+      "verified": false
+    },
+    {
+      "name": "Global Engineering Works",
+      "phone": "9949198056",
+      "addedBy": "ADM-1768979550622-C9AB0281",
+      "addedByName": "bharathreddy",
+      "verified": false
+    },
+    {
+      "name": "G S R Deep Cleaning Services",
+      "phone": "8143990124",
+      "addedBy": "ADM-1768826185642-4B876AB0",
+      "addedByName": "Nallavolu saikumar",
+      "verified": true
+    },
+    {
+      "name": "Ahmed.And.sons wood work",
+      "phone": "8555909056",
+      "addedBy": "ADM-1768826151553-1D83BC79",
+      "addedByName": "shivakumar lalkota",
+      "verified": false
+    },
+    {
+      "name": "Lakshmi Narasimha Wood Works",
+      "phone": "9618955122",
+      "addedBy": "ADM-1768826151553-1D83BC79",
+      "addedByName": "shivakumar lalkota",
+      "verified": false
+    },
+    {
+      "name": "Meraj Carpenters works",
+      "phone": "9014251541",
+      "addedBy": "ADM-1768826151553-1D83BC79",
+      "addedByName": "shivakumar lalkota",
+      "verified": false
+    },
+    {
+      "name": "Jyothi interiors and wood works",
+      "phone": "7569480665",
+      "addedBy": "ADM-1768826151553-1D83BC79",
+      "addedByName": "shivakumar lalkota",
+      "verified": true
+    },
+    {
+      "name": "Carpenter sonu",
+      "phone": "8074436994",
+      "addedBy": "ADM-1768826151553-1D83BC79",
+      "addedByName": "shivakumar lalkota",
+      "verified": false
+    },
+    {
+      "name": "Veenus Carpentry Services",
+      "phone": "7013233384",
+      "addedBy": "ADM-1768826151553-1D83BC79",
+      "addedByName": "shivakumar lalkota",
+      "verified": false
+    },
+    {
+      "name": "AVSR ENGINEERS HVAC AND AIR CONDITIONING AC SERVICES",
+      "phone": "7013271154",
+      "addedBy": "ADM-1768979550622-C9AB0281",
+      "addedByName": "bharathreddy",
+      "verified": false
+    },
+    {
+      "name": "Rainbow Home Appliances Services",
+      "phone": "8008615049",
+      "addedBy": "ADM-1768979550622-C9AB0281",
+      "addedByName": "bharathreddy",
+      "verified": false
+    },
+    {
+      "name": "JK KRISHNA PLUMBING SERVICE",
+      "phone": "8247272663",
+      "addedBy": "ADM-1768826185642-4B876AB0",
+      "addedByName": "Nallavolu saikumar",
+      "verified": true
+    },
+    {
+      "name": "Navya beauty parlour RTC colony near ring road",
+      "phone": "9392792587",
+      "addedBy": "ADM-1768804594248-1FA54557",
+      "addedByName": "Harish Kumar",
+      "verified": true
+    },
+    {
+      "name": "VMT BEAUTY SPA",
+      "phone": "8919146007",
+      "addedBy": "ADM-1768804594248-1FA54557",
+      "addedByName": "Harish Kumar",
+      "verified": false
+    },
+    {
+      "name": "pRiya's Beauty Zone",
+      "phone": "9666387654",
+      "addedBy": "ADM-1768804594248-1FA54557",
+      "addedByName": "Harish Kumar",
+      "verified": false
+    },
+    {
+      "name": "SH REPAIR SERVICES",
+      "phone": "8885838205",
+      "addedBy": "ADM-1768979550622-C9AB0281",
+      "addedByName": "bharathreddy",
+      "verified": false
+    },
+    {
+      "name": "Napa saikumar",
+      "phone": "7569649297",
+      "addedBy": "ADM-1776336019282-A9DBB689",
+      "addedByName": "TADEM BHARATH KUMAR",
+      "verified": true
+    },
+    {
+      "name": "chandrar prathap",
+      "phone": "9648635962",
+      "addedBy": "ADM-1776411092102-380022BB",
+      "addedByName": "TADEMBHARATH7@GMAIL.COM",
+      "verified": false
+    },
+    {
+      "name": "MEHEDHIPATNAM",
+      "phone": "9848888606",
+      "addedBy": "ADM-1776411092102-380022BB",
+      "addedByName": "TADEMBHARATH7@GMAIL.COM",
+      "verified": true
+    },
+    {
+      "name": "NARASHIMHA",
+      "phone": "9963720967",
+      "addedBy": "ADM-1776411092102-380022BB",
+      "addedByName": "TADEMBHARATH7@GMAIL.COM",
+      "verified": true
+    },
+    {
+      "name": "DAYAKAR",
+      "phone": "9177601526",
+      "addedBy": "ADM-1776411092102-380022BB",
+      "addedByName": "TADEMBHARATH7@GMAIL.COM",
+      "verified": true
+    },
+    {
+      "name": "murali",
+      "phone": "9492909157",
+      "addedBy": "ADM-1776410284855-458F0C5B",
+      "addedByName": "santhoshumareddy@gmail.com",
+      "verified": false
+    },
+    {
+      "name": "BALAKRISHNA",
+      "phone": "8297524284",
+      "addedBy": "ADM-1776411092102-380022BB",
+      "addedByName": "TADEMBHARATH7@GMAIL.COM",
+      "verified": false
+    },
+    {
+      "name": "ranga goud",
+      "phone": "9542378707",
+      "addedBy": "ADM-1776410284855-458F0C5B",
+      "addedByName": "santhoshumareddy@gmail.com",
+      "verified": false
+    },
+    {
+      "name": "thirupathi",
+      "phone": "9581704113",
+      "addedBy": "ADM-1776410284855-458F0C5B",
+      "addedByName": "santhoshumareddy@gmail.com",
+      "verified": false
+    },
+    {
+      "name": "Electrician",
+      "phone": "7013750532",
+      "addedBy": "ADM-1776413054383-D4656795",
+      "addedByName": "sdurgam751@gmail.com",
+      "verified": false
+    },
+    {
+      "name": "Anil kumar",
+      "phone": "8309476789",
+      "addedBy": "ADM-1776413054383-D4656795",
+      "addedByName": "sdurgam751@gmail.com",
+      "verified": false
+    },
+    {
+      "name": "chandra shekar",
+      "phone": "8790451816",
+      "addedBy": "ADM-1776413054383-D4656795",
+      "addedByName": "sdurgam751@gmail.com",
+      "verified": true
+    },
+    {
+      "name": "NAGENDRA",
+      "phone": "6304306235",
+      "addedBy": "ADM-1776411092102-380022BB",
+      "addedByName": "TADEMBHARATH7@GMAIL.COM",
+      "verified": false
+    },
+    {
+      "name": "k samual",
+      "phone": "9182134521",
+      "addedBy": "ADM-1776413054383-D4656795",
+      "addedByName": "sdurgam751@gmail.com",
+      "verified": false
+    },
+    {
+      "name": "venkata krishna",
+      "phone": "9951723174",
+      "addedBy": "ADM-1776410284855-458F0C5B",
+      "addedByName": "santhoshumareddy@gmail.com",
+      "verified": false
+    },
+    {
+      "name": "ravindhar",
+      "phone": "9000445410",
+      "addedBy": "ADM-1776413054383-D4656795",
+      "addedByName": "sdurgam751@gmail.com",
+      "verified": false
+    },
+    {
+      "name": "bhupathi",
+      "phone": "9989801129",
+      "addedBy": "ADM-1776413054383-D4656795",
+      "addedByName": "sdurgam751@gmail.com",
+      "verified": false
+    },
+    {
+      "name": "sai yadav",
+      "phone": "8074796087",
+      "addedBy": "ADM-1776413054383-D4656795",
+      "addedByName": "sdurgam751@gmail.com",
+      "verified": true
+    },
+    {
+      "name": "ravindher",
+      "phone": "8179525479",
+      "addedBy": "ADM-1776413054383-D4656795",
+      "addedByName": "sdurgam751@gmail.com",
+      "verified": false
+    },
+    {
+      "name": "sri hari",
+      "phone": "8184867280",
+      "addedBy": "ADM-1776413054383-D4656795",
+      "addedByName": "sdurgam751@gmail.com",
+      "verified": false
+    },
+    {
+      "name": "ARUNA PACKERS& MOVERS",
+      "phone": "9347596160",
+      "addedBy": "ADM-1776411092102-380022BB",
+      "addedByName": "TADEMBHARATH7@GMAIL.COM",
+      "verified": false
+    },
+    {
+      "name": "SHEKAR",
+      "phone": "9989130622",
+      "addedBy": "ADM-1776410284855-458F0C5B",
+      "addedByName": "santhoshumareddy@gmail.com",
+      "verified": false
+    },
+    {
+      "name": "NAGI REDDY",
+      "phone": "9704438412",
+      "addedBy": "ADM-1776410284855-458F0C5B",
+      "addedByName": "santhoshumareddy@gmail.com",
+      "verified": true
+    },
+    {
+      "name": "NAGAVAMSHI",
+      "phone": "9666541119",
+      "addedBy": "ADM-1776411092102-380022BB",
+      "addedByName": "TADEMBHARATH7@GMAIL.COM",
+      "verified": false
+    },
+    {
+      "name": "SWATHI MAKEOVER",
+      "phone": "8688013986",
+      "addedBy": "ADM-1776411092102-380022BB",
+      "addedByName": "TADEMBHARATH7@GMAIL.COM",
+      "verified": false
+    },
+    {
+      "name": "swarna cook",
+      "phone": "7981460907",
+      "addedBy": "ADM-1776411092102-380022BB",
+      "addedByName": "TADEMBHARATH7@GMAIL.COM",
+      "verified": true
+    },
+    {
+      "name": "manoj",
+      "phone": "9989691438",
+      "addedBy": "ADM-1776413054383-D4656795",
+      "addedByName": "sdurgam751@gmail.com",
+      "verified": false
+    },
+    {
+      "name": "nagesh",
+      "phone": "8074974471",
+      "addedBy": "ADM-1776413054383-D4656795",
+      "addedByName": "sdurgam751@gmail.com",
+      "verified": false
+    },
+    {
+      "name": "suman",
+      "phone": "7093492650",
+      "addedBy": "ADM-1776413054383-D4656795",
+      "addedByName": "sdurgam751@gmail.com",
+      "verified": false
+    },
+    {
+      "name": "YASHODHA COOK",
+      "phone": "7660810978",
+      "addedBy": "ADM-1776411092102-380022BB",
+      "addedByName": "TADEMBHARATH7@GMAIL.COM",
+      "verified": false
+    },
+    {
+      "name": "shaik",
+      "phone": "9515302514",
+      "addedBy": "ADM-1776413054383-D4656795",
+      "addedByName": "sdurgam751@gmail.com",
+      "verified": false
+    },
+    {
+      "name": "MM CLEANING SERVICES",
+      "phone": "6360559435",
+      "addedBy": "ADM-1776410284855-458F0C5B",
+      "addedByName": "santhoshumareddy@gmail.com",
+      "verified": false
+    },
+    {
+      "name": "carpenter",
+      "phone": "9588805747",
+      "addedBy": "ADM-1776413054383-D4656795",
+      "addedByName": "sdurgam751@gmail.com",
+      "verified": true
+    },
+    {
+      "name": "RAGHAVMAHESH INTERIORS AND CONSTRUCTIONS PVT LTD",
+      "phone": "7989923208",
+      "addedBy": "ADM-1776413054383-D4656795",
+      "addedByName": "sdurgam751@gmail.com",
+      "verified": false
+    },
+    {
+      "name": "DREAM DECOR WALLPAPERS & INTERIORS",
+      "phone": "9391108212",
+      "addedBy": "ADM-1776411092102-380022BB",
+      "addedByName": "TADEMBHARATH7@GMAIL.COM",
+      "verified": false
+    },
+    {
+      "name": "Butterfly interior designs",
+      "phone": "8331864788",
+      "addedBy": "ADM-1776411092102-380022BB",
+      "addedByName": "TADEMBHARATH7@GMAIL.COM",
+      "verified": false
+    },
+    {
+      "name": "Interior Near Me @ Prem Kumar",
+      "phone": "9700163320",
+      "addedBy": "ADM-1776411092102-380022BB",
+      "addedByName": "TADEMBHARATH7@GMAIL.COM",
+      "verified": false
+    },
+    {
+      "name": "Kark Interiors",
+      "phone": "9030917315",
+      "addedBy": "ADM-1776411092102-380022BB",
+      "addedByName": "TADEMBHARATH7@GMAIL.COM",
+      "verified": false
+    }
+  ]
+}

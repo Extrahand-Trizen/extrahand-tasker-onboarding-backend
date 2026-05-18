@@ -41,8 +41,8 @@ exports.BUILT_IN_VARIABLES = {
     },
     userRole: {
         name: 'userRole',
-        description: "User's role (tasker, requester, both)",
-        example: 'tasker',
+        description: "User's role (helper, requester, both)",
+        example: 'helper',
         category: 'user'
     },
     userType: {

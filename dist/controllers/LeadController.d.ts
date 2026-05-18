@@ -31,6 +31,11 @@ export declare class LeadController {
      */
     static getLeadCreators(req: AdminRequest, res: Response): Promise<void>;
     /**
+     * Get active qualifiers for pick/transfer
+     * GET /api/v1/onboarding/leads/qualifiers
+     */
+    static getQualifiers(req: AdminRequest, res: Response): Promise<void>;
+    /**
      * Search and filter leads
      * GET /api/v1/admin/caos/leads
      * ✅ ISOLATION: Qualifiers only see leads they added
@@ -96,5 +101,25 @@ export declare class LeadController {
      * DELETE /api/v1/admin/caos/leads/:leadId
      */
     static deleteLead(req: AdminRequest, res: Response): Promise<void>;
+    /**
+     * Pick a lead (qualifier only)
+     * POST /api/v1/onboarding/leads/:leadId/pick
+     */
+    static pickLead(req: AdminRequest, res: Response): Promise<void>;
+    /**
+     * Transfer a picked lead to another qualifier
+     * POST /api/v1/onboarding/leads/:leadId/transfer
+     */
+    static transferLead(req: AdminRequest, res: Response): Promise<void>;
+    /**
+     * Accept a pending lead transfer
+     * POST /api/v1/onboarding/leads/:leadId/accept-transfer
+     */
+    static acceptTransferLead(req: AdminRequest, res: Response): Promise<void>;
+    /**
+     * Reject a pending lead transfer
+     * POST /api/v1/onboarding/leads/:leadId/reject-transfer
+     */
+    static rejectTransferLead(req: AdminRequest, res: Response): Promise<void>;
 }
 //# sourceMappingURL=LeadController.d.ts.map

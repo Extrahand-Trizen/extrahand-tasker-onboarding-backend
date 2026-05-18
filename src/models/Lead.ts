@@ -123,6 +123,19 @@ export interface ILead extends Document {
   preferredTimeSlot?: string; // e.g., "Morning", "Afternoon", "Evening" or specific times
   addedBy: string;
   addedByName?: string;
+  pickedBy?: string;
+  pickedByName?: string;
+  pickedAt?: Date;
+  lastTransferredBy?: string;
+  lastTransferredByName?: string;
+  lastTransferredAt?: Date;
+  lastTransferDecision?: 'accepted' | 'rejected';
+  lastTransferDecisionBy?: string;
+  lastTransferDecisionByName?: string;
+  lastTransferDecisionAt?: Date;
+  transferPendingTo?: string;
+  transferPendingToName?: string;
+  transferPendingAt?: Date;
   
   // Status pipeline
   status: LeadStatus;  // ✅ Lead status only (ends at approved)
@@ -265,6 +278,56 @@ const LeadSchema = new Schema<ILead>({
   addedByName: {
     type: String,
     trim: true
+  },
+  pickedBy: {
+    type: String,
+    index: true
+  },
+  pickedByName: {
+    type: String,
+    trim: true
+  },
+  pickedAt: {
+    type: Date
+  },
+  lastTransferredBy: {
+    type: String,
+    index: true
+  },
+  lastTransferredByName: {
+    type: String,
+    trim: true
+  },
+  lastTransferredAt: {
+    type: Date
+  },
+  lastTransferDecision: {
+    type: String,
+    enum: ['accepted', 'rejected'],
+    default: undefined
+  },
+  lastTransferDecisionBy: {
+    type: String,
+    default: undefined
+  },
+  lastTransferDecisionByName: {
+    type: String,
+    default: undefined
+  },
+  lastTransferDecisionAt: {
+    type: Date,
+    default: undefined
+  },
+  transferPendingTo: {
+    type: String,
+    index: true
+  },
+  transferPendingToName: {
+    type: String,
+    trim: true
+  },
+  transferPendingAt: {
+    type: Date
   },
   status: {
     type: String,
@@ -487,6 +550,8 @@ LeadSchema.pre('save', function(next) {
 // Compound indexes for common queries
 LeadSchema.index({ status: 1, createdAt: -1 });
 LeadSchema.index({ addedBy: 1, status: 1 });
+LeadSchema.index({ pickedBy: 1, status: 1 });
+LeadSchema.index({ transferPendingTo: 1 });
 LeadSchema.index({ city: 1, status: 1 });
 LeadSchema.index({ source: 1, createdAt: -1 });
 LeadSchema.index({ primarySkill: 1, status: 1 });

@@ -120,6 +120,39 @@ const LeadSchema = new mongoose_1.Schema({
         type: String,
         trim: true
     },
+    pickedBy: {
+        type: String,
+        index: true
+    },
+    pickedByName: {
+        type: String,
+        trim: true
+    },
+    pickedAt: {
+        type: Date
+    },
+    lastTransferredBy: {
+        type: String,
+        index: true
+    },
+    lastTransferredByName: {
+        type: String,
+        trim: true
+    },
+    lastTransferredAt: {
+        type: Date
+    },
+    transferPendingTo: {
+        type: String,
+        index: true
+    },
+    transferPendingToName: {
+        type: String,
+        trim: true
+    },
+    transferPendingAt: {
+        type: Date
+    },
     status: {
         type: String,
         enum: [
@@ -337,6 +370,8 @@ LeadSchema.pre('save', function (next) {
 // Compound indexes for common queries
 LeadSchema.index({ status: 1, createdAt: -1 });
 LeadSchema.index({ addedBy: 1, status: 1 });
+LeadSchema.index({ pickedBy: 1, status: 1 });
+LeadSchema.index({ transferPendingTo: 1 });
 LeadSchema.index({ city: 1, status: 1 });
 LeadSchema.index({ source: 1, createdAt: -1 });
 LeadSchema.index({ primarySkill: 1, status: 1 });

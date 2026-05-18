@@ -5,6 +5,7 @@ import { DuplicateCheckService } from '../services/DuplicateCheckService';
 import { getConversionStatusByPhone } from '../services/UserLookupService';
 import { CertificateReviewService } from '../services/CertificateReviewService';
 import Lead from '../models/Lead';
+import AdminUser from '../models/AdminUser';
 import { UserRole } from '../lib/permissions';
 import logger from '../config/logger';
 import { LEAD_STATUS_REASON_CODES } from '../constants/leadContactTracking';
@@ -49,6 +50,23 @@ function canManageLead(req: AdminRequest, leadAddedBy: string): boolean {
   if (role === 'lead_access_manager' || role === 'onboarder') return true;
   if (role === 'qualifier') return userId === leadAddedBy;
   return false;
+}
+
+function canMutatePickedLead(req: AdminRequest, lead: { addedBy: string; pickedBy?: string | null }): boolean {
+  const role = req.admin?.role as UserRole;
+  const userId = getUserId(req);
+
+  if (!userId) return false;
+
+  if (lead.pickedBy && lead.pickedBy !== userId) {
+    return false;
+  }
+
+  if (role === 'qualifier') {
+    return lead.pickedBy ? lead.pickedBy === userId : lead.addedBy === userId;
+  }
+
+  return true;
 }
 
 function parseISTDateOnly(value: string, endOfDay = false): Date | undefined {
@@ -639,6 +657,147 @@ export class LeadController {
   }
 
   /**
+   * Get active qualifiers for pick/transfer
+   * GET /api/v1/onboarding/leads/qualifiers
+   */
+  static async getQualifiers(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      const qualifiers = await AdminUser.find({ role: 'qualifier', status: 'active' })
+        .sort({ name: 1, email: 1 })
+        .lean();
+
+      res.json({
+        success: true,
+        data: qualifiers.map((q) => ({
+          userId: q.userId || q.uid,
+          uid: q.uid,
+          name: q.name || q.firstName || q.lastName || q.email,
+          email: q.email,
+        })),
+      });
+    } catch (error: any) {
+      logger.error('Error in getQualifiers controller', { error: error.message });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch qualifiers',
+        message: error.message,
+      });
+    }
+  }
+
+  /**
+   * Get active transfer recipients (all active admin users)
+   * GET /api/v1/onboarding/leads/transfer-recipients
+   */
+  static async getTransferRecipients(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      const recipients = await AdminUser.find({ status: 'active' })
+        .sort({ name: 1, email: 1 })
+        .lean();
+
+      res.json({
+        success: true,
+        data: recipients.map((u) => ({
+          userId: u.userId || u.uid,
+          uid: u.uid,
+          name: u.name || u.firstName || u.lastName || u.email,
+          email: u.email,
+          role: u.role,
+        })),
+      });
+    } catch (error: any) {
+      logger.error('Error in getTransferRecipients controller', { error: error.message });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch transfer recipients',
+        message: error.message,
+      });
+    }
+  }
+
+  /**
+   * Get active onboarders for transfer
+   * GET /api/v1/onboarding/leads/onboarders
+   */
+  static async getOnboarders(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      const onboarders = await AdminUser.find({ role: 'onboarder', status: 'active' })
+        .sort({ name: 1, email: 1 })
+        .lean();
+
+      res.json({
+        success: true,
+        data: onboarders.map((o) => ({
+          userId: o.userId || o.uid,
+          uid: o.uid,
+          name: o.name || o.firstName || o.lastName || o.email,
+          email: o.email,
+        })),
+      });
+    } catch (error: any) {
+      logger.error('Error in getOnboarders controller', { error: error.message });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch onboarders',
+        message: error.message,
+      });
+    }
+  }
+
+  /**
+   * Get transfer decision notifications for current user
+   * GET /api/v1/onboarding/leads/transfer-notifications
+   */
+  static async getTransferNotifications(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      if (!req.admin) {
+        res.status(401).json({ success: false, error: 'Authentication required' });
+        return;
+      }
+
+      const userId = getUserId(req) || '';
+      const { since } = req.query as { since?: string };
+      const sinceDate = since ? new Date(since) : undefined;
+
+      const filters: any = {
+        lastTransferDecisionAt: { $exists: true },
+        $or: [{ lastTransferredBy: userId }, { lastTransferDecisionBy: userId }],
+      };
+
+      if (sinceDate && !Number.isNaN(sinceDate.getTime())) {
+        filters.lastTransferDecisionAt.$gt = sinceDate;
+      }
+
+      const leads = await Lead.find(filters)
+        .select(
+          'leadId lastTransferDecision lastTransferDecisionAt lastTransferredBy lastTransferredByName lastTransferDecisionBy lastTransferDecisionByName'
+        )
+        .sort({ lastTransferDecisionAt: -1 })
+        .lean();
+
+      res.json({
+        success: true,
+        data: leads.map((lead) => ({
+          leadId: lead.leadId,
+          decision: lead.lastTransferDecision,
+          decidedAt: lead.lastTransferDecisionAt,
+          fromUserId: lead.lastTransferredBy,
+          fromUserName: lead.lastTransferredByName,
+          toUserId: lead.lastTransferDecisionBy,
+          toUserName: lead.lastTransferDecisionByName,
+        })),
+      });
+    } catch (error: any) {
+      logger.error('Error in getTransferNotifications controller', { error: error.message });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch transfer notifications',
+        message: error.message,
+      });
+    }
+  }
+
+  /**
    * Search and filter leads
    * GET /api/v1/admin/caos/leads
    * ✅ ISOLATION: Qualifiers only see leads they added
@@ -659,6 +818,9 @@ export class LeadController {
         primarySkill,
         source,
         addedBy,
+        pickedBy,
+        transferPendingTo,
+        ownerBy,
         search,
         startDate,
         endDate,
@@ -676,6 +838,9 @@ export class LeadController {
         primarySkill: primarySkill as string,
         source: source as any,
         addedBy: addedBy as string,
+        pickedBy: pickedBy as string,
+        transferPendingTo: transferPendingTo as string,
+        ownerBy: ownerBy as string,
         search: search as string,
         startDate: startDate ? new Date(startDate as string) : undefined,
         endDate: endDate ? new Date(endDate as string) : undefined,
@@ -742,7 +907,9 @@ export class LeadController {
       };
 
       if (role === 'qualifier' && scopedIds.length > 0) {
-        filters.addedByAny = scopedIds;
+        filters.ownerByAny = scopedIds;
+      } else if (req.query.addedBy) {
+        filters.ownerBy = req.query.addedBy as string;
       }
 
       const result = await LeadService.getCallbackQueue(filters);
@@ -788,7 +955,9 @@ export class LeadController {
 
       const filters: Pick<CallbackQueueFilters, 'addedBy' | 'addedByAny'> = {};
       if (role === 'qualifier' && scopedIds.length > 0) {
-        filters.addedByAny = scopedIds;
+        (filters as any).ownerByAny = scopedIds;
+      } else if (req.query.addedBy) {
+        (filters as any).ownerBy = req.query.addedBy as string;
       }
 
       const stats = await LeadService.getCallbackQueueStats(filters);
@@ -857,7 +1026,9 @@ export class LeadController {
       };
 
       if (role === 'qualifier' && scopedIds.length > 0) {
-        filters.addedByAny = scopedIds;
+        filters.ownerByAny = scopedIds;
+      } else if (req.query.addedBy) {
+        filters.ownerBy = req.query.addedBy as string;
       }
 
       const result = await LeadService.getFollowUpQueue(filters);
@@ -903,7 +1074,9 @@ export class LeadController {
 
       const filters: Pick<FollowUpQueueFilters, 'addedBy' | 'addedByAny'> = {};
       if (role === 'qualifier' && scopedIds.length > 0) {
-        filters.addedByAny = scopedIds;
+        (filters as any).ownerByAny = scopedIds;
+      } else if (req.query.addedBy) {
+        (filters as any).ownerBy = req.query.addedBy as string;
       }
 
       const stats = await LeadService.getFollowUpQueueStats(filters);
@@ -1116,6 +1289,24 @@ export class LeadController {
       const { leadId } = req.params;
       const updateData: UpdateLeadData = req.body;
 
+      const existingLead = await LeadService.getLeadById(leadId);
+      if (!existingLead) {
+        res.status(404).json({
+          success: false,
+          error: 'Lead not found'
+        });
+        return;
+      }
+
+      if (!canMutatePickedLead(req, existingLead)) {
+        res.status(403).json({
+          success: false,
+          error: 'Permission denied',
+          message: 'Only the picked qualifier can update this lead.'
+        });
+        return;
+      }
+
       const lead = await LeadService.updateLead(leadId, updateData);
 
       if (!lead) {
@@ -1174,6 +1365,15 @@ export class LeadController {
         res.status(404).json({
           success: false,
           error: 'Lead not found'
+        });
+        return;
+      }
+
+      if (!canMutatePickedLead(req, existingLead)) {
+        res.status(403).json({
+          success: false,
+          error: 'Permission denied',
+          message: 'Only the picked qualifier can update this lead.'
         });
         return;
       }
@@ -1247,6 +1447,24 @@ export class LeadController {
 
       const { leadId } = req.params;
       const { note, isPrivate } = req.body;
+
+      const existingLead = await LeadService.getLeadById(leadId);
+      if (!existingLead) {
+        res.status(404).json({
+          success: false,
+          error: 'Lead not found'
+        });
+        return;
+      }
+
+      if (!canMutatePickedLead(req, existingLead)) {
+        res.status(403).json({
+          success: false,
+          error: 'Permission denied',
+          message: 'Only the picked qualifier can update this lead.'
+        });
+        return;
+      }
 
       if (!note || !note.trim()) {
         res.status(400).json({
@@ -1422,6 +1640,267 @@ export class LeadController {
         error: 'Failed to delete lead',
         message: error.message
       });
+    }
+  }
+
+  /**
+   * Pick a lead (qualifier or onboarder)
+   * POST /api/v1/onboarding/leads/:leadId/pick
+   */
+  static async pickLead(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      if (!req.admin) {
+        res.status(401).json({ success: false, error: 'Authentication required' });
+        return;
+      }
+
+      const role = req.admin.role as UserRole;
+      if (role !== 'qualifier' && role !== 'onboarder') {
+        res.status(403).json({ success: false, error: 'Only qualifiers and onboarders can pick leads' });
+        return;
+      }
+
+      const { leadId } = req.params;
+      const userId = getUserId(req) || '';
+      const userName = req.admin.name;
+
+      const lead = await Lead.findOne({ leadId });
+      if (!lead) {
+        res.status(404).json({ success: false, error: 'Lead not found' });
+        return;
+      }
+
+      if (lead.pickedBy && lead.pickedBy !== userId) {
+        res.status(409).json({
+          success: false,
+          error: 'Lead already picked',
+          message: 'This lead is already picked by another qualifier.'
+        });
+        return;
+      }
+
+      lead.pickedBy = userId;
+      lead.pickedByName = userName;
+      lead.pickedAt = new Date();
+      await lead.save();
+
+      await LeadService.logActivity(
+        leadId,
+        'lead_pick',
+        `Lead picked by ${userName || userId}`,
+        userId,
+        userName
+      );
+
+      res.json({ success: true, data: lead, message: 'Lead picked successfully' });
+    } catch (error: any) {
+      logger.error('Error in pickLead controller', { error: error.message, leadId: req.params.leadId });
+      res.status(500).json({ success: false, error: 'Failed to pick lead', message: error.message });
+    }
+  }
+
+  /**
+   * Request transfer of a picked lead to another admin user
+   * POST /api/v1/onboarding/leads/:leadId/transfer
+   */
+  static async transferLead(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      if (!req.admin) {
+        res.status(401).json({ success: false, error: 'Authentication required' });
+        return;
+      }
+
+      const role = req.admin.role as UserRole;
+      if (role !== 'qualifier' && role !== 'onboarder') {
+        res.status(403).json({ success: false, error: 'Only qualifiers and onboarders can transfer leads' });
+        return;
+      }
+
+      const { leadId } = req.params;
+      const { targetUserId } = req.body as { targetUserId?: string };
+
+      if (!targetUserId) {
+        res.status(400).json({ success: false, error: 'targetUserId is required' });
+        return;
+      }
+
+      const userId = getUserId(req) || '';
+      const userName = req.admin.name;
+
+      const lead = await Lead.findOne({ leadId });
+      if (!lead) {
+        res.status(404).json({ success: false, error: 'Lead not found' });
+        return;
+      }
+
+      if (lead.pickedBy !== userId) {
+        res.status(403).json({
+          success: false,
+          error: 'Permission denied',
+          message: 'Only the picked user can transfer this lead.'
+        });
+        return;
+      }
+
+      const target = await AdminUser.findOne({
+        $or: [{ userId: targetUserId }, { uid: targetUserId }],
+        status: 'active'
+      }).lean();
+
+      if (!target) {
+        res.status(404).json({ success: false, error: 'Target user not found' });
+        return;
+      }
+
+      const targetId = target.userId || target.uid || targetUserId;
+      const targetName = target.name || target.firstName || target.lastName || target.email;
+
+      lead.transferPendingTo = targetId;
+      lead.transferPendingToName = targetName;
+      lead.transferPendingAt = new Date();
+      lead.lastTransferDecision = undefined;
+      lead.lastTransferDecisionBy = undefined;
+      lead.lastTransferDecisionByName = undefined;
+      lead.lastTransferDecisionAt = undefined;
+      lead.lastTransferredBy = userId;
+      lead.lastTransferredByName = userName;
+      lead.lastTransferredAt = new Date();
+      await lead.save();
+
+      await LeadService.logActivity(
+        leadId,
+        'lead_transfer_request',
+        `Transfer requested for ${targetName || targetId}`,
+        userId,
+        userName,
+        { targetUserId: targetId, targetUserName: targetName }
+      );
+
+      res.json({ success: true, data: lead, message: 'Transfer request sent successfully' });
+    } catch (error: any) {
+      logger.error('Error in transferLead controller', { error: error.message, leadId: req.params.leadId });
+      res.status(500).json({ success: false, error: 'Failed to transfer lead', message: error.message });
+    }
+  }
+
+  /**
+   * Accept a pending lead transfer
+   * POST /api/v1/onboarding/leads/:leadId/accept-transfer
+   */
+  static async acceptTransferLead(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      if (!req.admin) {
+        res.status(401).json({ success: false, error: 'Authentication required' });
+        return;
+      }
+
+      const { leadId } = req.params;
+      const userId = getUserId(req) || '';
+      const userName = req.admin.name;
+
+      const lead = await Lead.findOne({ leadId });
+      if (!lead) {
+        res.status(404).json({ success: false, error: 'Lead not found' });
+        return;
+      }
+
+      if (lead.transferPendingTo !== userId) {
+        res.status(403).json({
+          success: false,
+          error: 'Permission denied',
+          message: 'Only the pending recipient can accept this transfer.'
+        });
+        return;
+      }
+
+      const senderId = lead.pickedBy || lead.addedBy;
+      const senderName = lead.pickedByName || lead.addedByName || 'unknown';
+
+      // Accept transfer: change owner to recipient and clear pending fields
+      lead.pickedBy = userId;
+      lead.pickedByName = userName;
+      lead.pickedAt = new Date();
+      lead.transferPendingTo = undefined;
+      lead.transferPendingToName = undefined;
+      lead.transferPendingAt = undefined;
+      lead.lastTransferDecision = 'accepted';
+      lead.lastTransferDecisionBy = userId;
+      lead.lastTransferDecisionByName = userName;
+      lead.lastTransferDecisionAt = new Date();
+      await lead.save();
+
+      await LeadService.logActivity(
+        leadId,
+        'transfer_accept',
+        `Lead transfer accepted by ${userName}. New owner: ${userName}`,
+        userId,
+        userName,
+        { fromUserId: senderId, fromUserName: senderName }
+      );
+
+      res.json({ success: true, data: lead, message: 'Lead transfer accepted successfully' });
+    } catch (error: any) {
+      logger.error('Error in acceptTransferLead controller', { error: error.message, leadId: req.params.leadId });
+      res.status(500).json({ success: false, error: 'Failed to accept lead transfer', message: error.message });
+    }
+  }
+
+  /**
+   * Reject a pending lead transfer
+   * POST /api/v1/onboarding/leads/:leadId/reject-transfer
+   */
+  static async rejectTransferLead(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      if (!req.admin) {
+        res.status(401).json({ success: false, error: 'Authentication required' });
+        return;
+      }
+
+      const { leadId } = req.params;
+      const userId = getUserId(req) || '';
+      const userName = req.admin.name;
+
+      const lead = await Lead.findOne({ leadId });
+      if (!lead) {
+        res.status(404).json({ success: false, error: 'Lead not found' });
+        return;
+      }
+
+      if (lead.transferPendingTo !== userId) {
+        res.status(403).json({
+          success: false,
+          error: 'Permission denied',
+          message: 'Only the pending recipient can reject this transfer.'
+        });
+        return;
+      }
+
+      const senderId = lead.pickedBy || lead.addedBy;
+      const senderName = lead.pickedByName || lead.addedByName || 'unknown';
+
+      // Reject transfer: keep original owner and clear pending fields
+      lead.transferPendingTo = undefined;
+      lead.transferPendingToName = undefined;
+      lead.transferPendingAt = undefined;
+      lead.lastTransferDecision = 'rejected';
+      lead.lastTransferDecisionBy = userId;
+      lead.lastTransferDecisionByName = userName;
+      lead.lastTransferDecisionAt = new Date();
+      await lead.save();
+
+      await LeadService.logActivity(
+        leadId,
+        'transfer_reject',
+        `Lead transfer rejected by ${userName}`,
+        userId,
+        userName,
+        { fromUserId: senderId, fromUserName: senderName }
+      );
+
+      res.json({ success: true, data: lead, message: 'Lead transfer rejected successfully' });
+    } catch (error: any) {
+      logger.error('Error in rejectTransferLead controller', { error: error.message, leadId: req.params.leadId });
+      res.status(500).json({ success: false, error: 'Failed to reject lead transfer', message: error.message });
     }
   }
 }

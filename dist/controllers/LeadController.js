@@ -9,6 +9,7 @@ const DuplicateCheckService_1 = require("../services/DuplicateCheckService");
 const UserLookupService_1 = require("../services/UserLookupService");
 const CertificateReviewService_1 = require("../services/CertificateReviewService");
 const Lead_1 = __importDefault(require("../models/Lead"));
+const AdminUser_1 = __importDefault(require("../models/AdminUser"));
 const logger_1 = __importDefault(require("../config/logger"));
 const leadContactTracking_1 = require("../constants/leadContactTracking");
 const axios_1 = __importDefault(require("axios"));
@@ -46,6 +47,19 @@ function canManageLead(req, leadAddedBy) {
     if (role === 'qualifier')
         return userId === leadAddedBy;
     return false;
+}
+function canMutatePickedLead(req, lead) {
+    const role = req.admin?.role;
+    const userId = getUserId(req);
+    if (!userId)
+        return false;
+    if (lead.pickedBy && lead.pickedBy !== userId) {
+        return false;
+    }
+    if (role === 'qualifier') {
+        return lead.pickedBy ? lead.pickedBy === userId : lead.addedBy === userId;
+    }
+    return true;
 }
 function parseISTDateOnly(value, endOfDay = false) {
     const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -535,6 +549,34 @@ class LeadController {
         }
     }
     /**
+     * Get active qualifiers for pick/transfer
+     * GET /api/v1/onboarding/leads/qualifiers
+     */
+    static async getQualifiers(req, res) {
+        try {
+            const qualifiers = await AdminUser_1.default.find({ role: 'qualifier', status: 'active' })
+                .sort({ name: 1, email: 1 })
+                .lean();
+            res.json({
+                success: true,
+                data: qualifiers.map((q) => ({
+                    userId: q.userId || q.uid,
+                    uid: q.uid,
+                    name: q.name || q.firstName || q.lastName || q.email,
+                    email: q.email,
+                })),
+            });
+        }
+        catch (error) {
+            logger_1.default.error('Error in getQualifiers controller', { error: error.message });
+            res.status(500).json({
+                success: false,
+                error: 'Failed to fetch qualifiers',
+                message: error.message,
+            });
+        }
+    }
+    /**
      * Search and filter leads
      * GET /api/v1/admin/caos/leads
      * ✅ ISOLATION: Qualifiers only see leads they added
@@ -548,7 +590,7 @@ class LeadController {
                 });
                 return;
             }
-            const { status, city, primarySkill, source, addedBy, search, startDate, endDate, page, limit, registrationStatus, statusChangedBy } = req.query;
+            const { status, city, primarySkill, source, addedBy, pickedBy, transferPendingTo, ownerBy, search, startDate, endDate, page, limit, registrationStatus, statusChangedBy } = req.query;
             const role = req.admin.role;
             const filters = {
                 status: status,
@@ -556,6 +598,9 @@ class LeadController {
                 primarySkill: primarySkill,
                 source: source,
                 addedBy: addedBy,
+                pickedBy: pickedBy,
+                transferPendingTo: transferPendingTo,
+                ownerBy: ownerBy,
                 search: search,
                 startDate: startDate ? new Date(startDate) : undefined,
                 endDate: endDate ? new Date(endDate) : undefined,
@@ -616,7 +661,10 @@ class LeadController {
                 limit: limit ? parseInt(limit) : undefined,
             };
             if (role === 'qualifier' && scopedIds.length > 0) {
-                filters.addedByAny = scopedIds;
+                filters.ownerByAny = scopedIds;
+            }
+            else if (req.query.addedBy) {
+                filters.ownerBy = req.query.addedBy;
             }
             const result = await LeadService_1.LeadService.getCallbackQueue(filters);
             res.json({
@@ -658,7 +706,10 @@ class LeadController {
             const scopedIds = getScopedAddedByIds(req);
             const filters = {};
             if (role === 'qualifier' && scopedIds.length > 0) {
-                filters.addedByAny = scopedIds;
+                filters.ownerByAny = scopedIds;
+            }
+            else if (req.query.addedBy) {
+                filters.ownerBy = req.query.addedBy;
             }
             const stats = await LeadService_1.LeadService.getCallbackQueueStats(filters);
             res.json({
@@ -712,7 +763,10 @@ class LeadController {
                 limit: limit ? parseInt(limit) : undefined,
             };
             if (role === 'qualifier' && scopedIds.length > 0) {
-                filters.addedByAny = scopedIds;
+                filters.ownerByAny = scopedIds;
+            }
+            else if (req.query.addedBy) {
+                filters.ownerBy = req.query.addedBy;
             }
             const result = await LeadService_1.LeadService.getFollowUpQueue(filters);
             res.json({
@@ -754,7 +808,10 @@ class LeadController {
             const scopedIds = getScopedAddedByIds(req);
             const filters = {};
             if (role === 'qualifier' && scopedIds.length > 0) {
-                filters.addedByAny = scopedIds;
+                filters.ownerByAny = scopedIds;
+            }
+            else if (req.query.addedBy) {
+                filters.ownerBy = req.query.addedBy;
             }
             const stats = await LeadService_1.LeadService.getFollowUpQueueStats(filters);
             res.json({
@@ -926,6 +983,22 @@ class LeadController {
         try {
             const { leadId } = req.params;
             const updateData = req.body;
+            const existingLead = await LeadService_1.LeadService.getLeadById(leadId);
+            if (!existingLead) {
+                res.status(404).json({
+                    success: false,
+                    error: 'Lead not found'
+                });
+                return;
+            }
+            if (!canMutatePickedLead(req, existingLead)) {
+                res.status(403).json({
+                    success: false,
+                    error: 'Permission denied',
+                    message: 'Only the picked qualifier can update this lead.'
+                });
+                return;
+            }
             const lead = await LeadService_1.LeadService.updateLead(leadId, updateData);
             if (!lead) {
                 res.status(404).json({
@@ -979,6 +1052,14 @@ class LeadController {
                 res.status(404).json({
                     success: false,
                     error: 'Lead not found'
+                });
+                return;
+            }
+            if (!canMutatePickedLead(req, existingLead)) {
+                res.status(403).json({
+                    success: false,
+                    error: 'Permission denied',
+                    message: 'Only the picked qualifier can update this lead.'
                 });
                 return;
             }
@@ -1047,6 +1128,22 @@ class LeadController {
             }
             const { leadId } = req.params;
             const { note, isPrivate } = req.body;
+            const existingLead = await LeadService_1.LeadService.getLeadById(leadId);
+            if (!existingLead) {
+                res.status(404).json({
+                    success: false,
+                    error: 'Lead not found'
+                });
+                return;
+            }
+            if (!canMutatePickedLead(req, existingLead)) {
+                res.status(403).json({
+                    success: false,
+                    error: 'Permission denied',
+                    message: 'Only the picked qualifier can update this lead.'
+                });
+                return;
+            }
             if (!note || !note.trim()) {
                 res.status(400).json({
                     success: false,
@@ -1197,6 +1294,196 @@ class LeadController {
                 error: 'Failed to delete lead',
                 message: error.message
             });
+        }
+    }
+    /**
+     * Pick a lead (qualifier only)
+     * POST /api/v1/onboarding/leads/:leadId/pick
+     */
+    static async pickLead(req, res) {
+        try {
+            if (!req.admin) {
+                res.status(401).json({ success: false, error: 'Authentication required' });
+                return;
+            }
+            const role = req.admin.role;
+            if (role !== 'qualifier') {
+                res.status(403).json({ success: false, error: 'Only qualifiers can pick leads' });
+                return;
+            }
+            const { leadId } = req.params;
+            const userId = getUserId(req) || '';
+            const userName = req.admin.name;
+            const lead = await Lead_1.default.findOne({ leadId });
+            if (!lead) {
+                res.status(404).json({ success: false, error: 'Lead not found' });
+                return;
+            }
+            if (lead.pickedBy && lead.pickedBy !== userId) {
+                res.status(409).json({
+                    success: false,
+                    error: 'Lead already picked',
+                    message: 'This lead is already picked by another qualifier.'
+                });
+                return;
+            }
+            lead.pickedBy = userId;
+            lead.pickedByName = userName;
+            lead.pickedAt = new Date();
+            await lead.save();
+            await LeadService_1.LeadService.logActivity(leadId, 'lead_pick', `Lead picked by ${userName || userId}`, userId, userName);
+            res.json({ success: true, data: lead, message: 'Lead picked successfully' });
+        }
+        catch (error) {
+            logger_1.default.error('Error in pickLead controller', { error: error.message, leadId: req.params.leadId });
+            res.status(500).json({ success: false, error: 'Failed to pick lead', message: error.message });
+        }
+    }
+    /**
+     * Transfer a picked lead to another qualifier
+     * POST /api/v1/onboarding/leads/:leadId/transfer
+     */
+    static async transferLead(req, res) {
+        try {
+            if (!req.admin) {
+                res.status(401).json({ success: false, error: 'Authentication required' });
+                return;
+            }
+            const role = req.admin.role;
+            if (role !== 'qualifier') {
+                res.status(403).json({ success: false, error: 'Only qualifiers can transfer leads' });
+                return;
+            }
+            const { leadId } = req.params;
+            const { targetUserId } = req.body;
+            if (!targetUserId) {
+                res.status(400).json({ success: false, error: 'targetUserId is required' });
+                return;
+            }
+            const userId = getUserId(req) || '';
+            const userName = req.admin.name;
+            const lead = await Lead_1.default.findOne({ leadId });
+            if (!lead) {
+                res.status(404).json({ success: false, error: 'Lead not found' });
+                return;
+            }
+            if (lead.pickedBy !== userId) {
+                res.status(403).json({
+                    success: false,
+                    error: 'Permission denied',
+                    message: 'Only the picked qualifier can transfer this lead.'
+                });
+                return;
+            }
+            const target = await AdminUser_1.default.findOne({
+                $or: [{ userId: targetUserId }, { uid: targetUserId }],
+                role: 'qualifier',
+                status: 'active'
+            }).lean();
+            if (!target) {
+                res.status(404).json({ success: false, error: 'Target qualifier not found' });
+                return;
+            }
+            const targetId = target.userId || target.uid || targetUserId;
+            const targetName = target.name || target.firstName || target.lastName || target.email;
+            lead.pickedBy = targetId;
+            lead.pickedByName = targetName;
+            lead.pickedAt = new Date();
+            lead.lastTransferredBy = userId;
+            lead.lastTransferredByName = userName;
+            lead.lastTransferredAt = new Date();
+            await lead.save();
+            await LeadService_1.LeadService.logActivity(leadId, 'lead_transfer', `Lead transferred to ${targetName || targetId}`, userId, userName, { targetUserId: targetId, targetUserName: targetName });
+            res.json({ success: true, data: lead, message: 'Lead transferred successfully' });
+        }
+        catch (error) {
+            logger_1.default.error('Error in transferLead controller', { error: error.message, leadId: req.params.leadId });
+            res.status(500).json({ success: false, error: 'Failed to transfer lead', message: error.message });
+        }
+    }
+    /**
+     * Accept a pending lead transfer
+     * POST /api/v1/onboarding/leads/:leadId/accept-transfer
+     */
+    static async acceptTransferLead(req, res) {
+        try {
+            if (!req.admin) {
+                res.status(401).json({ success: false, error: 'Authentication required' });
+                return;
+            }
+            const { leadId } = req.params;
+            const userId = getUserId(req) || '';
+            const userName = req.admin.name;
+            const lead = await Lead_1.default.findOne({ leadId });
+            if (!lead) {
+                res.status(404).json({ success: false, error: 'Lead not found' });
+                return;
+            }
+            if (lead.transferPendingTo !== userId) {
+                res.status(403).json({
+                    success: false,
+                    error: 'Permission denied',
+                    message: 'Only the pending recipient can accept this transfer.'
+                });
+                return;
+            }
+            const senderId = lead.pickedBy || lead.addedBy;
+            const senderName = lead.pickedByName || lead.addedByName || 'unknown';
+            // Accept transfer: change owner to recipient and clear pending fields
+            lead.pickedBy = userId;
+            lead.pickedByName = userName;
+            lead.pickedAt = new Date();
+            lead.transferPendingTo = undefined;
+            lead.transferPendingToName = undefined;
+            lead.transferPendingAt = undefined;
+            await lead.save();
+            await LeadService_1.LeadService.logActivity(leadId, 'transfer_accept', `Lead transfer accepted by ${userName}. New owner: ${userName}`, userId, userName, { fromUserId: senderId, fromUserName: senderName });
+            res.json({ success: true, data: lead, message: 'Lead transfer accepted successfully' });
+        }
+        catch (error) {
+            logger_1.default.error('Error in acceptTransferLead controller', { error: error.message, leadId: req.params.leadId });
+            res.status(500).json({ success: false, error: 'Failed to accept lead transfer', message: error.message });
+        }
+    }
+    /**
+     * Reject a pending lead transfer
+     * POST /api/v1/onboarding/leads/:leadId/reject-transfer
+     */
+    static async rejectTransferLead(req, res) {
+        try {
+            if (!req.admin) {
+                res.status(401).json({ success: false, error: 'Authentication required' });
+                return;
+            }
+            const { leadId } = req.params;
+            const userId = getUserId(req) || '';
+            const userName = req.admin.name;
+            const lead = await Lead_1.default.findOne({ leadId });
+            if (!lead) {
+                res.status(404).json({ success: false, error: 'Lead not found' });
+                return;
+            }
+            if (lead.transferPendingTo !== userId) {
+                res.status(403).json({
+                    success: false,
+                    error: 'Permission denied',
+                    message: 'Only the pending recipient can reject this transfer.'
+                });
+                return;
+            }
+            const senderId = lead.pickedBy || lead.addedBy;
+            const senderName = lead.pickedByName || lead.addedByName || 'unknown';
+            // Reject transfer: keep original owner and clear pending fields
+            lead.transferPendingTo = undefined;
+            lead.transferPendingToName = undefined;
+            lead.transferPendingAt = undefined;
+            await lead.save();
+            await LeadService_1.LeadService.logActivity(leadId, 'transfer_reject', `Lead transfer rejected by ${userName}`, userId, userName, { fromUserId: senderId, fromUserName: senderName });
+            res.json({ success: true, data: lead, message: 'Lead transfer rejected successfully' });
+        }
+        catch (error) {
+            logger_1.default.error('Error in rejectTransferLead controller', { error: error.message, leadId: req.params.leadId });
+            res.status(500).json({ success: false, error: 'Failed to reject lead transfer', message: error.message });
         }
     }
 }

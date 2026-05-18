@@ -66,6 +66,10 @@ export interface SearchFilters {
     source?: LeadSource;
     addedBy?: string;
     addedByAny?: string[];
+    pickedBy?: string;
+    transferPendingTo?: string;
+    ownerBy?: string;
+    ownerByAny?: string[];
     search?: string;
     startDate?: Date;
     endDate?: Date;
@@ -81,6 +85,8 @@ export interface CallbackQueueFilters {
     primarySkill?: string;
     addedBy?: string;
     addedByAny?: string[];
+    ownerBy?: string;
+    ownerByAny?: string[];
     startDate?: Date;
     endDate?: Date;
     page?: number;
@@ -98,6 +104,8 @@ export interface FollowUpQueueFilters {
     primarySkill?: string;
     addedBy?: string;
     addedByAny?: string[];
+    ownerBy?: string;
+    ownerByAny?: string[];
     startDate?: Date;
     endDate?: Date;
     dueType?: FollowUpDueType;
@@ -135,7 +143,11 @@ export interface StatusReportExportFilters extends StatusAnalyticsFilters {
     includeNotes?: boolean;
 }
 export declare class LeadService {
+    private static readonly STATUS_REPORT_LABELS;
     private static formatIST;
+    private static labelForReport;
+    private static textForSpreadsheet;
+    private static applyWorksheetLayout;
     private static getISTDayBounds;
     /**
      * Generate unique lead ID

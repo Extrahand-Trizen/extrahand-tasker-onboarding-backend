@@ -28,6 +28,95 @@ class LeadService {
             hour12: true,
         }).format(date);
     }
+    static labelForReport(value) {
+        if (!value)
+            return '';
+        return this.STATUS_REPORT_LABELS[value] || value.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
+    }
+    static textForSpreadsheet(value) {
+        if (value === null || value === undefined)
+            return '';
+        return String(value).trim();
+    }
+    static applyWorksheetLayout(worksheet, rows) {
+        if (!rows.length) {
+            return;
+        }
+        const widthHints = {
+            Date: { min: 24, max: 28 },
+            'Qualifier Name': { min: 24, max: 35 },
+            'Lead ID': { min: 16, max: 20 },
+            'Lead Name': { min: 24, max: 40 },
+            'Phone/Landline': { min: 18, max: 25 },
+            City: { min: 18, max: 28 },
+            State: { min: 16, max: 22 },
+            'Current Status': { min: 24, max: 35 },
+            'Status Reason': { min: 24, max: 45 },
+            'Callback Date': { min: 24, max: 28 },
+            'Expected Onboarding Date': { min: 26, max: 35 },
+            'Last Updated At': { min: 24, max: 28 },
+            'Last Updated By': { min: 28, max: 42 },
+            'Primary Category': { min: 20, max: 32 },
+            'Secondary Category': { min: 20, max: 32 },
+            Source: { min: 16, max: 24 },
+            'Source Details': { min: 20, max: 40 },
+            'Created At': { min: 24, max: 28 },
+            'Updated At': { min: 24, max: 28 },
+            Notes: { min: 30, max: 55 },
+            'Is Duplicate': { min: 16, max: 18 },
+            Blacklisted: { min: 14, max: 16 },
+        };
+        const headers = Object.keys(rows[0]);
+        worksheet['!cols'] = headers.map((header) => {
+            const hint = widthHints[header] || { min: 16, max: 35 };
+            const longestValue = rows.reduce((max, row) => {
+                const cellValue = row[header] || '';
+                const lineLength = cellValue
+                    .split('\n')
+                    .reduce((lineMax, line) => Math.max(lineMax, line.length), 0);
+                return Math.max(max, lineLength);
+            }, header.length);
+            return {
+                wch: Math.min(hint.max, Math.max(hint.min, longestValue + 3)),
+            };
+        });
+        worksheet['!rows'] = [{ hpt: 28 }];
+        if (worksheet['!ref']) {
+            worksheet['!autofilter'] = { ref: worksheet['!ref'] };
+        }
+        // Apply text wrapping and formatting to all cells
+        for (const cell in worksheet) {
+            if (cell[0] !== '!' && worksheet[cell]) {
+                if (!worksheet[cell].s) {
+                    worksheet[cell].s = {};
+                }
+                worksheet[cell].s.alignment = {
+                    wrap: true,
+                    vertical: 'top',
+                    horizontal: 'left',
+                };
+            }
+        }
+    }
+    static getISTDayBounds(reference = new Date()) {
+        const parts = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'Asia/Kolkata',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+        }).formatToParts(reference);
+        const values = Object.fromEntries(parts
+            .filter((part) => part.type !== 'literal')
+            .map((part) => [part.type, part.value]));
+        const year = Number(values.year);
+        const month = Number(values.month);
+        const day = Number(values.day);
+        const istOffsetMs = 5.5 * 60 * 60 * 1000;
+        return {
+            startOfToday: new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0) - istOffsetMs),
+            endOfToday: new Date(Date.UTC(year, month - 1, day, 23, 59, 59, 999) - istOffsetMs),
+        };
+    }
     /**
      * Generate unique lead ID
      */
@@ -331,9 +420,21 @@ class LeadService {
                 query.$or = [
                     { name: searchRegex },
                     { phone: searchRegex },
+                    { landline: searchRegex },
                     { city: searchRegex },
                     { leadId: searchRegex }
                 ];
+            }
+            if (filters.statusChangedBy) {
+                if (filters.status === 'contacted_interested') {
+                    query.lastInterestedBy = filters.statusChangedBy;
+                }
+                else if (filters.status === 'contacted_not_interested') {
+                    query.lastNotInterestedBy = filters.statusChangedBy;
+                }
+                else if (filters.status === 'contacted_not_lifted') {
+                    query.lastNotLiftedBy = filters.statusChangedBy;
+                }
             }
             // Registration/conversion status (main website)
             if (filters.registrationStatus) {
@@ -502,10 +603,7 @@ class LeadService {
             const limit = filters.limit || 20;
             const skip = (page - 1) * limit;
             const now = new Date();
-            const startOfToday = new Date(now);
-            startOfToday.setHours(0, 0, 0, 0);
-            const endOfToday = new Date(now);
-            endOfToday.setHours(23, 59, 59, 999);
+            const { startOfToday, endOfToday } = this.getISTDayBounds(now);
             const query = {};
             if (filters.city) {
                 query.city = { $regex: new RegExp(filters.city, 'i') };
@@ -598,10 +696,7 @@ class LeadService {
     static async getFollowUpQueueStats(filters) {
         try {
             const now = new Date();
-            const startOfToday = new Date(now);
-            startOfToday.setHours(0, 0, 0, 0);
-            const endOfToday = new Date(now);
-            endOfToday.setHours(23, 59, 59, 999);
+            const { startOfToday, endOfToday } = this.getISTDayBounds(now);
             const scope = {};
             if (filters.addedByAny && filters.addedByAny.length > 0) {
                 scope.addedBy = { $in: filters.addedByAny };
@@ -742,10 +837,21 @@ class LeadService {
             if (filters.qualifierId) {
                 leadMatch.addedBy = filters.qualifierId;
             }
+            const now = new Date();
+            const statusHistoryMatch = {
+                'statusHistory.changedAt': { $gte: filters.from, $lte: filters.to },
+            };
+            if (filters.reportCategory === 'interested') {
+                statusHistoryMatch['statusHistory.status'] = 'contacted_interested';
+            }
+            if (filters.reportCategory === 'callback_scheduled' || filters.reportCategory === 'callback_overdue') {
+                statusHistoryMatch['statusHistory.status'] = 'contacted_interested';
+                statusHistoryMatch['statusHistory.callbackAt'] = { $exists: true, $ne: null };
+            }
             const rows = await Lead_1.default.aggregate([
                 { $match: leadMatch },
                 { $unwind: '$statusHistory' },
-                { $match: { 'statusHistory.changedAt': { $gte: filters.from, $lte: filters.to } } },
+                { $match: statusHistoryMatch },
                 { $sort: { 'statusHistory.changedAt': -1 } },
                 {
                     $group: {
@@ -763,6 +869,7 @@ class LeadService {
                         createdAt: { $first: '$createdAt' },
                         updatedAt: { $first: '$updatedAt' },
                         currentStatus: { $first: '$status' },
+                        nextCallbackAt: { $first: '$nextCallbackAt' },
                         qualifierName: { $first: '$addedByName' },
                         qualifierId: { $first: '$addedBy' },
                         isDuplicate: { $first: '$isDuplicate' },
@@ -770,33 +877,39 @@ class LeadService {
                         latestHistory: { $first: '$statusHistory' },
                     },
                 },
+                ...(filters.reportCategory === 'callback_scheduled'
+                    ? [{ $match: { nextCallbackAt: { $exists: true, $ne: null, $gte: now } } }]
+                    : []),
+                ...(filters.reportCategory === 'callback_overdue'
+                    ? [{ $match: { nextCallbackAt: { $lt: now } } }]
+                    : []),
                 { $sort: { updatedAt: -1 } },
             ]);
             const reportRows = rows.map((row) => {
                 const base = {
                     Date: this.formatIST(row.latestHistory?.changedAt),
-                    'Qualifier Name': row.qualifierName || 'Unknown',
-                    'Lead ID': row.leadId,
-                    'Lead Name': row.name || '',
-                    'Phone/Landline': row.phone || row.landline || '',
-                    City: row.city || '',
-                    'Current Status': row.currentStatus || '',
-                    'Status Reason': row.latestHistory?.statusReasonText || row.latestHistory?.statusReasonCode || '',
+                    'Qualifier Name': this.textForSpreadsheet(row.qualifierName || 'Unknown'),
+                    'Lead ID': this.textForSpreadsheet(row.leadId),
+                    'Lead Name': this.textForSpreadsheet(row.name),
+                    'Phone/Landline': this.textForSpreadsheet(row.phone || row.landline || ''),
+                    City: this.textForSpreadsheet(row.city),
+                    'Current Status': this.labelForReport(row.latestHistory?.status || row.currentStatus),
+                    'Status Reason': this.textForSpreadsheet(row.latestHistory?.statusReasonText || this.labelForReport(row.latestHistory?.statusReasonCode)),
                     'Callback Date': this.formatIST(row.latestHistory?.callbackAt),
                     'Expected Onboarding Date': this.formatIST(row.latestHistory?.expectedOnboardingAt),
                     'Last Updated At': this.formatIST(row.updatedAt),
-                    'Last Updated By': row.latestHistory?.changedByName || row.latestHistory?.changedBy || '',
+                    'Last Updated By': this.textForSpreadsheet(row.latestHistory?.changedByName || row.latestHistory?.changedBy || ''),
                 };
                 if (filters.template === 'detailed') {
-                    base.State = row.state || '';
-                    base['Primary Category'] = row.primaryCategory || '';
-                    base['Secondary Category'] = row.secondaryCategory || '';
-                    base.Source = row.source || '';
-                    base['Source Details'] = row.sourceDetails || '';
+                    base.State = this.textForSpreadsheet(row.state);
+                    base['Primary Category'] = this.textForSpreadsheet(row.primaryCategory);
+                    base['Secondary Category'] = this.textForSpreadsheet(row.secondaryCategory);
+                    base.Source = this.textForSpreadsheet(row.source);
+                    base['Source Details'] = this.textForSpreadsheet(row.sourceDetails);
                     base['Created At'] = this.formatIST(row.createdAt);
                     base['Updated At'] = this.formatIST(row.updatedAt);
                     if (filters.includeNotes) {
-                        base.Notes = row.latestHistory?.notes || '';
+                        base.Notes = this.textForSpreadsheet(row.latestHistory?.notes);
                     }
                     base['Is Duplicate'] = row.isDuplicate ? 'Yes' : 'No';
                     base.Blacklisted = row.blacklisted ? 'Yes' : 'No';
@@ -804,10 +917,12 @@ class LeadService {
                 return base;
             });
             const worksheet = xlsx_1.default.utils.json_to_sheet(reportRows);
+            this.applyWorksheetLayout(worksheet, reportRows);
             const workbook = xlsx_1.default.utils.book_new();
             xlsx_1.default.utils.book_append_sheet(workbook, worksheet, 'Status Report');
             const dateStamp = new Date().toISOString().slice(0, 10);
-            const filename = `lead-status-report-${filters.template}-${dateStamp}.${filters.format}`;
+            const categorySlug = filters.reportCategory.replace(/_/g, '-');
+            const filename = `lead-status-report-${filters.template}-${categorySlug}-${dateStamp}.${filters.format}`;
             const mimeType = filters.format === 'xlsx'
                 ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
                 : 'text/csv';
@@ -1003,6 +1118,15 @@ class LeadService {
             lead.statusReasonText = statusReasonText || undefined;
             lead.nextCallbackAt = callbackAt || undefined;
             lead.expectedOnboardingAt = expectedOnboardingAt || undefined;
+            if (finalStatus === 'contacted_interested') {
+                lead.lastInterestedBy = data.changedBy;
+            }
+            else if (finalStatus === 'contacted_not_interested') {
+                lead.lastNotInterestedBy = data.changedBy;
+            }
+            else if (finalStatus === 'contacted_not_lifted') {
+                lead.lastNotLiftedBy = data.changedBy;
+            }
             lead.statusHistory.push({
                 status: finalStatus,
                 changedBy: data.changedBy,
@@ -1488,4 +1612,19 @@ class LeadService {
     }
 }
 exports.LeadService = LeadService;
+LeadService.STATUS_REPORT_LABELS = {
+    lead_added: 'New Lead',
+    contacted_not_lifted: 'Contacted & Not Lifted',
+    contacted_not_interested: 'Contacted & Not Interested',
+    contacted_interested: 'Contacted & Interested',
+    documents_submitted: 'Documents Received',
+    under_verification: 'Under Verification',
+    approved: 'Approved',
+    inactive: 'Inactive',
+    callback_requested: 'Callback Requested',
+    interested_onboarding_later: 'Interested - Onboarding Later',
+    not_interested: 'Not Interested',
+    wrong_number: 'Wrong Number',
+    other: 'Other',
+};
 //# sourceMappingURL=LeadService.js.map

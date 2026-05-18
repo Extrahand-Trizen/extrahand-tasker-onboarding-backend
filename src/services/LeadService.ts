@@ -79,6 +79,10 @@ export interface SearchFilters {
   source?: LeadSource;
   addedBy?: string;
   addedByAny?: string[];
+  pickedBy?: string;
+  transferPendingTo?: string;
+  ownerBy?: string;
+  ownerByAny?: string[];
   search?: string; // Name or phone search
   startDate?: Date;
   endDate?: Date;
@@ -95,6 +99,8 @@ export interface CallbackQueueFilters {
   primarySkill?: string;
   addedBy?: string;
   addedByAny?: string[];
+  ownerBy?: string;
+  ownerByAny?: string[];
   startDate?: Date;
   endDate?: Date;
   page?: number;
@@ -115,6 +121,8 @@ export interface FollowUpQueueFilters {
   primarySkill?: string;
   addedBy?: string;
   addedByAny?: string[];
+  ownerBy?: string;
+  ownerByAny?: string[];
   startDate?: Date;
   endDate?: Date;
   dueType?: FollowUpDueType;
@@ -534,6 +542,27 @@ export class LeadService {
     return lead;
   }
 
+  private static applyOwnerScope(query: any, ownerBy?: string, ownerByAny?: string[]): void {
+    const ownerIds = ownerByAny && ownerByAny.length > 0
+      ? ownerByAny
+      : ownerBy
+        ? [ownerBy]
+        : [];
+
+    if (!ownerIds.length) {
+      return;
+    }
+
+    query.$and = query.$and || [];
+    query.$and.push({
+      $or: [
+        { pickedBy: { $in: ownerIds } },
+        { pickedBy: { $exists: false } , addedBy: { $in: ownerIds } },
+        { pickedBy: null, addedBy: { $in: ownerIds } }
+      ]
+    });
+  }
+
   /**
    * Get lead by ID
    */
@@ -654,6 +683,18 @@ export class LeadService {
       } else if (filters.addedBy) {
         query.addedBy = filters.addedBy;
       }
+
+      this.applyOwnerScope(query, filters.ownerBy, filters.ownerByAny);
+
+      if (filters.pickedBy) {
+        query.pickedBy = filters.pickedBy;
+      }
+
+      if (filters.transferPendingTo) {
+        query.transferPendingTo = filters.transferPendingTo;
+      }
+
+      this.applyOwnerScope(query, filters.ownerBy, filters.ownerByAny);
 
       if (filters.startDate || filters.endDate) {
         query.createdAt = {};
@@ -842,6 +883,8 @@ export class LeadService {
         baseQuery.addedBy = filters.addedBy;
       }
 
+      this.applyOwnerScope(baseQuery, filters.ownerBy, filters.ownerByAny);
+
       const [totalScheduled, overdue, dueToday] = await Promise.all([
         Lead.countDocuments(baseQuery),
         Lead.countDocuments({
@@ -897,6 +940,8 @@ export class LeadService {
       } else if (filters.addedBy) {
         query.addedBy = filters.addedBy;
       }
+
+      this.applyOwnerScope(query, filters.ownerBy, filters.ownerByAny);
 
       if (filters.dueType === 'callback') {
         query.nextCallbackAt = { $exists: true, $ne: null };
@@ -981,6 +1026,8 @@ export class LeadService {
         scope.addedBy = filters.addedBy;
       }
 
+      this.applyOwnerScope(scope, filters.ownerBy, filters.ownerByAny);
+
       const [
         callbackDueToday,
         callbackOverdue,
@@ -1045,7 +1092,11 @@ export class LeadService {
     try {
       const leadMatch: any = {};
       if (filters.qualifierId) {
-        leadMatch.addedBy = filters.qualifierId;
+        leadMatch.$or = [
+          { pickedBy: filters.qualifierId },
+          { pickedBy: { $exists: false }, addedBy: filters.qualifierId },
+          { pickedBy: null, addedBy: filters.qualifierId },
+        ];
       }
 
       const dateMatch = {
@@ -1056,34 +1107,42 @@ export class LeadService {
         { $match: leadMatch },
         { $unwind: '$statusHistory' },
         { $match: dateMatch },
+        { $sort: { 'statusHistory.changedAt': 1 } },
       ];
 
-      const [statusCountsRaw, touchedRaw, qualifierRaw] = await Promise.all([
+      const latestStatusPipeline: any[] = [
+        ...basePipeline,
+        {
+          $group: {
+            _id: '$leadId',
+            latestStatus: { $last: '$statusHistory' },
+            ownerId: { $last: { $ifNull: ['$pickedBy', '$addedBy'] } },
+            ownerName: { $last: { $ifNull: ['$pickedByName', '$addedByName'] } },
+          },
+        },
+      ];
+
+      const [statusCountsRaw, touchedRaw, qualifierRaw, callbackScheduledRaw] = await Promise.all([
         Lead.aggregate([
-          ...basePipeline,
+          ...latestStatusPipeline,
           {
             $group: {
-              _id: '$statusHistory.status',
+              _id: '$latestStatus.status',
               count: { $sum: 1 },
             },
           },
         ]),
         Lead.aggregate([
-          ...basePipeline,
-          {
-            $group: {
-              _id: '$leadId',
-            },
-          },
+          ...latestStatusPipeline,
           { $count: 'count' },
         ]),
         Lead.aggregate([
-          ...basePipeline,
+          ...latestStatusPipeline,
           {
             $group: {
-              _id: '$addedBy',
-              qualifierName: { $last: '$addedByName' },
-              leadIds: { $addToSet: '$leadId' },
+              _id: '$ownerId',
+              qualifierName: { $last: '$ownerName' },
+              leadIds: { $addToSet: '$_id' },
             },
           },
           {
@@ -1095,6 +1154,16 @@ export class LeadService {
           },
           { $sort: { touchedLeads: -1 } },
         ]),
+        Lead.aggregate([
+          ...latestStatusPipeline,
+          {
+            $match: {
+              'latestStatus.status': 'contacted_interested',
+              'latestStatus.callbackAt': { $exists: true, $ne: null },
+            },
+          },
+          { $count: 'count' },
+        ]),
       ]);
 
       const statusCounts = statusCountsRaw.map((row: any) => ({
@@ -1104,7 +1173,15 @@ export class LeadService {
       const statusCountMap = new Map(statusCounts.map((row) => [row.status, row.count]));
 
       const callbackOverdue = await Lead.countDocuments({
-        ...(filters.qualifierId ? { addedBy: filters.qualifierId } : {}),
+        ...(filters.qualifierId
+          ? {
+              $or: [
+                { pickedBy: filters.qualifierId },
+                { pickedBy: { $exists: false }, addedBy: filters.qualifierId },
+                { pickedBy: null, addedBy: filters.qualifierId },
+              ],
+            }
+          : {}),
         nextCallbackAt: { $lt: new Date() },
       });
 
@@ -1112,7 +1189,7 @@ export class LeadService {
         touchedLeads: touchedRaw[0]?.count || 0,
         interested: statusCountMap.get('contacted_interested') || 0,
         notInterested: statusCountMap.get('contacted_not_interested') || 0,
-        callbackScheduled: statusCountMap.get('contacted_interested') || 0,
+        callbackScheduled: callbackScheduledRaw[0]?.count || 0,
         callbackOverdue,
         statusCounts,
         qualifierBreakdown: qualifierRaw.map((row: any) => ({
@@ -1139,7 +1216,11 @@ export class LeadService {
     try {
       const leadMatch: any = {};
       if (filters.qualifierId) {
-        leadMatch.addedBy = filters.qualifierId;
+        leadMatch.$or = [
+          { pickedBy: filters.qualifierId },
+          { pickedBy: { $exists: false }, addedBy: filters.qualifierId },
+          { pickedBy: null, addedBy: filters.qualifierId },
+        ];
       }
       const now = new Date();
 
@@ -1178,8 +1259,8 @@ export class LeadService {
             updatedAt: { $first: '$updatedAt' },
             currentStatus: { $first: '$status' },
             nextCallbackAt: { $first: '$nextCallbackAt' },
-            qualifierName: { $first: '$addedByName' },
-            qualifierId: { $first: '$addedBy' },
+            qualifierName: { $first: { $ifNull: ['$pickedByName', '$addedByName'] } },
+            qualifierId: { $first: { $ifNull: ['$pickedBy', '$addedBy'] } },
             isDuplicate: { $first: '$isDuplicate' },
             blacklisted: { $first: '$blacklisted' },
             latestHistory: { $first: '$statusHistory' },

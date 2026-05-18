@@ -71,7 +71,7 @@ class BulkUploadController {
                     ...result,
                     note: "Accounts will only be created when users accept invites. This ensures proper consent and data integrity.",
                     nextSteps: [
-                        "Review and qualify leads in the Tasker List",
+                        "Review and qualify leads in the Helper List",
                         "Send invites to qualified leads",
                         "Accounts will be created when users accept invites"
                     ]
@@ -176,7 +176,7 @@ John Doe,9876543210,john@example.com,Delhi,Delhi,123 Main Street Connaught Place
 Raj Kumar,9876543211,raj@example.com,Mumbai,Maharashtra,456 Worker Lane Andheri West,400053,cleaning,House Cleaning,experienced,5,Mon-Sat,Afternoon,campaign`;
         }
         res.setHeader("Content-Type", "text/csv");
-        res.setHeader("Content-Disposition", `attachment; filename=tasker-${operationType}-template.csv`);
+        res.setHeader("Content-Disposition", `attachment; filename=helper-${operationType}-template.csv`);
         res.send(csv);
     }
     /**

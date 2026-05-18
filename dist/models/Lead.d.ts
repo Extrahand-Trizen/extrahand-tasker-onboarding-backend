@@ -90,6 +90,15 @@ export interface ILead extends Document {
     preferredTimeSlot?: string;
     addedBy: string;
     addedByName?: string;
+    pickedBy?: string;
+    pickedByName?: string;
+    pickedAt?: Date;
+    lastTransferredBy?: string;
+    lastTransferredByName?: string;
+    lastTransferredAt?: Date;
+    transferPendingTo?: string;
+    transferPendingToName?: string;
+    transferPendingAt?: Date;
     status: LeadStatus;
     accountStatus: AccountStatus;
     statusHistory: IStatusHistory[];

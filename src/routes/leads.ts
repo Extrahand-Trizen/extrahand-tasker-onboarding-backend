@@ -54,6 +54,34 @@ router.get(
   LeadController.getLeadCreators
 );
 
+// Get qualifiers list (for pick/transfer)
+router.get(
+  '/qualifiers',
+  requirePermission('canViewLeads'),
+  LeadController.getQualifiers
+);
+
+// Get onboarders list (for transfer)
+router.get(
+  '/onboarders',
+  requirePermission('canViewLeads'),
+  LeadController.getOnboarders
+);
+
+// Transfer notifications for current user
+router.get(
+  '/transfer-notifications',
+  requirePermission('canViewLeads'),
+  LeadController.getTransferNotifications
+);
+
+// Get transfer recipients list (all active admin users)
+router.get(
+  '/transfer-recipients',
+  requirePermission('canViewLeads'),
+  LeadController.getTransferRecipients
+);
+
 // Shared status reason codes for lead status updates
 router.get(
   '/status-reason-codes',
@@ -109,6 +137,34 @@ router.get(
   '/:leadId',
   requirePermission('canViewLeads'),
   LeadController.getLead
+);
+
+// Pick lead (qualifier/onboarder)
+router.post(
+  '/:leadId/pick',
+  requirePermission('canViewLeads'),
+  LeadController.pickLead
+);
+
+// Transfer picked lead (qualifier/onboarder)
+router.post(
+  '/:leadId/transfer',
+  requirePermission('canViewLeads'),
+  LeadController.transferLead
+);
+
+// Accept lead transfer (qualifier/onboarder only)
+router.post(
+  '/:leadId/accept-transfer',
+  requirePermission('canViewLeads'),
+  LeadController.acceptTransferLead
+);
+
+// Reject lead transfer (qualifier/onboarder only)
+router.post(
+  '/:leadId/reject-transfer',
+  requirePermission('canViewLeads'),
+  LeadController.rejectTransferLead
 );
 
 // Update lead

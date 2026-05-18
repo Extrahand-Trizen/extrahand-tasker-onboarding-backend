@@ -201,7 +201,7 @@ class BulkUploadService {
                 operation: operation,
                 uid: record.uid || record.UID || undefined,
                 name: (record.name || record.Name || record["Full Name"] || "").toString().trim() ||
-                    "Unknown Tasker",
+                    "Unknown Helper",
                 phone: phoneValue || undefined,
                 landline: landlineValue ? String(landlineValue).trim() : undefined,
                 email: record.email || record.Email || undefined,
