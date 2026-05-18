@@ -1228,15 +1228,6 @@ export class LeadService {
         'statusHistory.changedAt': { $gte: filters.from, $lte: filters.to },
       };
 
-      if (filters.reportCategory === 'interested') {
-        statusHistoryMatch['statusHistory.status'] = 'contacted_interested';
-      }
-
-      if (filters.reportCategory === 'callback_scheduled' || filters.reportCategory === 'callback_overdue') {
-        statusHistoryMatch['statusHistory.status'] = 'contacted_interested';
-        statusHistoryMatch['statusHistory.callbackAt'] = { $exists: true, $ne: null };
-      }
-
       const rows = await Lead.aggregate([
         { $match: leadMatch },
         { $unwind: '$statusHistory' },
@@ -1266,11 +1257,24 @@ export class LeadService {
             latestHistory: { $first: '$statusHistory' },
           },
         },
+        ...(filters.reportCategory === 'interested'
+          ? [{ $match: { 'latestHistory.status': 'contacted_interested' } }]
+          : []),
         ...(filters.reportCategory === 'callback_scheduled'
-          ? [{ $match: { nextCallbackAt: { $exists: true, $ne: null, $gte: now } } }]
+          ? [{
+              $match: {
+                'latestHistory.status': 'contacted_interested',
+                'latestHistory.callbackAt': { $exists: true, $ne: null, $gte: now },
+              },
+            }]
           : []),
         ...(filters.reportCategory === 'callback_overdue'
-          ? [{ $match: { nextCallbackAt: { $lt: now } } }]
+          ? [{
+              $match: {
+                'latestHistory.status': 'contacted_interested',
+                'latestHistory.callbackAt': { $exists: true, $ne: null, $lt: now },
+              },
+            }]
           : []),
         { $sort: { updatedAt: -1 } },
       ]);
