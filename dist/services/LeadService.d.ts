@@ -132,11 +132,13 @@ export interface FollowUpQueueStats {
     totalFollowUps: number;
 }
 export interface StatusAnalyticsFilters {
-    from: Date;
-    to: Date;
+    from?: Date;
+    to?: Date;
     qualifierId?: string;
     pickedBy?: string;
     category?: string;
+    claimsScope?: 'current' | 'total';
+    allTime?: boolean;
 }
 export type StatusReportCategory = 'touched_leads' | 'interested' | 'callback_scheduled' | 'callback_overdue';
 export interface StatusReportExportFilters extends StatusAnalyticsFilters {
@@ -311,5 +313,11 @@ export declare class LeadService {
      * Log activity
      */
     static logActivity(leadId: string, type: string, action: string, performedBy: string, performedByName?: string, metadata?: Record<string, any>): Promise<void>;
+    static getPerformanceOverview(): Promise<any>;
+    static getPerformanceDetails(userId: string, filters: {
+        from?: Date;
+        to?: Date;
+        allTime?: boolean;
+    }): Promise<any>;
 }
 //# sourceMappingURL=LeadService.d.ts.map

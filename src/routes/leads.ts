@@ -94,6 +94,11 @@ router.get(
   LeadController.getStatusAnalytics
 );
 router.get(
+  '/performance',
+  requirePermission('canViewLeads'),
+  LeadController.getTeamPerformance
+);
+router.get(
   '/status-reports/export',
   requirePermission('canViewLeads'),
   LeadController.exportStatusReport

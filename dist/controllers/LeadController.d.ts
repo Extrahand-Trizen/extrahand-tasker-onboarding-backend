@@ -83,6 +83,10 @@ export declare class LeadController {
      */
     static getStatusAnalytics(req: AdminRequest, res: Response): Promise<void>;
     /**
+     * GET /api/v1/onboarding/leads/performance
+     */
+    static getTeamPerformance(req: AdminRequest, res: Response): Promise<void>;
+    /**
      * GET /api/v1/onboarding/leads/status-reports/export
      */
     static exportStatusReport(req: AdminRequest, res: Response): Promise<void>;

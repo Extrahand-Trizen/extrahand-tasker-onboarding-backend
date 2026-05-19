@@ -925,6 +925,9 @@ class LeadController {
             else if (role === 'qualifier' && scopedIds.length > 0) {
                 filters.ownerByAny = scopedIds;
             }
+            else if (req.query.ownerBy) {
+                filters.ownerBy = req.query.ownerBy;
+            }
             else if (req.query.addedBy) {
                 filters.ownerBy = req.query.addedBy;
             }
@@ -959,10 +962,11 @@ class LeadController {
             }
             const role = req.admin.role;
             const userId = getUserId(req);
-            const { from, to, qualifierId, pickedBy, category } = req.query;
-            const fromDate = from ? new Date(from) : new Date(Date.now() - 6 * 24 * 60 * 60 * 1000);
+            const { from, to, qualifierId, pickedBy, category, claimsScope, allTime } = req.query;
+            const isAllTime = String(allTime) === 'true';
+            const fromDate = from ? new Date(from) : (isAllTime ? new Date(0) : new Date(Date.now() - 6 * 24 * 60 * 60 * 1000));
             const toDate = to ? new Date(to) : new Date();
-            if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime())) {
+            if (!isAllTime && (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime()))) {
                 res.status(400).json({
                     success: false,
                     error: 'Invalid date range',
@@ -971,9 +975,11 @@ class LeadController {
                 return;
             }
             const filters = {
-                from: fromDate,
-                to: toDate,
+                from: isAllTime ? undefined : fromDate,
+                to: isAllTime ? undefined : toDate,
                 category: category ? String(category) : undefined,
+                claimsScope: claimsScope ? String(claimsScope) : undefined,
+                allTime: isAllTime,
             };
             if (role === 'qualifier' && userId) {
                 filters.qualifierId = userId;
@@ -1005,6 +1011,69 @@ class LeadController {
         }
     }
     /**
+     * GET /api/v1/onboarding/leads/performance
+     */
+    static async getTeamPerformance(req, res) {
+        try {
+            if (!req.admin) {
+                res.status(401).json({
+                    success: false,
+                    error: 'Authentication required'
+                });
+                return;
+            }
+            if (req.admin.role !== 'lead_access_manager') {
+                res.status(403).json({
+                    success: false,
+                    error: 'Forbidden',
+                    message: 'Only Lead Access Managers can view team performance metrics'
+                });
+                return;
+            }
+            const { userId, from, to, allTime } = req.query;
+            if (userId) {
+                const isAllTime = String(allTime) === 'true';
+                const fromDate = from ? new Date(from) : (isAllTime ? new Date(0) : new Date(Date.now() - 6 * 24 * 60 * 60 * 1000));
+                const toDate = to ? new Date(to) : new Date();
+                if (!isAllTime && (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime()))) {
+                    res.status(400).json({
+                        success: false,
+                        error: 'Invalid date range',
+                        message: 'from/to must be valid ISO date strings'
+                    });
+                    return;
+                }
+                const filters = {
+                    from: isAllTime ? undefined : fromDate,
+                    to: isAllTime ? undefined : toDate,
+                    allTime: isAllTime,
+                };
+                const details = await LeadService_1.LeadService.getPerformanceDetails(String(userId), filters);
+                res.json({
+                    success: true,
+                    data: details
+                });
+            }
+            else {
+                const overview = await LeadService_1.LeadService.getPerformanceOverview();
+                res.json({
+                    success: true,
+                    data: overview
+                });
+            }
+        }
+        catch (error) {
+            logger_1.default.error('Error in getTeamPerformance controller', {
+                error: error.message
+            });
+            res.status(500).json({
+                success: false,
+                error: 'Failed to fetch team performance metrics',
+                message: error.message
+            });
+        }
+    }
+    /**
      * GET /api/v1/onboarding/leads/status-reports/export
      */
     static async exportStatusReport(req, res) {
@@ -1018,7 +1087,7 @@ class LeadController {
             }
             const role = req.admin.role;
             const userId = getUserId(req);
-            const { from, to, qualifierId, pickedBy, format = 'csv', template = 'eod', reportCategory = 'touched_leads', includeNotes = 'false', category, exportLayout, } = req.query;
+            const { from, to, qualifierId, pickedBy, format = 'csv', template = 'eod', reportCategory = 'touched_leads', includeNotes = 'false', category, exportLayout, claimsScope, allTime, } = req.query;
             if (!['csv', 'xlsx'].includes(String(format))) {
                 res.status(400).json({
                     success: false,
@@ -1043,9 +1112,10 @@ class LeadController {
                 });
                 return;
             }
-            const fromDate = from ? new Date(from) : new Date(Date.now() - 24 * 60 * 60 * 1000);
+            const isAllTime = String(allTime) === 'true';
+            const fromDate = from ? new Date(from) : (isAllTime ? new Date(0) : new Date(Date.now() - 24 * 60 * 60 * 1000));
             const toDate = to ? new Date(to) : new Date();
-            if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime())) {
+            if (!isAllTime && (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime()))) {
                 res.status(400).json({
                     success: false,
                     error: 'Invalid date range',
@@ -1054,14 +1124,16 @@ class LeadController {
                 return;
             }
             const filters = {
-                from: fromDate,
-                to: toDate,
+                from: isAllTime ? undefined : fromDate,
+                to: isAllTime ? undefined : toDate,
                 format: format,
                 template: template,
                 reportCategory: reportCategory,
                 includeNotes: String(includeNotes) === 'true',
                 category: category ? String(category) : undefined,
                 exportLayout: exportLayout === 'qualifier' ? 'qualifier' : 'standard',
+                claimsScope: claimsScope ? String(claimsScope) : undefined,
+                allTime: isAllTime,
             };
             if (role === 'qualifier' && userId) {
                 filters.qualifierId = userId;
@@ -1081,8 +1153,8 @@ class LeadController {
                 reportType: 'lead-status-report',
                 role,
                 filters: {
-                    from: fromDate.toISOString(),
-                    to: toDate.toISOString(),
+                    from: isAllTime ? 'all-time' : fromDate.toISOString(),
+                    to: isAllTime ? 'all-time' : toDate.toISOString(),
                     qualifierId: filters.qualifierId,
                     format: filters.format,
                     template: filters.template,

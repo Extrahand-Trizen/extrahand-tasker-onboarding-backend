@@ -32,6 +32,7 @@ router.get('/transfer-recipients', (0, roleAuth_1.requirePermission)('canViewLea
 // Shared status reason codes for lead status updates
 router.get('/status-reason-codes', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getStatusReasonCodes);
 router.get('/status-analytics', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getStatusAnalytics);
+router.get('/performance', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getTeamPerformance);
 router.get('/status-reports/export', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.exportStatusReport);
 router.get('/dashboard-metrics', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getDashboardMetrics);
 // Check for duplicates
