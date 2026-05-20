@@ -54,6 +54,13 @@ router.get(
   LeadController.getLeadCreators
 );
 
+// Get distinct gated community names (for dropdown/autocomplete)
+router.get(
+  '/gated-community-names',
+  requirePermission('canViewLeads'),
+  LeadController.getGatedCommunityNames
+);
+
 // Get qualifiers list (for pick/transfer)
 router.get(
   '/qualifiers',

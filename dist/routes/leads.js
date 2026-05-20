@@ -21,6 +21,8 @@ router.get('/follow-up-queue', (0, roleAuth_1.requirePermission)('canViewLeads')
 router.get('/follow-up-queue/stats', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getFollowUpQueueStats);
 // Get unique users who have added leads (for filter dropdown)
 router.get('/creators', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getLeadCreators);
+// Get distinct gated community names (for dropdown/autocomplete)
+router.get('/gated-community-names', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getGatedCommunityNames);
 // Get qualifiers list (for pick/transfer)
 router.get('/qualifiers', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getQualifiers);
 // Get onboarders list (for transfer)

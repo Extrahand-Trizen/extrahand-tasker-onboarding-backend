@@ -26,6 +26,11 @@ export declare class LeadController {
      */
     static getVerifiedCertificates(req: AdminRequest, res: Response): Promise<void>;
     /**
+     * Get unique gated community names (for dropdown/autocomplete)
+     * GET /api/v1/onboarding/leads/gated-community-names
+     */
+    static getGatedCommunityNames(req: AdminRequest, res: Response): Promise<void>;
+    /**
      * Get unique users who have added leads (for filter dropdown)
      * GET /api/v1/onboarding/leads/creators
      */

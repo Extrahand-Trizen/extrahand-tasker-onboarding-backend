@@ -77,6 +77,53 @@ class LeadService {
             $or: matchConditions,
         };
     }
+    static escapeRegex(value) {
+        return value.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
+    }
+    static buildExactCaseInsensitiveMatch(value) {
+        return { $regex: new RegExp(`^${this.escapeRegex(value)}$`, 'i') };
+    }
+    static buildRegisteredPredicate() {
+        return {
+            $or: [
+                { 'conversionData.platformUid': { $exists: true, $nin: [null, ''] } },
+                { 'activationData.firebaseUid': { $exists: true, $nin: [null, ''] } },
+                { accountStatus: { $in: ['invited', 'activated', 'suspended'] } },
+            ],
+        };
+    }
+    static buildVerifiedPredicate() {
+        return {
+            $or: [
+                { 'conversionData.isAadhaarVerified': true },
+                { 'verificationStatus.aadhaar.status': 'verified' },
+            ],
+        };
+    }
+    static buildRegisteredOnlyPredicate() {
+        return {
+            ...this.buildRegisteredPredicate(),
+            $nor: [this.buildVerifiedPredicate()],
+        };
+    }
+    static getAdminIdentityIds(user) {
+        return Array.from(new Set([user.userId, user.uid].filter((id) => typeof id === 'string' && id.trim().length > 0)));
+    }
+    static buildIdSelector(field, ids) {
+        if (ids.length <= 1) {
+            return { [field]: ids[0] };
+        }
+        return { [field]: { $in: ids } };
+    }
+    static buildOwnerScopeClause(ownerIds) {
+        return {
+            $or: [
+                this.buildIdSelector('pickedBy', ownerIds),
+                this.buildIdSelector('addedBy', ownerIds),
+                this.buildIdSelector('statusHistory.changedBy', ownerIds),
+            ],
+        };
+    }
     static textForSpreadsheet(value) {
         if (value === null || value === undefined)
             return '';
@@ -264,6 +311,10 @@ class LeadService {
                 state: data.state?.trim() || undefined,
                 address: data.address?.trim() || undefined,
                 pincode: data.pincode?.trim() || undefined,
+                isGatedCommunity: data.isGatedCommunity || false,
+                gatedCommunityName: data.isGatedCommunity && data.gatedCommunityName?.trim()
+                    ? data.gatedCommunityName.trim()
+                    : undefined,
                 primarySkill: primarySkillCategory || undefined, // Legacy field
                 primaryCategory: primarySkillCategory || undefined, // New field
                 secondarySkill: secondaryCategoryValue || undefined, // Legacy field
@@ -342,22 +393,16 @@ class LeadService {
         return lead;
     }
     static applyOwnerScope(query, ownerBy, ownerByAny) {
-        const ownerIds = ownerByAny && ownerByAny.length > 0
+        const ownerIds = Array.from(new Set((ownerByAny && ownerByAny.length > 0
             ? ownerByAny
             : ownerBy
                 ? [ownerBy]
-                : [];
+                : []).filter((id) => typeof id === 'string' && id.trim().length > 0)));
         if (!ownerIds.length) {
             return;
         }
         query.$and = query.$and || [];
-        query.$and.push({
-            $or: [
-                { pickedBy: { $in: ownerIds } },
-                { addedBy: { $in: ownerIds } },
-                { 'statusHistory.changedBy': { $in: ownerIds } }
-            ]
-        });
+        query.$and.push(this.buildOwnerScopeClause(ownerIds));
     }
     /**
      * Get lead by ID
@@ -439,6 +484,23 @@ class LeadService {
             logger_1.default.error('Error getting lead creators', {
                 error: error.message
             });
+            throw error;
+        }
+    }
+    /**
+     * Get all distinct gated community names (for dropdown/autocomplete)
+     */
+    static async getGatedCommunityNames() {
+        try {
+            const names = await Lead_1.default.distinct('gatedCommunityName', {
+                gatedCommunityName: { $exists: true, $nin: [null, ''] },
+            });
+            return Array.from(new Set(names
+                .map((name) => name.trim())
+                .filter(Boolean))).sort((a, b) => a.localeCompare(b));
+        }
+        catch (error) {
+            logger_1.default.error('Error getting gated community names', { error: error.message });
             throw error;
         }
     }
@@ -865,6 +927,9 @@ class LeadService {
                 leadMatch.$and = leadMatch.$and || [];
                 leadMatch.$and.push(this.buildCategoryMatch(filters.category));
             }
+            if (filters.gatedCommunityName) {
+                leadMatch.gatedCommunityName = this.buildExactCaseInsensitiveMatch(filters.gatedCommunityName);
+            }
             const basePipeline = [
                 { $match: leadMatch },
                 { $unwind: '$statusHistory' },
@@ -888,7 +953,30 @@ class LeadService {
                     },
                 },
             ];
-            const [statusCountsRaw, touchedRaw, qualifierRaw, callbackScheduledRaw] = await Promise.all([
+            const now = new Date();
+            const registeredOnlyPredicate = this.buildRegisteredOnlyPredicate();
+            const onboardedScopeMatch = Object.keys(leadMatch).length > 0
+                ? { $and: [leadMatch, registeredOnlyPredicate] }
+                : registeredOnlyPredicate;
+            const onboardedPromise = filters.allTime || !filters.from || !filters.to
+                ? Lead_1.default.countDocuments(onboardedScopeMatch)
+                : Lead_1.default.aggregate([
+                    { $match: leadMatch },
+                    { $match: registeredOnlyPredicate },
+                    { $unwind: '$statusHistory' },
+                    {
+                        $match: {
+                            'statusHistory.changedAt': { $gte: filters.from, $lte: filters.to },
+                        },
+                    },
+                    {
+                        $group: {
+                            _id: '$leadId',
+                        },
+                    },
+                    { $count: 'count' },
+                ]);
+            const [statusCountsRaw, touchedRaw, qualifierRaw, callbackScheduledRaw, callbackOverdueRaw, onboardedRaw] = await Promise.all([
                 Lead_1.default.aggregate([
                     ...latestStatusPipeline,
                     {
@@ -925,50 +1013,32 @@ class LeadService {
                     {
                         $match: {
                             'latestStatus.status': 'contacted_interested',
-                            'latestStatus.callbackAt': { $exists: true, $ne: null },
+                            'latestStatus.callbackAt': { $exists: true, $ne: null, $gte: now },
                         },
                     },
                     { $count: 'count' },
                 ]),
+                Lead_1.default.aggregate([
+                    ...latestStatusPipeline,
+                    {
+                        $match: {
+                            'latestStatus.status': 'contacted_interested',
+                            'latestStatus.callbackAt': { $exists: true, $ne: null, $lt: now },
+                        },
+                    },
+                    { $count: 'count' },
+                ]),
+                onboardedPromise,
             ]);
             const statusCounts = statusCountsRaw.map((row) => ({
                 status: row._id,
                 count: row.count,
             }));
             const statusCountMap = new Map(statusCounts.map((row) => [row.status, row.count]));
-            const callbackOverdueMatch = {};
-            const now = new Date();
-            if (!filters.allTime && filters.from && filters.to) {
-                callbackOverdueMatch.nextCallbackAt = {
-                    $gte: filters.from,
-                    $lte: filters.to,
-                    $lt: now
-                };
-            }
-            else {
-                callbackOverdueMatch.nextCallbackAt = { $lt: now };
-            }
-            if (userId) {
-                if (filters.claimsScope === 'current') {
-                    callbackOverdueMatch.pickedBy = userId;
-                }
-                else {
-                    callbackOverdueMatch.$and = [
-                        {
-                            $or: [
-                                { pickedBy: userId },
-                                { addedBy: userId },
-                                { 'statusHistory.changedBy': userId }
-                            ]
-                        }
-                    ];
-                }
-            }
-            if (filters.category) {
-                callbackOverdueMatch.$and = callbackOverdueMatch.$and || [];
-                callbackOverdueMatch.$and.push(this.buildCategoryMatch(filters.category));
-            }
-            const callbackOverdue = await Lead_1.default.countDocuments(callbackOverdueMatch);
+            const callbackOverdue = callbackOverdueRaw[0]?.count || 0;
+            const onboarded = typeof onboardedRaw === 'number'
+                ? onboardedRaw
+                : onboardedRaw[0]?.count || 0;
             const leadsAddedMatch = {};
             if (userId) {
                 leadsAddedMatch.addedBy = userId;
@@ -979,6 +1049,9 @@ class LeadService {
             if (filters.category) {
                 leadsAddedMatch.$and = leadsAddedMatch.$and || [];
                 leadsAddedMatch.$and.push(this.buildCategoryMatch(filters.category));
+            }
+            if (filters.gatedCommunityName) {
+                leadsAddedMatch.gatedCommunityName = this.buildExactCaseInsensitiveMatch(filters.gatedCommunityName);
             }
             const categoryBreakdownRaw = await Lead_1.default.aggregate([
                 { $match: leadsAddedMatch },
@@ -1002,6 +1075,7 @@ class LeadService {
                 notInterested: statusCountMap.get('contacted_not_interested') || 0,
                 callbackScheduled: callbackScheduledRaw[0]?.count || 0,
                 callbackOverdue,
+                onboarded,
                 statusCounts,
                 qualifierBreakdown: qualifierRaw.map((row) => ({
                     qualifierId: row.qualifierId,
@@ -1042,6 +1116,9 @@ class LeadService {
                 leadMatch.$and = leadMatch.$and || [];
                 leadMatch.$and.push(this.buildCategoryMatch(filters.category));
             }
+            if (filters.gatedCommunityName) {
+                leadMatch.gatedCommunityName = this.buildExactCaseInsensitiveMatch(filters.gatedCommunityName);
+            }
             const now = new Date();
             const rows = await Lead_1.default.aggregate([
                 { $match: leadMatch },
@@ -1063,6 +1140,8 @@ class LeadService {
                         secondaryCategory: { $first: '$secondaryCategory' },
                         source: { $first: '$source' },
                         sourceDetails: { $first: '$sourceDetails' },
+                        isGatedCommunity: { $first: '$isGatedCommunity' },
+                        gatedCommunityName: { $first: '$gatedCommunityName' },
                         createdAt: { $first: '$createdAt' },
                         updatedAt: { $first: '$updatedAt' },
                         currentStatus: { $first: '$status' },
@@ -1116,6 +1195,8 @@ class LeadService {
                     base['Secondary Category'] = this.textForSpreadsheet(row.secondaryCategory);
                     base.Source = this.textForSpreadsheet(row.source);
                     base['Source Details'] = this.textForSpreadsheet(row.sourceDetails);
+                    base['Gated Community'] = row.isGatedCommunity ? 'Yes' : 'No';
+                    base['Gated Community Name'] = this.textForSpreadsheet(row.gatedCommunityName);
                     base['Created At'] = this.formatIST(row.createdAt);
                     base['Updated At'] = this.formatIST(row.updatedAt);
                     if (filters.includeNotes) {
@@ -1181,6 +1262,9 @@ class LeadService {
         if (filters.category) {
             conditions.push(this.buildCategoryMatch(filters.category));
         }
+        if (filters.gatedCommunityName) {
+            conditions.push({ gatedCommunityName: this.buildExactCaseInsensitiveMatch(filters.gatedCommunityName) });
+        }
         const leadMatch = conditions.length > 0 ? { $and: conditions } : {};
         const leads = await Lead_1.default.find(leadMatch)
             .sort({ createdAt: -1 })
@@ -1205,6 +1289,10 @@ class LeadService {
                 row['Local Area'] = this.textForSpreadsheet(lead.address);
             if (lead.pincode)
                 row.Pincode = this.textForSpreadsheet(lead.pincode);
+            if (lead.isGatedCommunity) {
+                row['Gated Community'] = 'Yes';
+                row['Gated Community Name'] = this.textForSpreadsheet(lead.gatedCommunityName);
+            }
             return row;
         });
         const worksheet = xlsx_1.default.utils.json_to_sheet(reportRows);
@@ -1304,6 +1392,20 @@ class LeadService {
                     setData.pincode = pincode;
                 else
                     unsetData.pincode = 1;
+            }
+            if (has('isGatedCommunity')) {
+                setData.isGatedCommunity = !!data.isGatedCommunity;
+                // If turning off gated community, clear the name too
+                if (!data.isGatedCommunity) {
+                    unsetData.gatedCommunityName = 1;
+                }
+            }
+            if (has('gatedCommunityName')) {
+                const gcName = typeof data.gatedCommunityName === 'string' ? data.gatedCommunityName.trim() : '';
+                if (gcName)
+                    setData.gatedCommunityName = gcName;
+                else
+                    unsetData.gatedCommunityName = 1;
             }
             if (has('primarySkill')) {
                 const primarySkill = typeof data.primarySkill === 'string' ? data.primarySkill.trim() : '';
@@ -1903,30 +2005,28 @@ class LeadService {
             "Arjun Das": "Hyderabad",
             "Vikram Iyer": "Bangalore",
         };
-        const registeredQuery = {
-            $or: [
-                { 'conversionData.platformUid': { $exists: true, $nin: [null, ''] } },
-                { 'activationData.firebaseUid': { $exists: true, $nin: [null, ''] } },
-                { accountStatus: { $in: ['invited', 'activated', 'suspended'] } }
-            ]
-        };
+        const registeredOnlyQuery = this.buildRegisteredOnlyPredicate();
         const performanceList = await Promise.all(users.map(async (user) => {
             const userId = user.userId;
+            const identityIds = this.getAdminIdentityIds(user);
             const name = user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Unknown';
             const location = userLocations[name] || user.team || user.department || 'Headquarters';
             // Claims Count (Only leads added by them)
-            const claims = await Lead_1.default.countDocuments({ addedBy: userId });
+            const claims = await Lead_1.default.countDocuments(this.buildIdSelector('addedBy', identityIds));
             if (user.role === 'qualifier') {
-                // Qualifier: Overdue Callbacks
-                const overdue = await Lead_1.default.countDocuments({
-                    status: 'contacted_interested',
-                    nextCallbackAt: { $lt: now },
-                    $or: [
-                        { pickedBy: userId },
-                        { addedBy: userId },
-                        { 'statusHistory.changedBy': userId }
-                    ]
-                });
+                const qualifierScope = {};
+                this.applyOwnerScope(qualifierScope, undefined, identityIds);
+                const [callbackOverdue, onboardingOverdue] = await Promise.all([
+                    Lead_1.default.countDocuments({
+                        ...qualifierScope,
+                        nextCallbackAt: { $lt: now },
+                    }),
+                    Lead_1.default.countDocuments({
+                        ...qualifierScope,
+                        expectedOnboardingAt: { $lt: now },
+                    }),
+                ]);
+                const overdue = callbackOverdue + onboardingOverdue;
                 return {
                     userId,
                     name,
@@ -1939,46 +2039,39 @@ class LeadService {
             }
             else {
                 // Onboarder: Current Claims
-                const currentClaims = await Lead_1.default.countDocuments({
-                    pickedBy: userId
-                });
+                const currentClaims = await Lead_1.default.countDocuments(this.buildIdSelector('pickedBy', identityIds));
                 const onboarderMatch = {
-                    $or: [
-                        { pickedBy: userId },
-                        { addedBy: userId },
-                        { 'statusHistory.changedBy': userId }
-                    ]
+                    ...this.buildOwnerScopeClause(identityIds),
                 };
-                // Onboarder: Follow-ups (touched leads)
-                const followUps = await Lead_1.default.countDocuments({
-                    $and: [
-                        onboarderMatch,
-                        {
-                            $or: [
-                                { nextCallbackAt: { $exists: true, $ne: null } },
-                                { expectedOnboardingAt: { $exists: true, $ne: null } }
-                            ]
-                        }
-                    ]
-                });
+                const followUpScope = this.buildIdSelector('pickedBy', identityIds);
+                const [callbackTotal, onboardingTotal, callbackOverdue, onboardingOverdue] = await Promise.all([
+                    Lead_1.default.countDocuments({
+                        ...followUpScope,
+                        nextCallbackAt: { $exists: true, $ne: null },
+                    }),
+                    Lead_1.default.countDocuments({
+                        ...followUpScope,
+                        expectedOnboardingAt: { $exists: true, $ne: null },
+                    }),
+                    Lead_1.default.countDocuments({
+                        ...followUpScope,
+                        nextCallbackAt: { $lt: now },
+                    }),
+                    Lead_1.default.countDocuments({
+                        ...followUpScope,
+                        expectedOnboardingAt: { $lt: now },
+                    }),
+                ]);
+                const followUps = callbackTotal + onboardingTotal;
                 // Onboarder: Registered (but not verified, touched leads)
                 const registered = await Lead_1.default.countDocuments({
                     $and: [
                         onboarderMatch,
-                        registeredQuery
-                    ],
-                    $nor: [
-                        { 'conversionData.isAadhaarVerified': true },
-                        { 'verificationStatus.aadhaar.status': 'verified' }
+                        registeredOnlyQuery,
                     ]
                 });
-                // Onboarder: Callback overdue only (align with follow-up queue stats)
-                const overdue = await Lead_1.default.countDocuments({
-                    $and: [
-                        onboarderMatch,
-                        { nextCallbackAt: { $lt: now } }
-                    ]
-                });
+                // Onboarder: Overdue follow-ups (align with follow-up queue stats)
+                const overdue = callbackOverdue + onboardingOverdue;
                 return {
                     userId,
                     name,
@@ -1998,8 +2091,8 @@ class LeadService {
         const qualifiersCount = users.filter((u) => u.role === 'qualifier').length;
         const onboardersCount = users.filter((u) => u.role === 'onboarder').length;
         const totalLeadsCount = await Lead_1.default.countDocuments({});
-        const totalOverdueCount = performanceList.reduce((sum, u) => sum + (u.overdue || 0), 0);
-        const totalRegisteredCount = performanceList.reduce((sum, u) => sum + (u.registered || 0), 0);
+        const totalRegisteredCount = await Lead_1.default.countDocuments(registeredOnlyQuery);
+        const totalOverdueCount = performanceList.reduce((sum, user) => sum + (user.overdue || 0), 0);
         return {
             kpis: {
                 totalTeam,
@@ -2014,10 +2107,13 @@ class LeadService {
         };
     }
     static async getPerformanceDetails(userId, filters) {
-        const user = await AdminUser_1.default.findOne({ userId }).lean();
+        const user = await AdminUser_1.default.findOne({
+            $or: [{ userId }, { uid: userId }],
+        }).lean();
         if (!user) {
             throw new Error('User not found');
         }
+        const identityIds = this.getAdminIdentityIds(user);
         const name = user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Unknown';
         const userLocations = {
             "Rahul Mehta": "Mumbai",
@@ -2032,13 +2128,7 @@ class LeadService {
         todayStart.setHours(0, 0, 0, 0);
         const todayEnd = new Date();
         todayEnd.setHours(23, 59, 59, 999);
-        const baseMatch = {
-            $or: [
-                { pickedBy: userId },
-                { addedBy: userId },
-                { 'statusHistory.changedBy': userId }
-            ]
-        };
+        const baseMatch = this.buildOwnerScopeClause(identityIds);
         if (!filters.allTime && filters.from && filters.to) {
             baseMatch.createdAt = { $gte: filters.from, $lte: filters.to };
         }
@@ -2055,14 +2145,15 @@ class LeadService {
                 { 'verificationStatus.aadhaar.status': 'verified' }
             ]
         };
-        const claims = await Lead_1.default.countDocuments({ addedBy: userId });
-        const currentClaims = await Lead_1.default.countDocuments({ pickedBy: userId });
+        const claims = await Lead_1.default.countDocuments(this.buildIdSelector('addedBy', identityIds));
+        const currentClaims = await Lead_1.default.countDocuments(this.buildIdSelector('pickedBy', identityIds));
         // Get ranking on team by claims (currentClaims for onboarder, claims for qualifier)
         const allUsers = await AdminUser_1.default.find({ role: user.role }).lean();
         const allUsersClaims = await Promise.all(allUsers.map(async (u) => {
+            const scopedIds = this.getAdminIdentityIds(u);
             const uClaims = await Lead_1.default.countDocuments(user.role === 'onboarder'
-                ? { pickedBy: u.userId }
-                : { addedBy: u.userId });
+                ? this.buildIdSelector('pickedBy', scopedIds)
+                : this.buildIdSelector('addedBy', scopedIds));
             return { userId: u.userId, claims: uClaims };
         }));
         allUsersClaims.sort((a, b) => b.claims - a.claims);
@@ -2080,35 +2171,65 @@ class LeadService {
         };
         const rankLabel = rankIndex !== -1 ? `#${rankIndex + 1}${getRankSuffix(rankIndex + 1)} on team` : 'N/A';
         if (user.role === 'qualifier') {
-            const qualifierOwnerMatch = {
-                $or: [
-                    { pickedBy: userId },
-                    { addedBy: userId },
-                    { 'statusHistory.changedBy': userId }
-                ]
-            };
+            const qualifierOwnerMatch = this.buildOwnerScopeClause(identityIds);
             const dateQuery = {};
             if (!filters.allTime && filters.from && filters.to) {
                 dateQuery.createdAt = { $gte: filters.from, $lte: filters.to };
             }
-            const overdue = await Lead_1.default.countDocuments({
-                ...qualifierOwnerMatch,
-                ...dateQuery,
-                status: 'contacted_interested',
-                nextCallbackAt: { $lt: now }
-            });
-            const dueToday = await Lead_1.default.countDocuments({
-                ...qualifierOwnerMatch,
-                ...dateQuery,
-                status: 'contacted_interested',
-                nextCallbackAt: { $gte: todayStart, $lte: todayEnd }
-            });
-            const totalFollowUps = await Lead_1.default.countDocuments({
-                ...qualifierOwnerMatch,
-                ...dateQuery,
-                status: 'contacted_interested',
-                nextCallbackAt: { $exists: true, $ne: null }
-            });
+            const dueDateRange = !filters.allTime && filters.from && filters.to
+                ? { $gte: filters.from, $lte: filters.to }
+                : undefined;
+            const [callbackTotal, onboardingTotal, callbackOverdue, onboardingOverdue, callbackDueToday, onboardingDueToday] = await Promise.all([
+                Lead_1.default.countDocuments({
+                    ...qualifierOwnerMatch,
+                    nextCallbackAt: {
+                        $exists: true,
+                        $ne: null,
+                        ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
+                    },
+                }),
+                Lead_1.default.countDocuments({
+                    ...qualifierOwnerMatch,
+                    expectedOnboardingAt: {
+                        $exists: true,
+                        $ne: null,
+                        ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
+                    },
+                }),
+                Lead_1.default.countDocuments({
+                    ...qualifierOwnerMatch,
+                    nextCallbackAt: {
+                        $lt: now,
+                        ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
+                    },
+                }),
+                Lead_1.default.countDocuments({
+                    ...qualifierOwnerMatch,
+                    expectedOnboardingAt: {
+                        $lt: now,
+                        ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
+                    },
+                }),
+                Lead_1.default.countDocuments({
+                    ...qualifierOwnerMatch,
+                    nextCallbackAt: {
+                        $gte: todayStart,
+                        $lte: todayEnd,
+                        ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
+                    },
+                }),
+                Lead_1.default.countDocuments({
+                    ...qualifierOwnerMatch,
+                    expectedOnboardingAt: {
+                        $gte: todayStart,
+                        $lte: todayEnd,
+                        ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
+                    },
+                }),
+            ]);
+            const totalFollowUps = callbackTotal + onboardingTotal;
+            const overdue = callbackOverdue + onboardingOverdue;
+            const dueToday = callbackDueToday + onboardingDueToday;
             const interested = await Lead_1.default.countDocuments({
                 ...qualifierOwnerMatch,
                 ...dateQuery,
@@ -2151,42 +2272,61 @@ class LeadService {
             if (!filters.allTime && filters.from && filters.to) {
                 dateQuery.createdAt = { $gte: filters.from, $lte: filters.to };
             }
-            const totalFollowUps = await Lead_1.default.countDocuments({
-                $and: [
-                    baseMatch,
-                    {
-                        $or: [
-                            { nextCallbackAt: { $exists: true, $ne: null } },
-                            { expectedOnboardingAt: { $exists: true, $ne: null } }
-                        ]
-                    }
-                ],
-                ...dateQuery
-            });
-            const overdue = await Lead_1.default.countDocuments({
-                $and: [
-                    baseMatch,
-                    {
-                        $or: [
-                            { nextCallbackAt: { $lt: now } },
-                            { expectedOnboardingAt: { $lt: now } }
-                        ]
-                    }
-                ],
-                ...dateQuery
-            });
-            const dueToday = await Lead_1.default.countDocuments({
-                $and: [
-                    baseMatch,
-                    {
-                        $or: [
-                            { nextCallbackAt: { $gte: todayStart, $lte: todayEnd } },
-                            { expectedOnboardingAt: { $gte: todayStart, $lte: todayEnd } }
-                        ]
-                    }
-                ],
-                ...dateQuery
-            });
+            const dueDateRange = !filters.allTime && filters.from && filters.to
+                ? { $gte: filters.from, $lte: filters.to }
+                : undefined;
+            const followUpScope = this.buildIdSelector('pickedBy', identityIds);
+            const [callbackTotal, onboardingTotal, callbackOverdue, onboardingOverdue, callbackDueToday, onboardingDueToday] = await Promise.all([
+                Lead_1.default.countDocuments({
+                    ...followUpScope,
+                    nextCallbackAt: {
+                        $exists: true,
+                        $ne: null,
+                        ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
+                    },
+                }),
+                Lead_1.default.countDocuments({
+                    ...followUpScope,
+                    expectedOnboardingAt: {
+                        $exists: true,
+                        $ne: null,
+                        ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
+                    },
+                }),
+                Lead_1.default.countDocuments({
+                    ...followUpScope,
+                    nextCallbackAt: {
+                        $lt: now,
+                        ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
+                    },
+                }),
+                Lead_1.default.countDocuments({
+                    ...followUpScope,
+                    expectedOnboardingAt: {
+                        $lt: now,
+                        ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
+                    },
+                }),
+                Lead_1.default.countDocuments({
+                    ...followUpScope,
+                    nextCallbackAt: {
+                        $gte: todayStart,
+                        $lte: todayEnd,
+                        ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
+                    },
+                }),
+                Lead_1.default.countDocuments({
+                    ...followUpScope,
+                    expectedOnboardingAt: {
+                        $gte: todayStart,
+                        $lte: todayEnd,
+                        ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
+                    },
+                }),
+            ]);
+            const totalFollowUps = callbackTotal + onboardingTotal;
+            const overdue = callbackOverdue + onboardingOverdue;
+            const dueToday = callbackDueToday + onboardingDueToday;
             const interested = await Lead_1.default.countDocuments({
                 ...baseMatch,
                 ...dateQuery,
@@ -2210,7 +2350,7 @@ class LeadService {
             });
             const notRegistered = await Lead_1.default.countDocuments({
                 ...baseMatch,
-                'statusHistory.changedBy': userId,
+                ...this.buildIdSelector('statusHistory.changedBy', identityIds),
                 ...dateQuery,
                 status: { $ne: 'inactive' },
                 $nor: [

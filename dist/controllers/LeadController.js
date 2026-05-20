@@ -208,7 +208,7 @@ class LeadController {
                 });
                 return;
             }
-            const { name, phone, landline, email, city, state, address, pincode, primaryCategory, primarySkill, // Legacy support
+            const { name, phone, landline, email, city, state, address, pincode, isGatedCommunity, gatedCommunityName, primaryCategory, primarySkill, // Legacy support
             secondaryCategory, secondarySkill, // Legacy support
             experienceLevel, workingDays, preferredTimeSlot, source, sourceDetails } = req.body;
             // Validation - support both new and legacy field names
@@ -242,6 +242,8 @@ class LeadController {
                 state,
                 address,
                 pincode,
+                isGatedCommunity: req.body.isGatedCommunity === true || req.body.isGatedCommunity === 'true',
+                gatedCommunityName: req.body.gatedCommunityName,
                 primaryCategory: primaryCategoryValue,
                 primarySkill: primarySkill, // For backward compatibility
                 secondaryCategory: secondaryCategoryValue || '',
@@ -516,6 +518,24 @@ class LeadController {
                 error: 'Failed to get verified certificates',
                 message: error.message
             });
+        }
+    }
+    /**
+     * Get unique gated community names (for dropdown/autocomplete)
+     * GET /api/v1/onboarding/leads/gated-community-names
+     */
+    static async getGatedCommunityNames(req, res) {
+        try {
+            if (!req.admin) {
+                res.status(401).json({ success: false, error: 'Authentication required' });
+                return;
+            }
+            const names = await LeadService_1.LeadService.getGatedCommunityNames();
+            res.json({ success: true, data: names });
+        }
+        catch (error) {
+            logger_1.default.error('Error in getGatedCommunityNames controller', { error: error.message });
+            res.status(500).json({ success: false, error: 'Failed to get gated community names', message: error.message });
         }
     }
     /**
@@ -980,6 +1000,7 @@ class LeadController {
                 category: category ? String(category) : undefined,
                 claimsScope: claimsScope ? String(claimsScope) : undefined,
                 allTime: isAllTime,
+                gatedCommunityName: req.query.gatedCommunityName ? String(req.query.gatedCommunityName) : undefined,
             };
             if (role === 'qualifier' && userId) {
                 filters.qualifierId = userId;
@@ -1134,6 +1155,7 @@ class LeadController {
                 exportLayout: exportLayout === 'qualifier' ? 'qualifier' : 'standard',
                 claimsScope: claimsScope ? String(claimsScope) : undefined,
                 allTime: isAllTime,
+                gatedCommunityName: req.query.gatedCommunityName ? String(req.query.gatedCommunityName) : undefined,
             };
             if (role === 'qualifier' && userId) {
                 filters.qualifierId = userId;
@@ -1161,6 +1183,7 @@ class LeadController {
                     reportCategory: filters.reportCategory,
                     includeNotes: filters.includeNotes,
                     category: filters.category,
+                    gatedCommunityName: filters.gatedCommunityName,
                     exportLayout: filters.exportLayout,
                 },
                 rowCount: report.rowCount

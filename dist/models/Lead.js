@@ -82,6 +82,17 @@ const LeadSchema = new mongoose_1.Schema({
         type: String,
         trim: true
     },
+    isGatedCommunity: {
+        type: Boolean,
+        default: false,
+        index: true
+    },
+    gatedCommunityName: {
+        type: String,
+        trim: true,
+        index: true,
+        sparse: true
+    },
     source: {
         type: String,
         enum: ['referral', 'campaign', 'walk-in', 'agent', 'other'],

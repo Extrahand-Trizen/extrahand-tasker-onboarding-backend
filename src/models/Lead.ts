@@ -110,6 +110,10 @@ export interface ILead extends Document {
   state?: string;
   address?: string; // Local Area
   pincode?: string;
+
+  // Gated community
+  isGatedCommunity?: boolean;
+  gatedCommunityName?: string;
   
   // Lead source & tracking
   source?: LeadSource;
@@ -240,6 +244,17 @@ const LeadSchema = new Schema<ILead>({
   pincode: {
     type: String,
     trim: true
+  },
+  isGatedCommunity: {
+    type: Boolean,
+    default: false,
+    index: true
+  },
+  gatedCommunityName: {
+    type: String,
+    trim: true,
+    index: true,
+    sparse: true
   },
   source: {
     type: String,

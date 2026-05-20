@@ -81,6 +81,8 @@ export interface ILead extends Document {
     state?: string;
     address?: string;
     pincode?: string;
+    isGatedCommunity?: boolean;
+    gatedCommunityName?: string;
     source?: LeadSource;
     sourceDetails?: string;
     agentCampaignId?: string;

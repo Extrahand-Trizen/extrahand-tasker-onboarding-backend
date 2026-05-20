@@ -266,6 +266,8 @@ export class LeadController {
         state,
         address,
         pincode,
+        isGatedCommunity,
+        gatedCommunityName,
         primaryCategory,
         primarySkill, // Legacy support
         secondaryCategory,
@@ -312,6 +314,8 @@ export class LeadController {
         state,
         address,
         pincode,
+        isGatedCommunity: req.body.isGatedCommunity === true || req.body.isGatedCommunity === 'true',
+        gatedCommunityName: req.body.gatedCommunityName,
         primaryCategory: primaryCategoryValue,
         primarySkill: primarySkill, // For backward compatibility
         secondaryCategory: secondaryCategoryValue || '',
@@ -621,6 +625,24 @@ export class LeadController {
         error: 'Failed to get verified certificates',
         message: error.message
       });
+    }
+  }
+
+  /**
+   * Get unique gated community names (for dropdown/autocomplete)
+   * GET /api/v1/onboarding/leads/gated-community-names
+   */
+  static async getGatedCommunityNames(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      if (!req.admin) {
+        res.status(401).json({ success: false, error: 'Authentication required' });
+        return;
+      }
+      const names = await LeadService.getGatedCommunityNames();
+      res.json({ success: true, data: names });
+    } catch (error: any) {
+      logger.error('Error in getGatedCommunityNames controller', { error: error.message });
+      res.status(500).json({ success: false, error: 'Failed to get gated community names', message: error.message });
     }
   }
 
@@ -1147,6 +1169,7 @@ export class LeadController {
         category: category ? String(category) : undefined,
         claimsScope: claimsScope ? (String(claimsScope) as 'current' | 'total') : undefined,
         allTime: isAllTime,
+        gatedCommunityName: req.query.gatedCommunityName ? String(req.query.gatedCommunityName) : undefined,
       };
 
       if (role === 'qualifier' && userId) {
@@ -1325,6 +1348,7 @@ export class LeadController {
         exportLayout: exportLayout === 'qualifier' ? 'qualifier' : 'standard',
         claimsScope: claimsScope ? (String(claimsScope) as 'current' | 'total') : undefined,
         allTime: isAllTime,
+        gatedCommunityName: req.query.gatedCommunityName ? String(req.query.gatedCommunityName) : undefined,
       };
 
       if (role === 'qualifier' && userId) {
@@ -1358,6 +1382,7 @@ export class LeadController {
             reportCategory: filters.reportCategory,
             includeNotes: filters.includeNotes,
             category: filters.category,
+            gatedCommunityName: filters.gatedCommunityName,
             exportLayout: filters.exportLayout,
           },
           rowCount: report.rowCount

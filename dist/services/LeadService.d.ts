@@ -9,6 +9,8 @@ export interface CreateLeadData {
     state?: string;
     address?: string;
     pincode?: string;
+    isGatedCommunity?: boolean;
+    gatedCommunityName?: string;
     primaryCategory?: string;
     primarySkill?: string;
     secondaryCategory?: string;
@@ -40,6 +42,8 @@ export interface UpdateLeadData {
     state?: string | null;
     address?: string | null;
     pincode?: string | null;
+    isGatedCommunity?: boolean | null;
+    gatedCommunityName?: string | null;
     primarySkill?: string | null;
     primaryCategory?: string | null;
     secondarySkill?: string | null;
@@ -139,6 +143,7 @@ export interface StatusAnalyticsFilters {
     category?: string;
     claimsScope?: 'current' | 'total';
     allTime?: boolean;
+    gatedCommunityName?: string;
 }
 export type StatusReportCategory = 'touched_leads' | 'interested' | 'callback_scheduled' | 'callback_overdue';
 export interface StatusReportExportFilters extends StatusAnalyticsFilters {
@@ -160,6 +165,14 @@ export declare class LeadService {
     private static contactStatusForExport;
     private static registrationStatusForExport;
     private static buildCategoryMatch;
+    private static escapeRegex;
+    private static buildExactCaseInsensitiveMatch;
+    private static buildRegisteredPredicate;
+    private static buildVerifiedPredicate;
+    private static buildRegisteredOnlyPredicate;
+    private static getAdminIdentityIds;
+    private static buildIdSelector;
+    private static buildOwnerScopeClause;
     private static textForSpreadsheet;
     private static applyWorksheetLayout;
     private static getISTDayBounds;
@@ -194,6 +207,10 @@ export declare class LeadService {
         userId: string;
         name: string;
     }>>;
+    /**
+     * Get all distinct gated community names (for dropdown/autocomplete)
+     */
+    static getGatedCommunityNames(): Promise<string[]>;
     static searchLeads(filters: SearchFilters): Promise<{
         leads: ILead[];
         total: number;
@@ -224,6 +241,7 @@ export declare class LeadService {
         notInterested: number;
         callbackScheduled: number;
         callbackOverdue: number;
+        onboarded: number;
         statusCounts: Array<{
             status: string;
             count: number;
