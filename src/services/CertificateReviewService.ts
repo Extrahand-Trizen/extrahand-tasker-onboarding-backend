@@ -76,16 +76,38 @@ export class CertificateReviewService {
   }
 
   static async getProfileByUid(uid: string, actorUid: string): Promise<any> {
-    const response = await axios.get<UserProfileResponse>(
-      `${this.getProfileBaseUrl()}/${uid}`,
-      { headers: this.getHeaders(actorUid) }
-    );
+    try {
+      const response = await axios.get<UserProfileResponse>(
+        `${this.getProfileBaseUrl()}/internal/${uid}`,
+        { headers: this.getHeaders(actorUid) }
+      );
 
-    const profile = response.data?.profile || response.data;
-    if (!profile?.uid) {
-      throw new Error('Profile not found');
+      const profile = response.data?.profile || response.data;
+      if (!profile?.uid) {
+        throw new Error('Profile not found');
+      }
+      return profile;
+    } catch (error: any) {
+      const status = error?.response?.status;
+      const remoteMessage =
+        error?.response?.data?.error ||
+        error?.response?.data?.message ||
+        error?.message;
+
+      if (status === 404) {
+        throw new Error('Profile not found');
+      }
+      if (status === 403) {
+        throw new Error('Profile access denied');
+      }
+
+      logger.error('Failed to fetch profile for certificate review', {
+        uid,
+        status,
+        message: remoteMessage,
+      });
+      throw new Error(remoteMessage || 'Failed to fetch profile from user-service');
     }
-    return profile;
   }
 
   static async searchProfiles(searchQuery: string, actorUid: string): Promise<any[]> {
@@ -312,24 +334,48 @@ export class CertificateReviewService {
     const updatedSkill: ProfileSkill = {
       ...skill,
       certificates,
-      // For now, mark the reviewed skill as verified/certified on approval.
-      verified: nextStatus === 'verified' ? true : skill?.verified,
-      certified: nextStatus === 'verified' ? true : skill?.certified,
+      verified: nextStatus === 'verified',
+      certified: nextStatus === 'verified',
     };
 
     const updatedSkills = [...skills];
     updatedSkills[skillIndex] = updatedSkill;
 
-    await axios.put(
-      `${this.getProfileBaseUrl()}/internal/${uid}`,
-      {
-        skills: {
-          ...(profile?.skills || {}),
-          list: updatedSkills,
+    try {
+      await axios.put(
+        `${this.getProfileBaseUrl()}/internal/${uid}`,
+        {
+          // Only send skills.list — avoid re-validating legacy primaryCategory values
+          skills: {
+            list: updatedSkills,
+          },
         },
-      },
-      { headers: this.getHeaders(actorUid) }
-    );
+        { headers: this.getHeaders(actorUid) }
+      );
+    } catch (error: any) {
+      const status = error?.response?.status;
+      const remoteMessage =
+        error?.response?.data?.error ||
+        error?.response?.data?.message ||
+        error?.message;
+
+      logger.error('Failed to persist certificate review', {
+        uid,
+        skillIndex,
+        certificateIndex,
+        status,
+        message: remoteMessage,
+      });
+
+      if (status === 404) {
+        throw new Error('Profile not found');
+      }
+      if (status === 400) {
+        throw new Error(remoteMessage || 'Invalid profile update payload');
+      }
+
+      throw new Error(remoteMessage || 'Failed to update profile in user-service');
+    }
 
     logger.info('Certificate review status updated', {
       uid,
