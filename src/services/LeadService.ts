@@ -129,6 +129,8 @@ export interface FollowUpQueueFilters {
   ownerBy?: string;
   ownerByAny?: string[];
   pickedBy?: string;
+  followUpOwnerBy?: string;
+  followUpOwnerByAny?: string[];
   startDate?: Date;
   endDate?: Date;
   dueType?: FollowUpDueType;
@@ -715,6 +717,44 @@ export class LeadService {
     query.$and.push(this.buildOwnerScopeClause(ownerIds));
   }
 
+  private static latestFollowUpHistoryEntry(
+    lead: { statusHistory?: Array<Record<string, any>> },
+    dueType: 'callback' | 'onboarding'
+  ): Record<string, any> | undefined {
+    const history = Array.isArray(lead.statusHistory) ? lead.statusHistory : [];
+    void dueType;
+    return [...history].sort(
+      (a, b) =>
+        new Date(b?.changedAt || 0).getTime() - new Date(a?.changedAt || 0).getTime()
+    )[0];
+  }
+
+  private static filterFollowUpsByOwner<T extends FollowUpQueueItem>(
+    items: T[],
+    filters: Pick<FollowUpQueueFilters, 'followUpOwnerBy' | 'followUpOwnerByAny'>
+  ): T[] {
+    const ownerIds = Array.from(
+      new Set(
+        (filters.followUpOwnerByAny && filters.followUpOwnerByAny.length > 0
+          ? filters.followUpOwnerByAny
+          : filters.followUpOwnerBy
+            ? [filters.followUpOwnerBy]
+            : []
+        ).filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+      )
+    );
+
+    if (!ownerIds.length) {
+      return items;
+    }
+
+    const ownerSet = new Set(ownerIds);
+    return items.filter((item) => {
+      const owner = this.latestFollowUpHistoryEntry(item as T & { statusHistory?: Array<Record<string, any>> }, item.dueType);
+      return owner?.changedBy ? ownerSet.has(owner.changedBy) : false;
+    });
+  }
+
   /**
    * Get lead by ID
    */
@@ -1006,8 +1046,8 @@ export class LeadService {
 
       if (filters.primarySkill) {
         query.$or = [
-          { primarySkill: { $regex: new RegExp(filters.primarySkill, 'i') } },
-          { primaryCategory: { $regex: new RegExp(filters.primarySkill, 'i') } },
+          { primarySkill: filters.primarySkill },
+          { primaryCategory: filters.primarySkill },
         ];
       }
 
@@ -1118,8 +1158,8 @@ export class LeadService {
       }
       if (filters.primarySkill) {
         query.$or = [
-          { primarySkill: { $regex: new RegExp(filters.primarySkill, 'i') } },
-          { primaryCategory: { $regex: new RegExp(filters.primarySkill, 'i') } },
+          { primarySkill: filters.primarySkill },
+          { primaryCategory: filters.primarySkill },
         ];
       }
       if (filters.addedByAny && filters.addedByAny.length > 0) {
@@ -1168,6 +1208,8 @@ export class LeadService {
         }
       }
 
+      items = this.filterFollowUpsByOwner(items, filters);
+
       const bucket = filters.bucket || 'all';
       items = items.filter((item) => {
         if (bucket === 'today') return item.dueAt >= startOfToday && item.dueAt <= endOfToday;
@@ -1204,7 +1246,7 @@ export class LeadService {
   }
 
   static async getFollowUpQueueStats(
-    filters: Pick<FollowUpQueueFilters, 'addedBy' | 'addedByAny' | 'ownerBy' | 'ownerByAny' | 'pickedBy'>
+    filters: Pick<FollowUpQueueFilters, 'addedBy' | 'addedByAny' | 'ownerBy' | 'ownerByAny' | 'pickedBy' | 'followUpOwnerBy' | 'followUpOwnerByAny'>
   ): Promise<FollowUpQueueStats> {
     try {
       const now = new Date();
@@ -1223,39 +1265,53 @@ export class LeadService {
         this.applyOwnerScope(scope, filters.ownerBy, filters.ownerByAny);
       }
 
-      const [
-        callbackDueToday,
-        callbackOverdue,
-        onboardingDueToday,
-        onboardingOverdue,
-        callbackTotal,
-        onboardingTotal,
-      ] = await Promise.all([
-        Lead.countDocuments({
-          ...scope,
-          nextCallbackAt: { $gte: startOfToday, $lte: endOfToday },
+      const existingScopeAnd = Array.isArray(scope.$and) ? scope.$and : [];
+      delete scope.$and;
+
+      const leads = await Lead.find({
+        ...scope,
+        $and: [
+          ...existingScopeAnd,
+          {
+            $or: [
+              { nextCallbackAt: { $exists: true, $ne: null } },
+              { expectedOnboardingAt: { $exists: true, $ne: null } },
+            ],
+          },
+        ],
+      }).lean();
+
+      const items = this.filterFollowUpsByOwner(
+        leads.flatMap((lead) => {
+          const followUps: FollowUpQueueItem[] = [];
+          if (lead.nextCallbackAt) {
+            followUps.push({
+              ...(this.normalizeLeadData(lead) as ILead),
+              dueType: 'callback',
+              dueAt: new Date(lead.nextCallbackAt),
+            });
+          }
+          if (lead.expectedOnboardingAt) {
+            followUps.push({
+              ...(this.normalizeLeadData(lead) as ILead),
+              dueType: 'onboarding',
+              dueAt: new Date(lead.expectedOnboardingAt),
+            });
+          }
+          return followUps;
         }),
-        Lead.countDocuments({
-          ...scope,
-          nextCallbackAt: { $lt: now },
-        }),
-        Lead.countDocuments({
-          ...scope,
-          expectedOnboardingAt: { $gte: startOfToday, $lte: endOfToday },
-        }),
-        Lead.countDocuments({
-          ...scope,
-          expectedOnboardingAt: { $lt: now },
-        }),
-        Lead.countDocuments({
-          ...scope,
-          nextCallbackAt: { $exists: true, $ne: null },
-        }),
-        Lead.countDocuments({
-          ...scope,
-          expectedOnboardingAt: { $exists: true, $ne: null },
-        }),
-      ]);
+        filters
+      );
+
+      const callbackItems = items.filter((item) => item.dueType === 'callback');
+      const onboardingItems = items.filter((item) => item.dueType === 'onboarding');
+
+      const callbackTotal = callbackItems.length;
+      const onboardingTotal = onboardingItems.length;
+      const callbackDueToday = callbackItems.filter((item) => item.dueAt >= startOfToday && item.dueAt <= endOfToday).length;
+      const callbackOverdue = callbackItems.filter((item) => item.dueAt < now).length;
+      const onboardingDueToday = onboardingItems.filter((item) => item.dueAt >= startOfToday && item.dueAt <= endOfToday).length;
+      const onboardingOverdue = onboardingItems.filter((item) => item.dueAt < now).length;
 
       return {
         callbackTotal,
@@ -2634,22 +2690,6 @@ export class LeadService {
         const claims = await Lead.countDocuments(this.buildIdSelector('addedBy', identityIds));
 
         if (user.role === 'qualifier') {
-          const qualifierScope: any = {};
-          this.applyOwnerScope(qualifierScope, undefined, identityIds);
-
-          const [callbackOverdue, onboardingOverdue] = await Promise.all([
-            Lead.countDocuments({
-              ...qualifierScope,
-              nextCallbackAt: { $lt: now },
-            }),
-            Lead.countDocuments({
-              ...qualifierScope,
-              expectedOnboardingAt: { $lt: now },
-            }),
-          ]);
-
-          const overdue = callbackOverdue + onboardingOverdue;
-
           return {
             userId,
             name,
@@ -2657,7 +2697,7 @@ export class LeadService {
             location,
             claims,
             totalLeads: claims,
-            overdue,
+            overdue: 0,
           };
         } else {
           // Onboarder: Current Claims
@@ -2667,28 +2707,10 @@ export class LeadService {
             ...this.buildOwnerScopeClause(identityIds),
           };
 
-          const followUpScope = this.buildIdSelector('pickedBy', identityIds);
-
-          const [callbackTotal, onboardingTotal, callbackOverdue, onboardingOverdue] = await Promise.all([
-            Lead.countDocuments({
-              ...followUpScope,
-              nextCallbackAt: { $exists: true, $ne: null },
-            }),
-            Lead.countDocuments({
-              ...followUpScope,
-              expectedOnboardingAt: { $exists: true, $ne: null },
-            }),
-            Lead.countDocuments({
-              ...followUpScope,
-              nextCallbackAt: { $lt: now },
-            }),
-            Lead.countDocuments({
-              ...followUpScope,
-              expectedOnboardingAt: { $lt: now },
-            }),
-          ]);
-
-          const followUps = callbackTotal + onboardingTotal;
+          const followUpStats = await this.getFollowUpQueueStats({
+            followUpOwnerByAny: identityIds,
+          });
+          const followUps = followUpStats.totalFollowUps;
 
           // Onboarder: Registered (but not verified, touched leads)
           const registered = await Lead.countDocuments({
@@ -2699,7 +2721,7 @@ export class LeadService {
           });
 
           // Onboarder: Overdue follow-ups (align with follow-up queue stats)
-          const overdue = callbackOverdue + onboardingOverdue;
+          const overdue = followUpStats.callbackOverdue + followUpStats.onboardingOverdue;
 
           return {
             userId,
@@ -2827,63 +2849,6 @@ export class LeadService {
         dateQuery.createdAt = { $gte: filters.from, $lte: filters.to };
       }
 
-      const dueDateRange = !filters.allTime && filters.from && filters.to
-        ? { $gte: filters.from, $lte: filters.to }
-        : undefined;
-
-      const [callbackTotal, onboardingTotal, callbackOverdue, onboardingOverdue, callbackDueToday, onboardingDueToday] = await Promise.all([
-        Lead.countDocuments({
-          ...qualifierOwnerMatch,
-          nextCallbackAt: {
-            $exists: true,
-            $ne: null,
-            ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
-          },
-        }),
-        Lead.countDocuments({
-          ...qualifierOwnerMatch,
-          expectedOnboardingAt: {
-            $exists: true,
-            $ne: null,
-            ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
-          },
-        }),
-        Lead.countDocuments({
-          ...qualifierOwnerMatch,
-          nextCallbackAt: {
-            $lt: now,
-            ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
-          },
-        }),
-        Lead.countDocuments({
-          ...qualifierOwnerMatch,
-          expectedOnboardingAt: {
-            $lt: now,
-            ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
-          },
-        }),
-        Lead.countDocuments({
-          ...qualifierOwnerMatch,
-          nextCallbackAt: {
-            $gte: todayStart,
-            $lte: todayEnd,
-            ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
-          },
-        }),
-        Lead.countDocuments({
-          ...qualifierOwnerMatch,
-          expectedOnboardingAt: {
-            $gte: todayStart,
-            $lte: todayEnd,
-            ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
-          },
-        }),
-      ]);
-
-      const totalFollowUps = callbackTotal + onboardingTotal;
-      const overdue = callbackOverdue + onboardingOverdue;
-      const dueToday = callbackDueToday + onboardingDueToday;
-
       const interested = await Lead.countDocuments({
         ...qualifierOwnerMatch,
         ...dateQuery,
@@ -2913,9 +2878,9 @@ export class LeadService {
         totalLeads: claims,
         rankLabel,
         followUps: {
-          total: totalFollowUps,
-          overdue,
-          dueToday,
+          total: 0,
+          overdue: 0,
+          dueToday: 0,
         },
         outcomes: {
           interested,
@@ -2929,64 +2894,12 @@ export class LeadService {
         dateQuery.createdAt = { $gte: filters.from, $lte: filters.to };
       }
 
-      const dueDateRange = !filters.allTime && filters.from && filters.to
-        ? { $gte: filters.from, $lte: filters.to }
-        : undefined;
-
-      const followUpScope = this.buildIdSelector('pickedBy', identityIds);
-
-      const [callbackTotal, onboardingTotal, callbackOverdue, onboardingOverdue, callbackDueToday, onboardingDueToday] = await Promise.all([
-        Lead.countDocuments({
-          ...followUpScope,
-          nextCallbackAt: {
-            $exists: true,
-            $ne: null,
-            ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
-          },
-        }),
-        Lead.countDocuments({
-          ...followUpScope,
-          expectedOnboardingAt: {
-            $exists: true,
-            $ne: null,
-            ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
-          },
-        }),
-        Lead.countDocuments({
-          ...followUpScope,
-          nextCallbackAt: {
-            $lt: now,
-            ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
-          },
-        }),
-        Lead.countDocuments({
-          ...followUpScope,
-          expectedOnboardingAt: {
-            $lt: now,
-            ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
-          },
-        }),
-        Lead.countDocuments({
-          ...followUpScope,
-          nextCallbackAt: {
-            $gte: todayStart,
-            $lte: todayEnd,
-            ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
-          },
-        }),
-        Lead.countDocuments({
-          ...followUpScope,
-          expectedOnboardingAt: {
-            $gte: todayStart,
-            $lte: todayEnd,
-            ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
-          },
-        }),
-      ]);
-
-      const totalFollowUps = callbackTotal + onboardingTotal;
-      const overdue = callbackOverdue + onboardingOverdue;
-      const dueToday = callbackDueToday + onboardingDueToday;
+      const followUpStats = await this.getFollowUpQueueStats({
+        followUpOwnerByAny: identityIds,
+      });
+      const totalFollowUps = followUpStats.totalFollowUps;
+      const overdue = followUpStats.callbackOverdue + followUpStats.onboardingOverdue;
+      const dueToday = followUpStats.callbackDueToday + followUpStats.onboardingDueToday;
 
       const interested = await Lead.countDocuments({
         ...baseMatch,

@@ -1050,9 +1050,11 @@ export class LeadController {
       };
 
       if (role === 'onboarder') {
-        filters.pickedBy = (getUserId(req) || '') as string;
+        filters.followUpOwnerBy = (getUserId(req) || '') as string;
       } else if (pickedBy) {
-        filters.pickedBy = pickedBy as string;
+        filters.followUpOwnerBy = pickedBy as string;
+      } else if (role === 'qualifier') {
+        filters.followUpOwnerBy = '__no_qualifier_followups__';
       }
 
       if (role === 'qualifier' && scopedIds.length > 0) {
@@ -1104,10 +1106,11 @@ export class LeadController {
       const role = req.admin.role as UserRole;
       const scopedIds = getScopedAddedByIds(req);
 
-      const filters: Pick<FollowUpQueueFilters, 'addedBy' | 'addedByAny' | 'ownerBy' | 'ownerByAny' | 'pickedBy'> = {};
+      const filters: Pick<FollowUpQueueFilters, 'addedBy' | 'addedByAny' | 'ownerBy' | 'ownerByAny' | 'pickedBy' | 'followUpOwnerBy' | 'followUpOwnerByAny'> = {};
       if (role === 'onboarder') {
-        filters.pickedBy = getUserId(req) || undefined;
+        filters.followUpOwnerBy = getUserId(req) || undefined;
       } else if (role === 'qualifier' && scopedIds.length > 0) {
+        filters.followUpOwnerBy = '__no_qualifier_followups__';
         filters.ownerByAny = scopedIds;
       } else if (req.query.ownerBy) {
         filters.ownerBy = req.query.ownerBy as string;
