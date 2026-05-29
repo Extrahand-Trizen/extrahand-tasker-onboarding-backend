@@ -263,6 +263,7 @@ export class LeadController {
         landline,
         email,
         city,
+        locality,
         state,
         address,
         pincode,
@@ -311,6 +312,7 @@ export class LeadController {
         landline: landlineValue || undefined,
         email,
         city,
+        locality,
         state,
         address,
         pincode,
@@ -647,6 +649,32 @@ export class LeadController {
   }
 
   /**
+   * Distinct cities and local areas from existing leads (for filter dropdowns).
+   * GET /api/v1/onboarding/leads/location-filter-options
+   */
+  static async getLeadLocationFilterOptions(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      if (!req.admin) {
+        res.status(401).json({ success: false, error: 'Authentication required' });
+        return;
+      }
+      const [cities, localities, localAreas] = await Promise.all([
+        LeadService.getLeadCities(),
+        LeadService.getLeadLocalities(),
+        LeadService.getLeadLocalAreas(),
+      ]);
+      res.json({ success: true, data: { cities, localities, localAreas } });
+    } catch (error: any) {
+      logger.error('Error in getLeadLocationFilterOptions controller', { error: error.message });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to get location filter options',
+        message: error.message,
+      });
+    }
+  }
+
+  /**
    * Get unique users who have added leads (for filter dropdown)
    * GET /api/v1/onboarding/leads/creators
    */
@@ -849,7 +877,11 @@ export class LeadController {
         page,
         limit,
         registrationStatus,
-        statusChangedBy
+        statusChangedBy,
+        unclaimed,
+        claimed,
+        locality,
+        localArea,
       } = req.query;
 
       const role = req.admin.role as UserRole;
@@ -857,6 +889,8 @@ export class LeadController {
       const filters: SearchFilters = {
         status: status as any,
         city: city as string,
+        locality: locality as string,
+        localArea: localArea as string,
         primarySkill: primarySkill as string,
         source: source as any,
         addedBy: addedBy as string,
@@ -869,8 +903,21 @@ export class LeadController {
         page: page ? parseInt(page as string) : undefined,
         limit: limit ? parseInt(limit as string) : undefined,
         registrationStatus: registrationStatus as SearchFilters['registrationStatus'],
-        statusChangedBy: statusChangedBy as string
+        statusChangedBy: statusChangedBy as string,
+        unclaimed: unclaimed === 'true' || unclaimed === '1',
+        claimed: claimed === 'true' || claimed === '1',
       };
+
+      // Expand single id to userId + uid for owner/picked filters.
+      const scopedIds = getScopedAddedByIds(req);
+      if (filters.ownerBy && scopedIds.length > 0) {
+        filters.ownerByAny = Array.from(new Set([...scopedIds, filters.ownerBy]));
+        delete filters.ownerBy;
+      }
+      if (filters.pickedBy && scopedIds.length > 0) {
+        filters.pickedByAny = Array.from(new Set([...scopedIds, filters.pickedBy]));
+        delete filters.pickedBy;
+      }
 
       // Keep search generic; caller (UI/page) decides whether to scope by addedBy.
       // This is required so "All Leads" can remain truly global for allowed roles.
@@ -1107,8 +1154,8 @@ export class LeadController {
       const scopedIds = getScopedAddedByIds(req);
 
       const filters: Pick<FollowUpQueueFilters, 'addedBy' | 'addedByAny' | 'ownerBy' | 'ownerByAny' | 'pickedBy' | 'followUpOwnerBy' | 'followUpOwnerByAny'> = {};
-      if (role === 'onboarder') {
-        filters.followUpOwnerBy = getUserId(req) || undefined;
+      if (role === 'onboarder' && scopedIds.length > 0) {
+        filters.followUpOwnerByAny = scopedIds;
       } else if (role === 'qualifier' && scopedIds.length > 0) {
         filters.followUpOwnerBy = '__no_qualifier_followups__';
         filters.ownerByAny = scopedIds;
@@ -1173,6 +1220,9 @@ export class LeadController {
         claimsScope: claimsScope ? (String(claimsScope) as 'current' | 'total') : undefined,
         allTime: isAllTime,
         gatedCommunityName: req.query.gatedCommunityName ? String(req.query.gatedCommunityName) : undefined,
+        city: req.query.city ? String(req.query.city) : undefined,
+        locality: req.query.locality ? String(req.query.locality) : undefined,
+        localArea: req.query.localArea ? String(req.query.localArea) : undefined,
       };
 
       if (role === 'qualifier' && userId) {
@@ -1352,6 +1402,9 @@ export class LeadController {
         claimsScope: claimsScope ? (String(claimsScope) as 'current' | 'total') : undefined,
         allTime: isAllTime,
         gatedCommunityName: req.query.gatedCommunityName ? String(req.query.gatedCommunityName) : undefined,
+        city: req.query.city ? String(req.query.city) : undefined,
+        locality: req.query.locality ? String(req.query.locality) : undefined,
+        localArea: req.query.localArea ? String(req.query.localArea) : undefined,
       };
 
       if (role === 'qualifier' && userId) {

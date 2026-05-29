@@ -15,6 +15,7 @@ export interface CreateLeadData {
   landline?: string;
   email?: string;
   city?: string;
+  locality?: string;
   state?: string;
   address?: string; // Local Area
   pincode?: string;
@@ -50,6 +51,7 @@ export interface UpdateLeadData {
   landline?: string | null;
   email?: string | null;
   city?: string | null;
+  locality?: string | null;
   state?: string | null;
   address?: string | null;
   pincode?: string | null;
@@ -85,6 +87,7 @@ export interface SearchFilters {
   addedBy?: string;
   addedByAny?: string[];
   pickedBy?: string;
+  pickedByAny?: string[];
   transferPendingTo?: string;
   ownerBy?: string;
   ownerByAny?: string[];
@@ -93,10 +96,18 @@ export interface SearchFilters {
   endDate?: Date;
   page?: number;
   limit?: number;
+  /** Locality filter — stored on lead.locality */
+  locality?: string;
+  /** Exact local area filter — stored on lead.address */
+  localArea?: string;
   /** Filter by conversion/registration on main website */
   registrationStatus?: RegistrationStatusFilter;
   /** Filter by user who moved lead into current contact status */
   statusChangedBy?: string;
+  /** When true, only leads with no picker (unclaimed) */
+  unclaimed?: boolean;
+  /** When true, only leads that have been claimed (pickedBy set) */
+  claimed?: boolean;
 }
 
 export interface CallbackQueueFilters {
@@ -167,6 +178,9 @@ export interface StatusAnalyticsFilters {
   claimsScope?: 'current' | 'total';
   allTime?: boolean;
   gatedCommunityName?: string;
+  city?: string;
+  locality?: string;
+  localArea?: string;
 }
 
 export type StatusReportCategory =
@@ -222,9 +236,21 @@ export class LeadService {
     return this.STATUS_REPORT_LABELS[value] || value.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
   }
 
+  /** Extra stored values matched when filtering by canonical category id */
+  private static readonly CATEGORY_FILTER_ALIASES: Record<string, string[]> = {
+    electrical: ['electrical', 'electrician'],
+    plumbing: ['plumbing', 'plumber'],
+    carpenter: ['carpenter', 'carpentry'],
+    painting: ['painting', 'painter'],
+  };
+
   private static readonly PRIMARY_CATEGORY_LABELS: Record<string, string> = {
     cleaning: 'Cleaning',
     handyperson: 'Handyperson',
+    plumbing: 'Plumbing',
+    electrical: 'Electrician',
+    carpenter: 'Carpentry',
+    painting: 'Home Painting',
     moving: 'Moving & Delivery',
     gardening: 'Gardening',
     business: 'Business Services',
@@ -273,25 +299,30 @@ export class LeadService {
   }
 
   private static buildCategoryMatch(category: string): Record<string, unknown> {
-    const label = this.PRIMARY_CATEGORY_LABELS[category];
-    const matchConditions: any[] = [
-      { primaryCategory: category },
-      { primarySkill: category },
-    ];
+    const keys = this.CATEGORY_FILTER_ALIASES[category] ?? [category];
+    const matchConditions: any[] = [];
 
-    if (label) {
-      matchConditions.push({ primaryCategory: label });
-      matchConditions.push({ primarySkill: label });
-      matchConditions.push({ primaryCategory: { $regex: new RegExp(`^${label.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i') } });
-      matchConditions.push({ primarySkill: { $regex: new RegExp(`^${label.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i') } });
+    for (const key of keys) {
+      const label = this.PRIMARY_CATEGORY_LABELS[key];
+      matchConditions.push({ primaryCategory: key }, { primarySkill: key });
+
+      if (label) {
+        matchConditions.push(
+          { primaryCategory: label },
+          { primarySkill: label },
+          { primaryCategory: { $regex: new RegExp(`^${this.escapeRegex(label)}$`, 'i') } },
+          { primarySkill: { $regex: new RegExp(`^${this.escapeRegex(label)}$`, 'i') } },
+        );
+      }
+
+      const escapedKey = this.escapeRegex(key);
+      matchConditions.push(
+        { primaryCategory: { $regex: new RegExp(`^${escapedKey}$`, 'i') } },
+        { primarySkill: { $regex: new RegExp(`^${escapedKey}$`, 'i') } },
+      );
     }
 
-    matchConditions.push({ primaryCategory: { $regex: new RegExp(`^${category.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i') } });
-    matchConditions.push({ primarySkill: { $regex: new RegExp(`^${category.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i') } });
-
-    return {
-      $or: matchConditions,
-    };
+    return { $or: matchConditions };
   }
 
   private static escapeRegex(value: string): string {
@@ -300,6 +331,195 @@ export class LeadService {
 
   private static buildExactCaseInsensitiveMatch(value: string): { $regex: RegExp } {
     return { $regex: new RegExp(`^${this.escapeRegex(value)}$`, 'i') };
+  }
+
+  private static normalizeDistinctLocationValues(values: unknown[]): string[] {
+    return this.collectLocationDropdownValues(
+      values
+        .filter((value): value is string => typeof value === 'string')
+        .map((value) => value.trim())
+        .filter(Boolean),
+    );
+  }
+
+  /** Dropdown options must be place names — not pin codes, plot numbers, or numeric-only text. */
+  private static isValidLocationDropdownValue(value: string): boolean {
+    const v = value.trim();
+    if (!v || v.length < 2) return false;
+    if (!/[A-Za-z]/.test(v)) return false;
+    if (/^\d+$/.test(v)) return false;
+    if (/^\d{6}$/.test(v)) return false;
+    if (/^[A-Z0-9]+\+[A-Z0-9]+$/i.test(v)) return false;
+    if (/^[\d\s\-#./]+$/.test(v)) return false;
+    if (/^(plot\s*(no\.?|number)?|no\.?|#)\s*\d+$/i.test(v)) return false;
+    if (/^(first floor|floor|door\s*no\.?)\b/i.test(v)) return false;
+    return true;
+  }
+
+  /** Case-insensitive dedupe; dropdown labels shown in uppercase. */
+  private static collectLocationDropdownValues(values: Iterable<string>): string[] {
+    const byKey = new Map<string, string>();
+    for (const raw of values) {
+      const v = raw.trim();
+      if (!this.isValidLocationDropdownValue(v)) continue;
+      const key = v.toLowerCase();
+      if (!byKey.has(key)) {
+        byKey.set(key, v.toUpperCase());
+      }
+    }
+    return Array.from(byKey.values()).sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: 'base' }),
+    );
+  }
+
+  /** Full Google-style address stored in city field by mistake. */
+  private static isFullAddressLike(value: string): boolean {
+    const v = value.trim();
+    if (!v) return false;
+    if (v.includes(',')) return true;
+    if (v.length > 60) return true;
+    if (/[A-Z0-9]+\+[A-Z0-9]+/i.test(v)) return true;
+    return false;
+  }
+
+  /** Parse city name from plain city or comma-separated address text. */
+  private static extractCityFromStoredValue(raw: string): string | null {
+    const v = raw.trim();
+    if (!v) return null;
+
+    if (!this.isFullAddressLike(v)) {
+      return this.isValidLocationDropdownValue(v) ? v : null;
+    }
+
+    const parts = v.split(',').map((part) => part.trim()).filter(Boolean);
+    if (parts.length < 2) return null;
+
+    const last = parts[parts.length - 1];
+    const stateWithPin = last.match(/^(.+?)\s+(\d{6})$/);
+    if (stateWithPin && parts.length >= 2) {
+      const city = parts[parts.length - 2];
+      return this.isValidLocationDropdownValue(city) ? city : null;
+    }
+
+    if (parts.length === 2 && parts[1].length <= 40) {
+      const city = parts[1];
+      return this.isValidLocationDropdownValue(city) ? city : null;
+    }
+
+    return null;
+  }
+
+  private static isSkippableAddressPart(part: string): boolean {
+    const v = part.trim();
+    if (!v) return true;
+    if (!this.isValidLocationDropdownValue(v)) return true;
+    if (/[A-Z0-9]+\+[A-Z0-9]+/i.test(v)) return true;
+    if (/^\d{6}$/.test(v)) return true;
+    if (/^(Telangana|Andhra Pradesh|Karnataka|Maharashtra|Tamil Nadu|Delhi)$/i.test(v)) {
+      return true;
+    }
+    if (/^(first floor|plot no|floor)/i.test(v)) return true;
+    return false;
+  }
+
+  /** Parse local area from plain text or comma-separated address (not full address in dropdown). */
+  private static extractLocalAreasFromStoredValue(raw: string): string[] {
+    const v = raw.trim();
+    if (!v) return [];
+
+    if (!this.isFullAddressLike(v)) {
+      return this.isValidLocationDropdownValue(v) ? [v] : [];
+    }
+
+    const parts = v.split(',').map((part) => part.trim()).filter(Boolean);
+    if (!parts.length) return [];
+
+    const city = this.extractCityFromStoredValue(v);
+    const candidates: string[] = [];
+
+    if (city) {
+      const cityIndex = parts.findIndex(
+        (part) => part.toLowerCase() === city.toLowerCase(),
+      );
+      if (cityIndex > 0) {
+        const beforeCity = parts[cityIndex - 1];
+        if (beforeCity && !this.isSkippableAddressPart(beforeCity)) {
+          candidates.push(beforeCity);
+        }
+      }
+      if (parts.length === 2 && parts[0].toLowerCase() !== city.toLowerCase()) {
+        candidates.push(parts[0]);
+      }
+    }
+
+    return this.collectLocationDropdownValues(candidates);
+  }
+
+  private static pushLocationFilterClause(
+    match: Record<string, unknown>,
+    clause: Record<string, unknown>,
+  ): void {
+    if (match.$and) {
+      (match.$and as Record<string, unknown>[]).push(clause);
+      return;
+    }
+    if (match.$or) {
+      match.$and = [{ $or: match.$or }, clause];
+      delete match.$or;
+      return;
+    }
+    Object.assign(match, clause);
+  }
+
+  private static buildCityFilterMatch(city: string): Record<string, unknown> {
+    const trimmed = city.trim();
+    const escaped = this.escapeRegex(trimmed);
+    return {
+      $or: [
+        { city: this.buildExactCaseInsensitiveMatch(trimmed) },
+        { city: { $regex: new RegExp(`,\\s*${escaped}(\\s*,|\\s*$)`, 'i') } },
+      ],
+    };
+  }
+
+  private static buildLocalAreaFilterMatch(localArea: string): Record<string, unknown> {
+    const trimmed = localArea.trim();
+    const escaped = this.escapeRegex(trimmed);
+    return {
+      $or: [
+        { address: this.buildExactCaseInsensitiveMatch(trimmed) },
+        { address: { $regex: new RegExp(`,\\s*${escaped}\\s*,`, 'i') } },
+        { address: { $regex: new RegExp(`^${escaped}\\s*,`, 'i') } },
+        { city: { $regex: new RegExp(`,\\s*${escaped}\\s*,`, 'i') } },
+        { city: { $regex: new RegExp(`^${escaped}\\s*,`, 'i') } },
+      ],
+    };
+  }
+
+  private static buildLocalityFilterMatch(locality: string): Record<string, unknown> {
+    const trimmed = locality.trim();
+    const escaped = this.escapeRegex(trimmed);
+    return {
+      $or: [
+        { locality: this.buildExactCaseInsensitiveMatch(trimmed) },
+        { locality: { $regex: new RegExp(`,\\s*${escaped}(\\s*,|\\s*$)`, 'i') } },
+      ],
+    };
+  }
+
+  private static applyLeadLocationFilters(
+    match: Record<string, unknown>,
+    filters: { city?: string; locality?: string; localArea?: string },
+  ): void {
+    if (filters.city) {
+      this.pushLocationFilterClause(match, this.buildCityFilterMatch(filters.city));
+    }
+    if (filters.locality) {
+      this.pushLocationFilterClause(match, this.buildLocalityFilterMatch(filters.locality));
+    }
+    if (filters.localArea) {
+      this.pushLocationFilterClause(match, this.buildLocalAreaFilterMatch(filters.localArea));
+    }
   }
 
   private static buildRegisteredPredicate(): Record<string, unknown> {
@@ -566,6 +786,10 @@ export class LeadService {
       const primarySkillNameMap: Record<string, string> = {
         'cleaning': 'Cleaning',
         'handyperson': 'Handyperson',
+        'plumbing': 'Plumbing',
+        'electrical': 'Electrician',
+        'carpenter': 'Carpentry',
+        'painting': 'Home Painting',
         'moving': 'Moving & Delivery',
         'gardening': 'Gardening',
         'business': 'Business Services',
@@ -592,6 +816,7 @@ export class LeadService {
         landline: normalizedLandline || undefined,
         email: data.email?.trim().toLowerCase(),
         city: data.city?.trim() || undefined,
+        locality: data.locality?.trim() || undefined,
         state: data.state?.trim() || undefined,
         address: data.address?.trim() || undefined,
         pincode: data.pincode?.trim() || undefined,
@@ -847,15 +1072,75 @@ export class LeadService {
       const names = await Lead.distinct('gatedCommunityName', {
         gatedCommunityName: { $exists: true, $nin: [null, ''] },
       });
-      return Array.from(
-        new Set(
-          (names as string[])
-            .map((name) => name.trim())
-            .filter(Boolean)
-        )
-      ).sort((a, b) => a.localeCompare(b));
+      return this.normalizeDistinctLocationValues(names);
     } catch (error: any) {
       logger.error('Error getting gated community names', { error: error.message });
+      throw error;
+    }
+  }
+
+  static async getLeadCities(): Promise<string[]> {
+    try {
+      const cities = await Lead.distinct('city', {
+        city: { $exists: true, $nin: [null, ''] },
+      });
+
+      const cityNames: string[] = [];
+      for (const value of cities) {
+        if (typeof value !== 'string') continue;
+        const extracted = this.extractCityFromStoredValue(value);
+        if (extracted) {
+          cityNames.push(extracted);
+        }
+      }
+
+      return this.collectLocationDropdownValues(cityNames);
+    } catch (error: any) {
+      logger.error('Error getting lead cities', { error: error.message });
+      throw error;
+    }
+  }
+
+  static async getLeadLocalAreas(): Promise<string[]> {
+    try {
+      const [addresses, cityValues] = await Promise.all([
+        Lead.distinct('address', {
+          address: { $exists: true, $nin: [null, ''] },
+        }),
+        Lead.distinct('city', {
+          city: { $exists: true, $nin: [null, ''] },
+        }),
+      ]);
+
+      const localAreas: string[] = [];
+      for (const value of [...addresses, ...cityValues]) {
+        if (typeof value !== 'string') continue;
+        localAreas.push(...this.extractLocalAreasFromStoredValue(value));
+      }
+
+      return this.collectLocationDropdownValues(localAreas);
+    } catch (error: any) {
+      logger.error('Error getting lead local areas', { error: error.message });
+      throw error;
+    }
+  }
+
+  static async getLeadLocalities(): Promise<string[]> {
+    try {
+      const localities = await Lead.distinct('locality', {
+        locality: { $exists: true, $nin: [null, ''] },
+      });
+
+      const names: string[] = [];
+      for (const value of localities) {
+        if (typeof value !== 'string') continue;
+        const trimmed = value.trim();
+        if (trimmed) names.push(trimmed);
+      }
+
+      return this.collectLocationDropdownValues(names);
+    } catch (error: any) {
+      logger.error('Error getting lead localities', { error: error.message });
       throw error;
     }
   }
@@ -878,18 +1163,15 @@ export class LeadService {
         query.status = filters.status;
       }
 
-      if (filters.city) {
-        query.city = { $regex: new RegExp(filters.city, 'i') };
-      }
+      this.applyLeadLocationFilters(query, {
+        city: filters.city,
+        locality: filters.locality,
+        localArea: filters.localArea,
+      });
 
       if (filters.primarySkill) {
         query.$and = query.$and || [];
-        query.$and.push({
-          $or: [
-            { primaryCategory: filters.primarySkill },
-            { primarySkill: filters.primarySkill },
-          ],
-        });
+        query.$and.push(this.buildCategoryMatch(filters.primarySkill));
       }
 
       if (filters.source) {
@@ -902,15 +1184,23 @@ export class LeadService {
         query.addedBy = filters.addedBy;
       }
 
-      if (filters.pickedBy) {
-        query.pickedBy = filters.pickedBy;
-      }
-
-      if (!filters.pickedBy) {
-        this.applyOwnerScope(query, filters.ownerBy, filters.ownerByAny);
-      }
-
-      if (filters.pickedBy) {
+      if (filters.unclaimed) {
+        query.$and = query.$and || [];
+        query.$and.push({
+          $or: [
+            { pickedBy: null },
+            { pickedBy: { $exists: false } },
+            { pickedBy: '' },
+          ],
+        });
+      } else if (filters.claimed) {
+        query.$and = query.$and || [];
+        query.$and.push({
+          pickedBy: { $exists: true, $nin: [null, ''] },
+        });
+      } else if (filters.pickedByAny && filters.pickedByAny.length > 0) {
+        query.pickedBy = { $in: filters.pickedByAny };
+      } else if (filters.pickedBy) {
         query.pickedBy = filters.pickedBy;
       }
 
@@ -918,7 +1208,11 @@ export class LeadService {
         query.transferPendingTo = filters.transferPendingTo;
       }
 
-      this.applyOwnerScope(query, filters.ownerBy, filters.ownerByAny);
+      const hasPickedFilter =
+        !!filters.pickedBy || (filters.pickedByAny && filters.pickedByAny.length > 0);
+      if (!hasPickedFilter && !filters.unclaimed && !filters.claimed) {
+        this.applyOwnerScope(query, filters.ownerBy, filters.ownerByAny);
+      }
 
       if (filters.startDate || filters.endDate) {
         query.createdAt = {};
@@ -1045,10 +1339,8 @@ export class LeadService {
       }
 
       if (filters.primarySkill) {
-        query.$or = [
-          { primarySkill: filters.primarySkill },
-          { primaryCategory: filters.primarySkill },
-        ];
+        query.$and = query.$and || [];
+        query.$and.push(this.buildCategoryMatch(filters.primarySkill));
       }
 
       if (filters.addedByAny && filters.addedByAny.length > 0) {
@@ -1157,10 +1449,8 @@ export class LeadService {
         query.city = { $regex: new RegExp(filters.city, 'i') };
       }
       if (filters.primarySkill) {
-        query.$or = [
-          { primarySkill: filters.primarySkill },
-          { primaryCategory: filters.primarySkill },
-        ];
+        query.$and = query.$and || [];
+        query.$and.push(this.buildCategoryMatch(filters.primarySkill));
       }
       if (filters.addedByAny && filters.addedByAny.length > 0) {
         query.addedBy = { $in: filters.addedByAny };
@@ -1366,6 +1656,7 @@ export class LeadService {
       if (filters.gatedCommunityName) {
         leadMatch.gatedCommunityName = this.buildExactCaseInsensitiveMatch(filters.gatedCommunityName);
       }
+      this.applyLeadLocationFilters(leadMatch, filters);
 
       const basePipeline: any[] = [
         { $match: leadMatch },
@@ -1504,6 +1795,7 @@ export class LeadService {
       if (filters.gatedCommunityName) {
         leadsAddedMatch.gatedCommunityName = this.buildExactCaseInsensitiveMatch(filters.gatedCommunityName);
       }
+      this.applyLeadLocationFilters(leadsAddedMatch, filters);
 
       const categoryBreakdownRaw = await Lead.aggregate([
         { $match: leadsAddedMatch },
@@ -1581,6 +1873,7 @@ export class LeadService {
       if (filters.gatedCommunityName) {
         leadMatch.gatedCommunityName = this.buildExactCaseInsensitiveMatch(filters.gatedCommunityName);
       }
+      this.applyLeadLocationFilters(leadMatch, filters);
 
       const now = new Date();
 
@@ -1744,6 +2037,15 @@ export class LeadService {
     if (filters.gatedCommunityName) {
       conditions.push({ gatedCommunityName: this.buildExactCaseInsensitiveMatch(filters.gatedCommunityName) });
     }
+    if (filters.city) {
+      conditions.push(this.buildCityFilterMatch(filters.city));
+    }
+    if (filters.locality) {
+      conditions.push(this.buildLocalityFilterMatch(filters.locality));
+    }
+    if (filters.localArea) {
+      conditions.push(this.buildLocalAreaFilterMatch(filters.localArea));
+    }
 
     const leadMatch = conditions.length > 0 ? { $and: conditions } : {};
 
@@ -1861,6 +2163,11 @@ export class LeadService {
         const city = typeof data.city === 'string' ? data.city.trim() : '';
         if (city) setData.city = city;
         else unsetData.city = 1;
+      }
+      if (has('locality')) {
+        const locality = typeof data.locality === 'string' ? data.locality.trim() : '';
+        if (locality) setData.locality = locality;
+        else unsetData.locality = 1;
       }
       if (has('state')) {
         const state = typeof data.state === 'string' ? data.state.trim() : '';
