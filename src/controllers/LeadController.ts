@@ -7,6 +7,7 @@ import { CertificateReviewService } from '../services/CertificateReviewService';
 import Lead from '../models/Lead';
 import AdminUser from '../models/AdminUser';
 import { UserRole } from '../lib/permissions';
+import { canQualifierEditLead, isLeadCreator, updateTouchesSkills } from '../utils/leadCreatorAccess';
 import logger from '../config/logger';
 import { LEAD_STATUS_REASON_CODES } from '../constants/leadContactTracking';
 import axios from 'axios';
@@ -54,16 +55,16 @@ function canManageLead(req: AdminRequest, leadAddedBy: string): boolean {
 
 function canMutatePickedLead(req: AdminRequest, lead: { addedBy: string; pickedBy?: string | null }): boolean {
   const role = req.admin?.role as UserRole;
-  const userId = getUserId(req);
+  const identityIds = getScopedAddedByIds(req);
 
-  if (!userId) return false;
+  if (!identityIds.length) return false;
 
-  if (lead.pickedBy && lead.pickedBy !== userId) {
+  if (lead.pickedBy && !identityIds.includes(lead.pickedBy)) {
     return false;
   }
 
   if (role === 'qualifier') {
-    return lead.pickedBy ? lead.pickedBy === userId : lead.addedBy === userId;
+    return canQualifierEditLead(lead, identityIds);
   }
 
   return true;
@@ -1483,6 +1484,15 @@ export class LeadController {
           success: false,
           error: 'Permission denied',
           message: 'Only the picked qualifier can update this lead.'
+        });
+        return;
+      }
+
+      if (updateTouchesSkills(updateData as Record<string, unknown>) && !isLeadCreator(req, existingLead.addedBy)) {
+        res.status(403).json({
+          success: false,
+          error: 'Permission denied',
+          message: 'Only the user who created this lead can edit skills.',
         });
         return;
       }
