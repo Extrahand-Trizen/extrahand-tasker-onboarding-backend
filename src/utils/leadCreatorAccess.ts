@@ -16,13 +16,16 @@ export function isLeadCreator(req: AdminRequest, leadAddedBy: string): boolean {
   return identityIds.includes(leadAddedBy);
 }
 
+/**
+ * Any qualifier can edit any lead — regardless of who created or claimed it.
+ * The only requirement is that the caller is a valid authenticated qualifier
+ * (identityIds must be non-empty).
+ */
 export function canQualifierEditLead(
   lead: { addedBy: string; pickedBy?: string | null },
   identityIds: string[]
 ): boolean {
-  if (!identityIds.length) return false;
-  if (identityIds.includes(lead.addedBy)) return true;
-  return !!lead.pickedBy && identityIds.includes(lead.pickedBy);
+  return identityIds.length > 0;
 }
 
 const SKILL_UPDATE_KEYS = [

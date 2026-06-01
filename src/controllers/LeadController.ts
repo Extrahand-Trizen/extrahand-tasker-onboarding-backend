@@ -59,12 +59,13 @@ function canMutatePickedLead(req: AdminRequest, lead: { addedBy: string; pickedB
 
   if (!identityIds.length) return false;
 
-  if (lead.pickedBy && !identityIds.includes(lead.pickedBy)) {
-    return false;
-  }
-
+  // ✅ Qualifiers can edit any lead — skip the pickedBy ownership check for them
   if (role === 'qualifier') {
     return canQualifierEditLead(lead, identityIds);
+  }
+
+  if (lead.pickedBy && !identityIds.includes(lead.pickedBy)) {
+    return false;
   }
 
   return true;
