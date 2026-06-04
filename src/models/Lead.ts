@@ -107,6 +107,7 @@ export interface ILead extends Document {
   landline?: string;
   email?: string;
   city?: string;
+  locality?: string;
   state?: string;
   address?: string; // Local Area
   pincode?: string;
@@ -237,6 +238,12 @@ const LeadSchema = new Schema<ILead>({
     type: String,
     trim: true,
     index: true
+  },
+  locality: {
+    type: String,
+    trim: true,
+    index: true,
+    sparse: true
   },
   state: {
     type: String,

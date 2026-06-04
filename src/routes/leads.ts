@@ -61,6 +61,12 @@ router.get(
   LeadController.getGatedCommunityNames
 );
 
+router.get(
+  '/location-filter-options',
+  requirePermission('canViewLeads'),
+  LeadController.getLeadLocationFilterOptions
+);
+
 // Get qualifiers list (for pick/transfer)
 router.get(
   '/qualifiers',
