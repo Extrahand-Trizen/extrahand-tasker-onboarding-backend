@@ -17,6 +17,7 @@ import passwordAuthRoutes from './routes/passwordAuth';
 import userManagementRoutes from './routes/userManagement';
 import certificateReviewRoutes from './routes/certificateReview';
 import { errorHandler } from './middleware/errorHandler';
+import { env } from './config/env';
 import logger from './config/logger';
 
 const app = express();
@@ -24,10 +25,26 @@ const app = express();
 // Security middleware
 app.use(helmet());
 
+const corsOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean)
+  : [env.FRONTEND_URL, 'http://localhost:3000'];
+
 // CORS
 app.use(cors({
-  origin: true,
-  credentials: true
+  origin: (origin, callback) => {
+    if (!origin) {
+      callback(null, true);
+      return;
+    }
+
+    if (corsOrigins.includes('*') || corsOrigins.includes(origin)) {
+      callback(null, true);
+      return;
+    }
+
+    callback(new Error(`CORS blocked for origin: ${origin}`));
+  },
+  credentials: true,
 }));
 
 // Body parsing

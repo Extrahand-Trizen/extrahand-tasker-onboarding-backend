@@ -45,6 +45,8 @@ const envSchema = z.object({
   // Production: https://partner.extrahand.in
   // Development: http://localhost:3000
   FRONTEND_URL: z.string().url().default('http://localhost:3000'),
+  // Comma-separated list of allowed origins for CORS
+  CORS_ORIGIN: z.string().optional(),
   
   LOG_LEVEL: z.enum(['error', 'warn', 'info', 'debug']).default('info'),
   // Storage Configuration
