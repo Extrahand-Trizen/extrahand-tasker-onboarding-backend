@@ -1,8 +1,6 @@
 import { Response } from 'express';
 import { AdminRequest } from '../middleware/adminAuth';
 export declare class SkillController {
-    private static getUserId;
-    private static canMutatePickedLead;
     /**
      * Add skill to a lead
      * POST /api/v1/admin/caos/leads/:leadId/skills

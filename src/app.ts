@@ -25,9 +25,9 @@ const app = express();
 // Security middleware
 app.use(helmet());
 
-const corsOrigins = process.env.CORS_ORIGIN
-  ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean)
-  : [env.FRONTEND_URL, 'http://localhost:3000'];
+const corsOrigins = env.CORS_ORIGIN
+  ? env.CORS_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean)
+  : [];
 
 // CORS
 app.use(cors({

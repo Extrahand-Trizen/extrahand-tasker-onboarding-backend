@@ -64,8 +64,14 @@ class BulkLeadImportService {
             "home services": "handyperson",
             "home service": "handyperson",
             home_services: "handyperson",
-            plumbing: "handyperson", // Plumbing falls under handyperson
-            electrician: "handyperson", // Electrician falls under handyperson
+            plumbing: "plumbing",
+            plumber: "plumbing",
+            electrical: "electrical",
+            electrician: "electrical",
+            carpenter: "carpenter",
+            carpentry: "carpenter",
+            painting: "painting",
+            painter: "painting",
             "delivery & transport": "moving",
             "delivery and transport": "moving",
             delivery: "moving",

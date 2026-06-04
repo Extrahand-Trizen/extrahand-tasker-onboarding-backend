@@ -22,14 +22,28 @@ const passwordAuth_1 = __importDefault(require("./routes/passwordAuth"));
 const userManagement_1 = __importDefault(require("./routes/userManagement"));
 const certificateReview_1 = __importDefault(require("./routes/certificateReview"));
 const errorHandler_1 = require("./middleware/errorHandler");
+const env_1 = require("./config/env");
 const logger_1 = __importDefault(require("./config/logger"));
 const app = (0, express_1.default)();
 // Security middleware
 app.use((0, helmet_1.default)());
+const corsOrigins = env_1.env.CORS_ORIGIN
+    ? env_1.env.CORS_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean)
+    : [];
 // CORS
 app.use((0, cors_1.default)({
-    origin: true,
-    credentials: true
+    origin: (origin, callback) => {
+        if (!origin) {
+            callback(null, true);
+            return;
+        }
+        if (corsOrigins.includes('*') || corsOrigins.includes(origin)) {
+            callback(null, true);
+            return;
+        }
+        callback(new Error(`CORS blocked for origin: ${origin}`));
+    },
+    credentials: true,
 }));
 // Body parsing
 app.use(express_1.default.json());

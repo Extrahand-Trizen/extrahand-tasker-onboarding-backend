@@ -78,6 +78,7 @@ export interface ILead extends Document {
     landline?: string;
     email?: string;
     city?: string;
+    locality?: string;
     state?: string;
     address?: string;
     pincode?: string;

@@ -21,6 +21,7 @@ export declare const env: {
     MICROSOFT_CLIENT_ID?: string | undefined;
     MICROSOFT_CLIENT_SECRET?: string | undefined;
     MICROSOFT_REDIRECT_URI?: string | undefined;
+    CORS_ORIGIN?: string | undefined;
     MINIO_ENDPOINT?: string | undefined;
     MINIO_PORT?: string | undefined;
     MINIO_USE_SSL?: string | undefined;

@@ -6,6 +6,7 @@ export interface CreateLeadData {
     landline?: string;
     email?: string;
     city?: string;
+    locality?: string;
     state?: string;
     address?: string;
     pincode?: string;
@@ -39,6 +40,7 @@ export interface UpdateLeadData {
     landline?: string | null;
     email?: string | null;
     city?: string | null;
+    locality?: string | null;
     state?: string | null;
     address?: string | null;
     pincode?: string | null;
@@ -74,6 +76,7 @@ export interface SearchFilters {
     addedBy?: string;
     addedByAny?: string[];
     pickedBy?: string;
+    pickedByAny?: string[];
     transferPendingTo?: string;
     ownerBy?: string;
     ownerByAny?: string[];
@@ -82,10 +85,18 @@ export interface SearchFilters {
     endDate?: Date;
     page?: number;
     limit?: number;
+    /** Locality filter — stored on lead.locality */
+    locality?: string;
+    /** Exact local area filter — stored on lead.address */
+    localArea?: string;
     /** Filter by conversion/registration on main website */
     registrationStatus?: RegistrationStatusFilter;
     /** Filter by user who moved lead into current contact status */
     statusChangedBy?: string;
+    /** When true, only leads with no picker (unclaimed) */
+    unclaimed?: boolean;
+    /** When true, only leads that have been claimed (pickedBy set) */
+    claimed?: boolean;
 }
 export interface CallbackQueueFilters {
     city?: string;
@@ -149,6 +160,9 @@ export interface StatusAnalyticsFilters {
     claimsScope?: 'current' | 'total';
     allTime?: boolean;
     gatedCommunityName?: string;
+    city?: string;
+    locality?: string;
+    localArea?: string;
 }
 export type StatusReportCategory = 'touched_leads' | 'interested' | 'callback_scheduled' | 'callback_overdue';
 export interface StatusReportExportFilters extends StatusAnalyticsFilters {
@@ -165,6 +179,8 @@ export declare class LeadService {
     private static readonly STATUS_REPORT_LABELS;
     private static formatIST;
     private static labelForReport;
+    /** Extra stored values matched when filtering by canonical category id */
+    private static readonly CATEGORY_FILTER_ALIASES;
     private static readonly PRIMARY_CATEGORY_LABELS;
     private static categoryLabelForExport;
     private static contactStatusForExport;
@@ -172,6 +188,23 @@ export declare class LeadService {
     private static buildCategoryMatch;
     private static escapeRegex;
     private static buildExactCaseInsensitiveMatch;
+    private static normalizeDistinctLocationValues;
+    /** Dropdown options must be place names — not pin codes, plot numbers, or numeric-only text. */
+    private static isValidLocationDropdownValue;
+    /** Case-insensitive dedupe; dropdown labels shown in uppercase. */
+    private static collectLocationDropdownValues;
+    /** Full Google-style address stored in city field by mistake. */
+    private static isFullAddressLike;
+    /** Parse city name from plain city or comma-separated address text. */
+    private static extractCityFromStoredValue;
+    private static isSkippableAddressPart;
+    /** Parse local area from plain text or comma-separated address (not full address in dropdown). */
+    private static extractLocalAreasFromStoredValue;
+    private static pushLocationFilterClause;
+    private static buildCityFilterMatch;
+    private static buildLocalAreaFilterMatch;
+    private static buildLocalityFilterMatch;
+    private static applyLeadLocationFilters;
     private static buildRegisteredPredicate;
     private static buildVerifiedPredicate;
     private static buildRegisteredOnlyPredicate;
@@ -227,6 +260,9 @@ export declare class LeadService {
      * Get all distinct gated community names (for dropdown/autocomplete)
      */
     static getGatedCommunityNames(): Promise<string[]>;
+    static getLeadCities(): Promise<string[]>;
+    static getLeadLocalAreas(): Promise<string[]>;
+    static getLeadLocalities(): Promise<string[]>;
     static searchLeads(filters: SearchFilters): Promise<{
         leads: ILead[];
         total: number;

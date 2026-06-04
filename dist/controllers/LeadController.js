@@ -10,6 +10,7 @@ const UserLookupService_1 = require("../services/UserLookupService");
 const CertificateReviewService_1 = require("../services/CertificateReviewService");
 const Lead_1 = __importDefault(require("../models/Lead"));
 const AdminUser_1 = __importDefault(require("../models/AdminUser"));
+const leadCreatorAccess_1 = require("../utils/leadCreatorAccess");
 const logger_1 = __importDefault(require("../config/logger"));
 const leadContactTracking_1 = require("../constants/leadContactTracking");
 const axios_1 = __importDefault(require("axios"));
@@ -50,14 +51,15 @@ function canManageLead(req, leadAddedBy) {
 }
 function canMutatePickedLead(req, lead) {
     const role = req.admin?.role;
-    const userId = getUserId(req);
-    if (!userId)
+    const identityIds = getScopedAddedByIds(req);
+    if (!identityIds.length)
         return false;
-    if (lead.pickedBy && lead.pickedBy !== userId) {
-        return false;
-    }
+    // ✅ Qualifiers can edit any lead — skip the pickedBy ownership check for them
     if (role === 'qualifier') {
-        return lead.pickedBy ? lead.pickedBy === userId : lead.addedBy === userId;
+        return (0, leadCreatorAccess_1.canQualifierEditLead)(lead, identityIds);
+    }
+    if (lead.pickedBy && !identityIds.includes(lead.pickedBy)) {
+        return false;
     }
     return true;
 }
@@ -208,7 +210,7 @@ class LeadController {
                 });
                 return;
             }
-            const { name, phone, landline, email, city, state, address, pincode, isGatedCommunity, gatedCommunityName, primaryCategory, primarySkill, // Legacy support
+            const { name, phone, landline, email, city, locality, state, address, pincode, isGatedCommunity, gatedCommunityName, primaryCategory, primarySkill, // Legacy support
             secondaryCategory, secondarySkill, // Legacy support
             experienceLevel, workingDays, preferredTimeSlot, source, sourceDetails } = req.body;
             // Validation - support both new and legacy field names
@@ -239,6 +241,7 @@ class LeadController {
                 landline: landlineValue || undefined,
                 email,
                 city,
+                locality,
                 state,
                 address,
                 pincode,
@@ -539,6 +542,32 @@ class LeadController {
         }
     }
     /**
+     * Distinct cities and local areas from existing leads (for filter dropdowns).
+     * GET /api/v1/onboarding/leads/location-filter-options
+     */
+    static async getLeadLocationFilterOptions(req, res) {
+        try {
+            if (!req.admin) {
+                res.status(401).json({ success: false, error: 'Authentication required' });
+                return;
+            }
+            const [cities, localities, localAreas] = await Promise.all([
+                LeadService_1.LeadService.getLeadCities(),
+                LeadService_1.LeadService.getLeadLocalities(),
+                LeadService_1.LeadService.getLeadLocalAreas(),
+            ]);
+            res.json({ success: true, data: { cities, localities, localAreas } });
+        }
+        catch (error) {
+            logger_1.default.error('Error in getLeadLocationFilterOptions controller', { error: error.message });
+            res.status(500).json({
+                success: false,
+                error: 'Failed to get location filter options',
+                message: error.message,
+            });
+        }
+    }
+    /**
      * Get unique users who have added leads (for filter dropdown)
      * GET /api/v1/onboarding/leads/creators
      */
@@ -713,11 +742,13 @@ class LeadController {
                 });
                 return;
             }
-            const { status, city, primarySkill, source, addedBy, pickedBy, transferPendingTo, ownerBy, search, startDate, endDate, page, limit, registrationStatus, statusChangedBy } = req.query;
+            const { status, city, primarySkill, source, addedBy, pickedBy, transferPendingTo, ownerBy, search, startDate, endDate, page, limit, registrationStatus, statusChangedBy, unclaimed, claimed, locality, localArea, } = req.query;
             const role = req.admin.role;
             const filters = {
                 status: status,
                 city: city,
+                locality: locality,
+                localArea: localArea,
                 primarySkill: primarySkill,
                 source: source,
                 addedBy: addedBy,
@@ -730,8 +761,20 @@ class LeadController {
                 page: page ? parseInt(page) : undefined,
                 limit: limit ? parseInt(limit) : undefined,
                 registrationStatus: registrationStatus,
-                statusChangedBy: statusChangedBy
+                statusChangedBy: statusChangedBy,
+                unclaimed: unclaimed === 'true' || unclaimed === '1',
+                claimed: claimed === 'true' || claimed === '1',
             };
+            // Expand single id to userId + uid for owner/picked filters.
+            const scopedIds = getScopedAddedByIds(req);
+            if (filters.ownerBy && scopedIds.length > 0) {
+                filters.ownerByAny = Array.from(new Set([...scopedIds, filters.ownerBy]));
+                delete filters.ownerBy;
+            }
+            if (filters.pickedBy && scopedIds.length > 0) {
+                filters.pickedByAny = Array.from(new Set([...scopedIds, filters.pickedBy]));
+                delete filters.pickedBy;
+            }
             // Keep search generic; caller (UI/page) decides whether to scope by addedBy.
             // This is required so "All Leads" can remain truly global for allowed roles.
             const result = await LeadService_1.LeadService.searchLeads(filters);
@@ -942,8 +985,8 @@ class LeadController {
             const role = req.admin.role;
             const scopedIds = getScopedAddedByIds(req);
             const filters = {};
-            if (role === 'onboarder') {
-                filters.followUpOwnerBy = getUserId(req) || undefined;
+            if (role === 'onboarder' && scopedIds.length > 0) {
+                filters.followUpOwnerByAny = scopedIds;
             }
             else if (role === 'qualifier' && scopedIds.length > 0) {
                 filters.followUpOwnerBy = '__no_qualifier_followups__';
@@ -1012,6 +1055,9 @@ class LeadController {
                 claimsScope: claimsScope ? String(claimsScope) : undefined,
                 allTime: isAllTime,
                 gatedCommunityName: req.query.gatedCommunityName ? String(req.query.gatedCommunityName) : undefined,
+                city: req.query.city ? String(req.query.city) : undefined,
+                locality: req.query.locality ? String(req.query.locality) : undefined,
+                localArea: req.query.localArea ? String(req.query.localArea) : undefined,
             };
             if (role === 'qualifier' && userId) {
                 filters.qualifierId = userId;
@@ -1181,6 +1227,9 @@ class LeadController {
                 claimsScope: claimsScope ? String(claimsScope) : undefined,
                 allTime: isAllTime,
                 gatedCommunityName: req.query.gatedCommunityName ? String(req.query.gatedCommunityName) : undefined,
+                city: req.query.city ? String(req.query.city) : undefined,
+                locality: req.query.locality ? String(req.query.locality) : undefined,
+                localArea: req.query.localArea ? String(req.query.localArea) : undefined,
             };
             if (role === 'qualifier' && userId) {
                 filters.qualifierId = userId;
@@ -1253,6 +1302,14 @@ class LeadController {
                     success: false,
                     error: 'Permission denied',
                     message: 'Only the picked qualifier can update this lead.'
+                });
+                return;
+            }
+            if ((0, leadCreatorAccess_1.updateTouchesSkills)(updateData) && !(0, leadCreatorAccess_1.isLeadCreator)(req, existingLead.addedBy)) {
+                res.status(403).json({
+                    success: false,
+                    error: 'Permission denied',
+                    message: 'Only the user who created this lead can edit skills.',
                 });
                 return;
             }
