@@ -123,6 +123,11 @@ export interface ILead extends Document {
     lastInterestedBy?: string;
     lastNotInterestedBy?: string;
     lastNotLiftedBy?: string;
+    /** Tracks who last edited lead fields (name, phone, city, etc.) */
+    lastUpdatedBy?: string;
+    lastUpdatedByName?: string;
+    /** When lead profile fields were last edited (excludes status-only updates) */
+    lastFieldEditedAt?: Date;
     communicationLog: ICommunicationLog[];
     internalNotes: IInternalNote[];
     duplicateOf?: string;

@@ -51,6 +51,9 @@ export interface UpdateLeadData {
     source?: LeadSource | null;
     sourceDetails?: string | null;
     skills?: ILeadSkill[];
+    /** Actor who performed the update — set by controller, not from request body */
+    _updatedBy?: string;
+    _updatedByName?: string;
 }
 export interface UpdateStatusData {
     status: LeadStatus;
@@ -111,6 +114,8 @@ export interface FollowUpQueueFilters {
     ownerBy?: string;
     ownerByAny?: string[];
     pickedBy?: string;
+    followUpOwnerBy?: string;
+    followUpOwnerByAny?: string[];
     startDate?: Date;
     endDate?: Date;
     dueType?: FollowUpDueType;
@@ -175,6 +180,15 @@ export declare class LeadService {
     private static buildOwnerScopeClause;
     private static textForSpreadsheet;
     private static applyWorksheetLayout;
+    /**
+     * Parse from/to query params into IST day bounds (inclusive).
+     * Accepts YYYY-MM-DD or full ISO timestamps.
+     */
+    static parseFilterRange(from?: string | Date, to?: string | Date): {
+        from?: Date;
+        to?: Date;
+    };
+    static normalizeLeadForResponse(lead: any): any;
     private static getISTDayBounds;
     /**
      * Generate unique lead ID
@@ -192,6 +206,8 @@ export declare class LeadService {
      */
     private static normalizeLeadData;
     private static applyOwnerScope;
+    private static latestFollowUpHistoryEntry;
+    private static filterFollowUpsByOwner;
     /**
      * Get lead by ID
      */
@@ -233,7 +249,7 @@ export declare class LeadService {
         limit: number;
         totalPages: number;
     }>;
-    static getFollowUpQueueStats(filters: Pick<FollowUpQueueFilters, 'addedBy' | 'addedByAny' | 'ownerBy' | 'ownerByAny' | 'pickedBy'>): Promise<FollowUpQueueStats>;
+    static getFollowUpQueueStats(filters: Pick<FollowUpQueueFilters, 'addedBy' | 'addedByAny' | 'ownerBy' | 'ownerByAny' | 'pickedBy' | 'followUpOwnerBy' | 'followUpOwnerByAny'>): Promise<FollowUpQueueStats>;
     static getStatusAnalytics(filters: StatusAnalyticsFilters): Promise<{
         leadsAdded: number;
         touchedLeads: number;
@@ -262,6 +278,7 @@ export declare class LeadService {
         buffer: Buffer;
         rowCount: number;
     }>;
+    private static exportLeadsAddedStandardReport;
     private static exportQualifierStatusReport;
     /**
      * Update lead

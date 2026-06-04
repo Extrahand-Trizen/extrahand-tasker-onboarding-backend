@@ -426,7 +426,7 @@ export class LeadController {
 
       res.json({
         success: true,
-        data: leadToReturn
+        data: LeadService.normalizeLeadForResponse(leadToReturn)
       });
     } catch (error: any) {
       logger.error('Error in getLead controller', {
@@ -1154,10 +1154,22 @@ export class LeadController {
       const { from, to, qualifierId, pickedBy, category, claimsScope, allTime } = req.query;
 
       const isAllTime = String(allTime) === 'true';
-      const fromDate = from ? new Date(from as string) : (isAllTime ? new Date(0) : new Date(Date.now() - 6 * 24 * 60 * 60 * 1000));
-      const toDate = to ? new Date(to as string) : new Date();
+      const defaultFrom = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const defaultTo = new Date().toISOString().slice(0, 10);
+      const parsedRange = isAllTime
+        ? { from: undefined, to: undefined }
+        : LeadService.parseFilterRange(
+            (from as string) || defaultFrom,
+            (to as string) || defaultTo
+          );
 
-      if (!isAllTime && (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime()))) {
+      if (
+        !isAllTime &&
+        (!parsedRange.from ||
+          !parsedRange.to ||
+          Number.isNaN(parsedRange.from.getTime()) ||
+          Number.isNaN(parsedRange.to.getTime()))
+      ) {
         res.status(400).json({
           success: false,
           error: 'Invalid date range',
@@ -1167,8 +1179,8 @@ export class LeadController {
       }
 
       const filters: any = {
-        from: isAllTime ? undefined : fromDate,
-        to: isAllTime ? undefined : toDate,
+        from: parsedRange.from,
+        to: parsedRange.to,
         category: category ? String(category) : undefined,
         claimsScope: claimsScope ? (String(claimsScope) as 'current' | 'total') : undefined,
         allTime: isAllTime,
@@ -1228,10 +1240,22 @@ export class LeadController {
 
       if (userId) {
         const isAllTime = String(allTime) === 'true';
-        const fromDate = from ? new Date(from as string) : (isAllTime ? new Date(0) : new Date(Date.now() - 6 * 24 * 60 * 60 * 1000));
-        const toDate = to ? new Date(to as string) : new Date();
+        const defaultFrom = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+        const defaultTo = new Date().toISOString().slice(0, 10);
+        const parsedRange = isAllTime
+          ? { from: undefined, to: undefined }
+          : LeadService.parseFilterRange(
+              (from as string) || defaultFrom,
+              (to as string) || defaultTo
+            );
 
-        if (!isAllTime && (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime()))) {
+        if (
+          !isAllTime &&
+          (!parsedRange.from ||
+            !parsedRange.to ||
+            Number.isNaN(parsedRange.from.getTime()) ||
+            Number.isNaN(parsedRange.to.getTime()))
+        ) {
           res.status(400).json({
             success: false,
             error: 'Invalid date range',
@@ -1241,8 +1265,8 @@ export class LeadController {
         }
 
         const filters = {
-          from: isAllTime ? undefined : fromDate,
-          to: isAllTime ? undefined : toDate,
+          from: parsedRange.from,
+          to: parsedRange.to,
           allTime: isAllTime,
         };
 
@@ -1328,10 +1352,22 @@ export class LeadController {
       }
 
       const isAllTime = String(allTime) === 'true';
-      const fromDate = from ? new Date(from as string) : (isAllTime ? new Date(0) : new Date(Date.now() - 24 * 60 * 60 * 1000));
-      const toDate = to ? new Date(to as string) : new Date();
+      const defaultFrom = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const defaultTo = new Date().toISOString().slice(0, 10);
+      const parsedRange = isAllTime
+        ? { from: undefined, to: undefined }
+        : LeadService.parseFilterRange(
+            (from as string) || defaultFrom,
+            (to as string) || defaultTo
+          );
 
-      if (!isAllTime && (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime()))) {
+      if (
+        !isAllTime &&
+        (!parsedRange.from ||
+          !parsedRange.to ||
+          Number.isNaN(parsedRange.from.getTime()) ||
+          Number.isNaN(parsedRange.to.getTime()))
+      ) {
         res.status(400).json({
           success: false,
           error: 'Invalid date range',
@@ -1341,8 +1377,8 @@ export class LeadController {
       }
 
       const filters: any = {
-        from: isAllTime ? undefined : fromDate,
-        to: isAllTime ? undefined : toDate,
+        from: parsedRange.from,
+        to: parsedRange.to,
         format: format as 'csv' | 'xlsx',
         template: template as 'eod' | 'detailed',
         reportCategory: reportCategory as 'touched_leads' | 'interested' | 'callback_scheduled' | 'callback_overdue',
@@ -1377,8 +1413,8 @@ export class LeadController {
           reportType: 'lead-status-report',
           role,
           filters: {
-            from: isAllTime ? 'all-time' : fromDate.toISOString(),
-            to: isAllTime ? 'all-time' : toDate.toISOString(),
+            from: isAllTime ? 'all-time' : filters.from?.toISOString(),
+            to: isAllTime ? 'all-time' : filters.to?.toISOString(),
             qualifierId: filters.qualifierId,
             format: filters.format,
             template: filters.template,
@@ -1414,7 +1450,11 @@ export class LeadController {
   static async updateLead(req: AdminRequest, res: Response): Promise<void> {
     try {
       const { leadId } = req.params;
-      const updateData: UpdateLeadData = req.body;
+      const updateData: UpdateLeadData = {
+        ...req.body,
+        _updatedBy: getUserId(req) || req.admin?.uid || '',
+        _updatedByName: req.admin?.name || '',
+      };
 
       const existingLead = await LeadService.getLeadById(leadId);
       if (!existingLead) {

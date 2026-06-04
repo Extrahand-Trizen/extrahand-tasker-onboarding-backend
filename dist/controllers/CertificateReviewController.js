@@ -168,9 +168,11 @@ class CertificateReviewController {
             const badRequest = error.message?.includes('Invalid') ||
                 error.message?.includes('required') ||
                 error.message?.includes('already reviewed');
-            res.status(badRequest ? 400 : 500).json({
+            const notFound = error.message?.includes('Profile not found');
+            const statusCode = badRequest ? 400 : notFound ? 404 : 500;
+            res.status(statusCode).json({
                 success: false,
-                error: badRequest ? error.message : 'Failed to verify certificate',
+                error: badRequest || notFound ? error.message : 'Failed to verify certificate',
                 message: error.message,
             });
         }
@@ -214,9 +216,11 @@ class CertificateReviewController {
             const badRequest = error.message?.includes('Invalid') ||
                 error.message?.includes('required') ||
                 error.message?.includes('already reviewed');
-            res.status(badRequest ? 400 : 500).json({
+            const notFound = error.message?.includes('Profile not found');
+            const statusCode = badRequest ? 400 : notFound ? 404 : 500;
+            res.status(statusCode).json({
                 success: false,
-                error: badRequest ? error.message : 'Failed to reject certificate',
+                error: badRequest || notFound ? error.message : 'Failed to reject certificate',
                 message: error.message,
             });
         }

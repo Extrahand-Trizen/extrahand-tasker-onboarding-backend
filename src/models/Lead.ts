@@ -169,6 +169,11 @@ export interface ILead extends Document {
   lastInterestedBy?: string;
   lastNotInterestedBy?: string;
   lastNotLiftedBy?: string;
+  /** Tracks who last edited lead fields (name, phone, city, etc.) */
+  lastUpdatedBy?: string;
+  lastUpdatedByName?: string;
+  /** When lead profile fields were last edited (excludes status-only updates) */
+  lastFieldEditedAt?: Date;
   communicationLog: ICommunicationLog[];
   
   // Internal notes
@@ -484,6 +489,18 @@ const LeadSchema = new Schema<ILead>({
   },
   lastNotLiftedBy: {
     type: String,
+    index: true
+  },
+  lastUpdatedBy: {
+    type: String,
+    index: true
+  },
+  lastUpdatedByName: {
+    type: String,
+    trim: true
+  },
+  lastFieldEditedAt: {
+    type: Date,
     index: true
   },
   communicationLog: [{

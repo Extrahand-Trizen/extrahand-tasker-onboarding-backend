@@ -205,7 +205,7 @@ class ActivationService {
                 email: lead.email || null,
                 phone: lead.phone || null,
                 emailVerified: false,
-                roles: ['both'],
+                roles: ['poster', 'tasker'],
                 userType: 'individual',
                 // ✅ Location format matches Profile model structure
                 // Priority: Address from Aadhaar verification > address_proof document > lead address

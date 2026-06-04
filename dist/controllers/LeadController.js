@@ -341,7 +341,7 @@ class LeadController {
             }
             res.json({
                 success: true,
-                data: leadToReturn
+                data: LeadService_1.LeadService.normalizeLeadForResponse(leadToReturn)
             });
         }
         catch (error) {
@@ -886,10 +886,13 @@ class LeadController {
                 limit: limit ? parseInt(limit) : undefined,
             };
             if (role === 'onboarder') {
-                filters.pickedBy = (getUserId(req) || '');
+                filters.followUpOwnerBy = (getUserId(req) || '');
             }
             else if (pickedBy) {
-                filters.pickedBy = pickedBy;
+                filters.followUpOwnerBy = pickedBy;
+            }
+            else if (role === 'qualifier') {
+                filters.followUpOwnerBy = '__no_qualifier_followups__';
             }
             if (role === 'qualifier' && scopedIds.length > 0) {
                 filters.ownerByAny = scopedIds;
@@ -940,9 +943,10 @@ class LeadController {
             const scopedIds = getScopedAddedByIds(req);
             const filters = {};
             if (role === 'onboarder') {
-                filters.pickedBy = getUserId(req) || undefined;
+                filters.followUpOwnerBy = getUserId(req) || undefined;
             }
             else if (role === 'qualifier' && scopedIds.length > 0) {
+                filters.followUpOwnerBy = '__no_qualifier_followups__';
                 filters.ownerByAny = scopedIds;
             }
             else if (req.query.ownerBy) {
@@ -984,9 +988,16 @@ class LeadController {
             const userId = getUserId(req);
             const { from, to, qualifierId, pickedBy, category, claimsScope, allTime } = req.query;
             const isAllTime = String(allTime) === 'true';
-            const fromDate = from ? new Date(from) : (isAllTime ? new Date(0) : new Date(Date.now() - 6 * 24 * 60 * 60 * 1000));
-            const toDate = to ? new Date(to) : new Date();
-            if (!isAllTime && (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime()))) {
+            const defaultFrom = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+            const defaultTo = new Date().toISOString().slice(0, 10);
+            const parsedRange = isAllTime
+                ? { from: undefined, to: undefined }
+                : LeadService_1.LeadService.parseFilterRange(from || defaultFrom, to || defaultTo);
+            if (!isAllTime &&
+                (!parsedRange.from ||
+                    !parsedRange.to ||
+                    Number.isNaN(parsedRange.from.getTime()) ||
+                    Number.isNaN(parsedRange.to.getTime()))) {
                 res.status(400).json({
                     success: false,
                     error: 'Invalid date range',
@@ -995,8 +1006,8 @@ class LeadController {
                 return;
             }
             const filters = {
-                from: isAllTime ? undefined : fromDate,
-                to: isAllTime ? undefined : toDate,
+                from: parsedRange.from,
+                to: parsedRange.to,
                 category: category ? String(category) : undefined,
                 claimsScope: claimsScope ? String(claimsScope) : undefined,
                 allTime: isAllTime,
@@ -1054,9 +1065,16 @@ class LeadController {
             const { userId, from, to, allTime } = req.query;
             if (userId) {
                 const isAllTime = String(allTime) === 'true';
-                const fromDate = from ? new Date(from) : (isAllTime ? new Date(0) : new Date(Date.now() - 6 * 24 * 60 * 60 * 1000));
-                const toDate = to ? new Date(to) : new Date();
-                if (!isAllTime && (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime()))) {
+                const defaultFrom = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+                const defaultTo = new Date().toISOString().slice(0, 10);
+                const parsedRange = isAllTime
+                    ? { from: undefined, to: undefined }
+                    : LeadService_1.LeadService.parseFilterRange(from || defaultFrom, to || defaultTo);
+                if (!isAllTime &&
+                    (!parsedRange.from ||
+                        !parsedRange.to ||
+                        Number.isNaN(parsedRange.from.getTime()) ||
+                        Number.isNaN(parsedRange.to.getTime()))) {
                     res.status(400).json({
                         success: false,
                         error: 'Invalid date range',
@@ -1065,8 +1083,8 @@ class LeadController {
                     return;
                 }
                 const filters = {
-                    from: isAllTime ? undefined : fromDate,
-                    to: isAllTime ? undefined : toDate,
+                    from: parsedRange.from,
+                    to: parsedRange.to,
                     allTime: isAllTime,
                 };
                 const details = await LeadService_1.LeadService.getPerformanceDetails(String(userId), filters);
@@ -1134,9 +1152,16 @@ class LeadController {
                 return;
             }
             const isAllTime = String(allTime) === 'true';
-            const fromDate = from ? new Date(from) : (isAllTime ? new Date(0) : new Date(Date.now() - 24 * 60 * 60 * 1000));
-            const toDate = to ? new Date(to) : new Date();
-            if (!isAllTime && (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime()))) {
+            const defaultFrom = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+            const defaultTo = new Date().toISOString().slice(0, 10);
+            const parsedRange = isAllTime
+                ? { from: undefined, to: undefined }
+                : LeadService_1.LeadService.parseFilterRange(from || defaultFrom, to || defaultTo);
+            if (!isAllTime &&
+                (!parsedRange.from ||
+                    !parsedRange.to ||
+                    Number.isNaN(parsedRange.from.getTime()) ||
+                    Number.isNaN(parsedRange.to.getTime()))) {
                 res.status(400).json({
                     success: false,
                     error: 'Invalid date range',
@@ -1145,8 +1170,8 @@ class LeadController {
                 return;
             }
             const filters = {
-                from: isAllTime ? undefined : fromDate,
-                to: isAllTime ? undefined : toDate,
+                from: parsedRange.from,
+                to: parsedRange.to,
                 format: format,
                 template: template,
                 reportCategory: reportCategory,
@@ -1175,8 +1200,8 @@ class LeadController {
                 reportType: 'lead-status-report',
                 role,
                 filters: {
-                    from: isAllTime ? 'all-time' : fromDate.toISOString(),
-                    to: isAllTime ? 'all-time' : toDate.toISOString(),
+                    from: isAllTime ? 'all-time' : filters.from?.toISOString(),
+                    to: isAllTime ? 'all-time' : filters.to?.toISOString(),
                     qualifierId: filters.qualifierId,
                     format: filters.format,
                     template: filters.template,
@@ -1210,7 +1235,11 @@ class LeadController {
     static async updateLead(req, res) {
         try {
             const { leadId } = req.params;
-            const updateData = req.body;
+            const updateData = {
+                ...req.body,
+                _updatedBy: getUserId(req) || req.admin?.uid || '',
+                _updatedByName: req.admin?.name || '',
+            };
             const existingLead = await LeadService_1.LeadService.getLeadById(leadId);
             if (!existingLead) {
                 res.status(404).json({

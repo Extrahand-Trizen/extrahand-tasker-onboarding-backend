@@ -323,6 +323,18 @@ const LeadSchema = new mongoose_1.Schema({
         type: String,
         index: true
     },
+    lastUpdatedBy: {
+        type: String,
+        index: true
+    },
+    lastUpdatedByName: {
+        type: String,
+        trim: true
+    },
+    lastFieldEditedAt: {
+        type: Date,
+        index: true
+    },
     communicationLog: [{
             type: {
                 type: String,

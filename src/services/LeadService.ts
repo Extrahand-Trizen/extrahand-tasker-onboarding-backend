@@ -62,6 +62,9 @@ export interface UpdateLeadData {
   source?: LeadSource | null;
   sourceDetails?: string | null;
   skills?: ILeadSkill[];
+  /** Actor who performed the update — set by controller, not from request body */
+  _updatedBy?: string;
+  _updatedByName?: string;
 }
 
 export interface UpdateStatusData {
@@ -430,6 +433,46 @@ export class LeadService {
         };
       }
     }
+  }
+
+  /**
+   * Parse from/to query params into IST day bounds (inclusive).
+   * Accepts YYYY-MM-DD or full ISO timestamps.
+   */
+  static parseFilterRange(
+    from?: string | Date,
+    to?: string | Date
+  ): { from?: Date; to?: Date } {
+    const istOffsetMs = 5.5 * 60 * 60 * 1000;
+
+    const toISTBound = (value: string | Date, end: boolean): Date => {
+      if (value instanceof Date) {
+        return value;
+      }
+
+      const str = String(value).trim();
+      const dateOnly = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (dateOnly) {
+        const year = Number(dateOnly[1]);
+        const month = Number(dateOnly[2]);
+        const day = Number(dateOnly[3]);
+        if (end) {
+          return new Date(Date.UTC(year, month - 1, day, 23, 59, 59, 999) - istOffsetMs);
+        }
+        return new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0) - istOffsetMs);
+      }
+
+      return new Date(str);
+    };
+
+    return {
+      from: from ? toISTBound(from, false) : undefined,
+      to: to ? toISTBound(to, true) : undefined,
+    };
+  }
+
+  static normalizeLeadForResponse(lead: any): any {
+    return this.normalizeLeadData(lead);
   }
 
   private static getISTDayBounds(reference = new Date()): { startOfToday: Date; endOfToday: Date } {
@@ -1559,6 +1602,11 @@ export class LeadService {
         return this.exportQualifierStatusReport(filters);
       }
 
+      // "Leads Added" / claims-by-creation export (matches leadsAdded analytics card)
+      if (filters.reportCategory === 'touched_leads' && !filters.pickedBy) {
+        return this.exportLeadsAddedStandardReport(filters);
+      }
+
       const leadMatch: any = {};
       const userId = filters.pickedBy || filters.qualifierId;
       if (userId) {
@@ -1707,6 +1755,100 @@ export class LeadService {
       });
       throw error;
     }
+  }
+
+  private static async exportLeadsAddedStandardReport(
+    filters: StatusReportExportFilters
+  ): Promise<{ filename: string; mimeType: string; buffer: Buffer; rowCount: number }> {
+    const leadMatch: any = {};
+
+    if (filters.qualifierId) {
+      leadMatch.addedBy = filters.qualifierId;
+    }
+
+    if (!filters.allTime && filters.from && filters.to) {
+      leadMatch.createdAt = { $gte: filters.from, $lte: filters.to };
+    }
+
+    if (filters.category) {
+      leadMatch.$and = leadMatch.$and || [];
+      leadMatch.$and.push(this.buildCategoryMatch(filters.category));
+    }
+
+    if (filters.gatedCommunityName) {
+      leadMatch.gatedCommunityName = this.buildExactCaseInsensitiveMatch(filters.gatedCommunityName);
+    }
+
+    const leads = await Lead.find(leadMatch).sort({ createdAt: -1 }).lean();
+
+    const reportRows = leads.map((lead) => {
+      const latestHistory = [...(lead.statusHistory || [])].sort(
+        (a, b) => new Date(b.changedAt).getTime() - new Date(a.changedAt).getTime()
+      )[0];
+
+      const base: Record<string, string> = {
+        Date: this.formatIST(lead.createdAt),
+        'Qualifier Name': this.textForSpreadsheet(lead.addedByName || lead.pickedByName || 'Unknown'),
+        'Lead ID': this.textForSpreadsheet(lead.leadId),
+        'Lead Name': this.textForSpreadsheet(lead.name),
+        'Phone/Landline': this.textForSpreadsheet(lead.phone || lead.landline || ''),
+        City: this.textForSpreadsheet(lead.city),
+        'Current Status': this.labelForReport(latestHistory?.status || lead.status),
+        'Status Reason': this.textForSpreadsheet(
+          latestHistory?.statusReasonText || this.labelForReport(latestHistory?.statusReasonCode)
+        ),
+        'Callback Date': this.formatIST(latestHistory?.callbackAt),
+        'Expected Onboarding Date': this.formatIST(latestHistory?.expectedOnboardingAt),
+        'Last Updated At': this.formatIST(lead.updatedAt),
+        'Last Updated By': this.textForSpreadsheet(
+          lead.lastUpdatedByName || lead.lastUpdatedBy || latestHistory?.changedByName || latestHistory?.changedBy || ''
+        ),
+      };
+
+      if (filters.template === 'detailed') {
+        base.State = this.textForSpreadsheet(lead.state);
+        base['Primary Category'] = this.textForSpreadsheet(lead.primaryCategory || lead.primarySkill);
+        base['Secondary Category'] = this.textForSpreadsheet(lead.secondaryCategory || lead.secondarySkill);
+        base.Source = this.textForSpreadsheet(lead.source);
+        base['Source Details'] = this.textForSpreadsheet(lead.sourceDetails);
+        base['Gated Community'] = lead.isGatedCommunity ? 'Yes' : 'No';
+        base['Gated Community Name'] = this.textForSpreadsheet(lead.gatedCommunityName);
+        base['Created At'] = this.formatIST(lead.createdAt);
+        base['Updated At'] = this.formatIST(lead.updatedAt);
+        if (filters.includeNotes) {
+          base.Notes = this.textForSpreadsheet(latestHistory?.notes);
+        }
+        base['Is Duplicate'] = lead.isDuplicate ? 'Yes' : 'No';
+        base.Blacklisted = lead.blacklisted ? 'Yes' : 'No';
+      }
+
+      return base;
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(reportRows);
+    this.applyWorksheetLayout(worksheet, reportRows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Leads Added');
+
+    const dateStamp = new Date().toISOString().slice(0, 10);
+    const categorySlug = filters.category ? `-${filters.category}` : '';
+    const filename = `leads-added-report-${filters.template}${categorySlug}-${dateStamp}.${filters.format}`;
+    const mimeType =
+      filters.format === 'xlsx'
+        ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        : 'text/csv';
+
+    const buffer =
+      filters.format === 'xlsx'
+        ? XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer
+        : Buffer.from(XLSX.utils.sheet_to_csv(worksheet), 'utf-8');
+
+    return {
+      filename,
+      mimeType,
+      buffer,
+      rowCount: reportRows.length,
+    };
   }
 
   private static async exportQualifierStatusReport(
@@ -1889,8 +2031,10 @@ export class LeadService {
         if (gcName) setData.gatedCommunityName = gcName;
         else unsetData.gatedCommunityName = 1;
       }
-      if (has('primarySkill')) {
-        const primarySkill = typeof data.primarySkill === 'string' ? data.primarySkill.trim() : '';
+      if (has('primarySkill') || has('primaryCategory')) {
+        const primarySkill = (
+          typeof data.primaryCategory === 'string' ? data.primaryCategory : typeof data.primarySkill === 'string' ? data.primarySkill : ''
+        ).trim();
         if (primarySkill) {
           setData.primarySkill = primarySkill;
           setData.primaryCategory = primarySkill;
@@ -1899,8 +2043,14 @@ export class LeadService {
           unsetData.primaryCategory = 1;
         }
       }
-      if (has('secondarySkill')) {
-        const secondarySkill = typeof data.secondarySkill === 'string' ? data.secondarySkill.trim() : '';
+      if (has('secondarySkill') || has('secondaryCategory')) {
+        const secondarySkill = (
+          typeof data.secondaryCategory === 'string'
+            ? data.secondaryCategory
+            : typeof data.secondarySkill === 'string'
+              ? data.secondarySkill
+              : ''
+        ).trim();
         if (secondarySkill) {
           setData.secondarySkill = secondarySkill;
           setData.secondaryCategory = secondarySkill;
@@ -1920,9 +2070,56 @@ export class LeadService {
       }
       if (has('skills') && data.skills) setData.skills = data.skills;
 
+      // Track who last edited this lead's fields
+      if (data._updatedBy) {
+        setData.lastUpdatedBy = data._updatedBy;
+      }
+      if (data._updatedByName) {
+        setData.lastUpdatedByName = data._updatedByName;
+      }
+
+      const profileFieldKeys = new Set([
+        'name',
+        'phone',
+        'landline',
+        'email',
+        'city',
+        'state',
+        'address',
+        'pincode',
+        'isGatedCommunity',
+        'gatedCommunityName',
+        'primarySkill',
+        'primaryCategory',
+        'secondarySkill',
+        'secondaryCategory',
+        'source',
+        'sourceDetails',
+        'skills',
+      ]);
+      const hasProfileFieldChange =
+        Object.keys(setData).some((key) => profileFieldKeys.has(key)) || Object.keys(unsetData).length > 0;
+
+      if (hasProfileFieldChange && data._updatedBy) {
+        const editedAt = new Date();
+        setData.lastFieldEditedAt = editedAt;
+      }
+
       const updateQuery: any = {};
       if (Object.keys(setData).length > 0) updateQuery.$set = setData;
       if (Object.keys(unsetData).length > 0) updateQuery.$unset = unsetData;
+
+      if (hasProfileFieldChange && data._updatedBy) {
+        updateQuery.$push = {
+          statusHistory: {
+            status: existingLead.status,
+            changedBy: data._updatedBy,
+            changedByName: data._updatedByName,
+            changedAt: new Date(),
+            notes: 'Lead details updated',
+          },
+        };
+      }
 
       const lead = await Lead.findOneAndUpdate(
         { leadId },
@@ -1930,7 +2127,17 @@ export class LeadService {
         { new: true }
       ).lean();
 
-      return lead as ILead | null;
+      if (lead && hasProfileFieldChange && data._updatedBy) {
+        await this.logActivity(
+          leadId,
+          'lead_update',
+          'Lead profile details updated',
+          data._updatedBy,
+          data._updatedByName
+        );
+      }
+
+      return lead ? (this.normalizeLeadData(lead) as ILead) : null;
     } catch (error: any) {
       logger.error('Error updating lead', {
         error: error.message,
@@ -2792,10 +2999,6 @@ export class LeadService {
 
     const baseMatch: any = this.buildOwnerScopeClause(identityIds);
 
-    if (!filters.allTime && filters.from && filters.to) {
-      baseMatch.createdAt = { $gte: filters.from, $lte: filters.to };
-    }
-
     const registeredQuery = {
       $or: [
         { 'conversionData.platformUid': { $exists: true, $nin: [null, ''] } },
@@ -2842,30 +3045,32 @@ export class LeadService {
     const rankLabel = rankIndex !== -1 ? `#${rankIndex + 1}${getRankSuffix(rankIndex + 1)} on team` : 'N/A';
 
     if (user.role === 'qualifier') {
-      const qualifierOwnerMatch = this.buildOwnerScopeClause(identityIds);
+      const qualifierOwnerMatch = this.buildIdSelector('addedBy', identityIds);
 
-      const dateQuery: any = {};
-      if (!filters.allTime && filters.from && filters.to) {
-        dateQuery.createdAt = { $gte: filters.from, $lte: filters.to };
-      }
+      const editedDateFilter =
+        !filters.allTime && filters.from && filters.to
+          ? {
+              $or: [
+                { lastFieldEditedAt: { $gte: filters.from, $lte: filters.to } },
+                {
+                  lastFieldEditedAt: { $exists: false },
+                  updatedAt: { $gte: filters.from, $lte: filters.to },
+                },
+              ],
+            }
+          : {};
 
-      const interested = await Lead.countDocuments({
-        ...qualifierOwnerMatch,
-        ...dateQuery,
-        status: 'contacted_interested'
+      const editedLeads = await Lead.countDocuments({
+        lastUpdatedBy: { $in: identityIds },
+        ...editedDateFilter,
       });
 
-      const notInterested = await Lead.countDocuments({
-        ...qualifierOwnerMatch,
-        ...dateQuery,
-        status: 'contacted_not_interested'
-      });
-
-      const notLifted = await Lead.countDocuments({
-        ...qualifierOwnerMatch,
-        ...dateQuery,
-        status: 'contacted_not_lifted'
-      });
+      const totalLeadsInRange = filters.allTime
+        ? claims
+        : await Lead.countDocuments({
+            ...qualifierOwnerMatch,
+            createdAt: { $gte: filters.from!, $lte: filters.to! },
+          });
 
       return {
         user: {
@@ -2875,23 +3080,24 @@ export class LeadService {
           location,
         },
         claims,
-        totalLeads: claims,
+        totalLeads: filters.allTime ? claims : totalLeadsInRange,
+        totalLeadsInRange,
+        editedLeads,
         rankLabel,
         followUps: {
           total: 0,
           overdue: 0,
           dueToday: 0,
         },
-        outcomes: {
-          interested,
-          notInterested,
-          notLifted,
-        }
+        // Qualifier outcomes intentionally omitted — not shown on the UI
+        outcomes: {}
       };
     } else {
+      // Onboarder: date filter on updatedAt (when the lead was last worked),
+      // not createdAt (when it was added).
       const dateQuery: any = {};
       if (!filters.allTime && filters.from && filters.to) {
-        dateQuery.createdAt = { $gte: filters.from, $lte: filters.to };
+        dateQuery.updatedAt = { $gte: filters.from, $lte: filters.to };
       }
 
       const followUpStats = await this.getFollowUpQueueStats({
@@ -2916,9 +3122,9 @@ export class LeadService {
       const registered = await Lead.countDocuments({
         $and: [
           baseMatch,
-          registeredQuery
+          registeredQuery,
+          ...(dateQuery.updatedAt ? [{ updatedAt: dateQuery.updatedAt }] : []),
         ],
-        ...dateQuery,
         $nor: [
           { 'conversionData.isAadhaarVerified': true },
           { 'verificationStatus.aadhaar.status': 'verified' }
@@ -2941,12 +3147,38 @@ export class LeadService {
         $and: [
           baseMatch,
           registeredQuery,
-          isVerifiedQuery
+          isVerifiedQuery,
+          ...(dateQuery.updatedAt ? [{ updatedAt: dateQuery.updatedAt }] : []),
         ],
-        ...dateQuery
       });
 
       const totalRegistered = registered + verified;
+
+      // Leads in range added by this user
+      const totalLeadsInRange = filters.allTime
+        ? claims
+        : await Lead.countDocuments({
+            ...this.buildOwnerScopeClause(identityIds),
+            createdAt: { $gte: filters.from!, $lte: filters.to! },
+          });
+
+      const editedDateFilter =
+        !filters.allTime && filters.from && filters.to
+          ? {
+              $or: [
+                { lastFieldEditedAt: { $gte: filters.from, $lte: filters.to } },
+                {
+                  lastFieldEditedAt: { $exists: false },
+                  updatedAt: { $gte: filters.from, $lte: filters.to },
+                },
+              ],
+            }
+          : {};
+
+      const editedLeads = await Lead.countDocuments({
+        lastUpdatedBy: { $in: identityIds },
+        ...editedDateFilter,
+      });
 
       return {
         user: {
@@ -2956,7 +3188,9 @@ export class LeadService {
           location,
         },
         claims,
-        totalLeads: claims,
+        totalLeads: filters.allTime ? claims : totalLeadsInRange,
+        totalLeadsInRange,
+        editedLeads,
         currentClaims,
         rankLabel,
         followUps: {
