@@ -29,11 +29,17 @@ const corsOrigins = env.CORS_ORIGIN
   ? env.CORS_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean)
   : [];
 
-// CORS
+// CORS — use callback(null, false) for disallowed origins so preflight still gets a clean response
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin) {
       callback(null, true);
+      return;
+    }
+
+    if (corsOrigins.length === 0) {
+      logger.warn('CORS_ORIGIN is not set; blocking cross-origin browser requests', { origin });
+      callback(null, false);
       return;
     }
 
@@ -42,7 +48,8 @@ app.use(cors({
       return;
     }
 
-    callback(new Error(`CORS blocked for origin: ${origin}`));
+    logger.warn('CORS blocked for origin', { origin, allowedOrigins: corsOrigins });
+    callback(null, false);
   },
   credentials: true,
 }));
