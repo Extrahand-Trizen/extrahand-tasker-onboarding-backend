@@ -2072,6 +2072,8 @@ export class LeadService {
       leadMatch.gatedCommunityName = this.buildExactCaseInsensitiveMatch(filters.gatedCommunityName);
     }
 
+    this.applyLeadLocationFilters(leadMatch, filters);
+
     const leads = await Lead.find(leadMatch).sort({ createdAt: -1 }).lean();
 
     const reportRows = leads.map((lead) => {
@@ -2391,6 +2393,7 @@ export class LeadService {
         'landline',
         'email',
         'city',
+        'locality',
         'state',
         'address',
         'pincode',
@@ -2407,10 +2410,52 @@ export class LeadService {
       const hasProfileFieldChange =
         Object.keys(setData).some((key) => profileFieldKeys.has(key)) || Object.keys(unsetData).length > 0;
 
+      const buildFieldChanges = () => {
+        const fieldsToTrack = [
+          'name',
+          'phone',
+          'landline',
+          'email',
+          'city',
+          'locality',
+          'state',
+          'address',
+          'pincode',
+          'isGatedCommunity',
+          'gatedCommunityName',
+          'primarySkill',
+          'secondarySkill',
+          'source',
+          'sourceDetails',
+          'skills',
+        ];
+
+        return fieldsToTrack.reduce((changes: Array<{ field: string; previous: any; current: any }>, field) => {
+          const hasSet = Object.prototype.hasOwnProperty.call(setData, field);
+          const hasUnset = Object.prototype.hasOwnProperty.call(unsetData, field);
+
+          if (!hasSet && !hasUnset) return changes;
+
+          const previous = (existingLead as any)[field];
+          const current = hasSet ? (setData as any)[field] : undefined;
+          const changed = hasSet
+            ? JSON.stringify(previous) !== JSON.stringify(current)
+            : previous !== undefined;
+
+          if (changed) {
+            changes.push({ field, previous, current });
+          }
+
+          return changes;
+        }, []);
+      };
+
       if (hasProfileFieldChange && data._updatedBy) {
         const editedAt = new Date();
         setData.lastFieldEditedAt = editedAt;
       }
+
+      const fieldChanges = hasProfileFieldChange ? buildFieldChanges() : undefined;
 
       const updateQuery: any = {};
       if (Object.keys(setData).length > 0) updateQuery.$set = setData;
@@ -2424,6 +2469,7 @@ export class LeadService {
             changedByName: data._updatedByName,
             changedAt: new Date(),
             notes: 'Lead details updated',
+            fieldChanges: fieldChanges?.length ? fieldChanges : undefined,
           },
         };
       }

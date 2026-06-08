@@ -22,12 +22,19 @@ export type LeadSource = 'referral' | 'campaign' | 'walk-in' | 'agent' | 'other'
 
 export type CreationMethod = 'manual_onboarding' | 'bulk_upload' | 'direct_activation';
 
+export interface IStatusChange {
+  field: string;
+  previous?: any;
+  current?: any;
+}
+
 export interface IStatusHistory {
   status: LeadStatus;
   changedBy: string;
   changedByName?: string;
   changedAt: Date;
   notes?: string;
+  fieldChanges?: IStatusChange[];
   statusReasonCode?: string;
   statusReasonText?: string;
   callbackAt?: Date;
@@ -401,6 +408,11 @@ const LeadSchema = new Schema<ILead>({
     changedByName: String,
     changedAt: { type: Date, default: Date.now },
     notes: String,
+    fieldChanges: [{
+      field: String,
+      previous: Schema.Types.Mixed,
+      current: Schema.Types.Mixed,
+    }],
     statusReasonCode: String,
     statusReasonText: String,
     callbackAt: Date,
