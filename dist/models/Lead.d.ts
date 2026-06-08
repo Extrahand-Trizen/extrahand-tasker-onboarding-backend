@@ -3,12 +3,18 @@ export type LeadStatus = 'lead_added' | 'contacted_not_lifted' | 'contacted_not_
 export type AccountStatus = 'not_created' | 'invited' | 'activated' | 'suspended';
 export type LeadSource = 'referral' | 'campaign' | 'walk-in' | 'agent' | 'other';
 export type CreationMethod = 'manual_onboarding' | 'bulk_upload' | 'direct_activation';
+export interface IStatusChange {
+    field: string;
+    previous?: any;
+    current?: any;
+}
 export interface IStatusHistory {
     status: LeadStatus;
     changedBy: string;
     changedByName?: string;
     changedAt: Date;
     notes?: string;
+    fieldChanges?: IStatusChange[];
     statusReasonCode?: string;
     statusReasonText?: string;
     callbackAt?: Date;
@@ -124,6 +130,7 @@ export interface ILead extends Document {
     lastInterestedBy?: string;
     lastNotInterestedBy?: string;
     lastNotLiftedBy?: string;
+    attempts?: string;
     /** Tracks who last edited lead fields (name, phone, city, etc.) */
     lastUpdatedBy?: string;
     lastUpdatedByName?: string;

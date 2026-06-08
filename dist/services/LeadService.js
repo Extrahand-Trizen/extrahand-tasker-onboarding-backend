@@ -805,6 +805,9 @@ class LeadService {
             if (filters.status) {
                 query.status = filters.status;
             }
+            if (filters.attempts) {
+                query.attempts = filters.attempts;
+            }
             this.applyLeadLocationFilters(query, {
                 city: filters.city,
                 locality: filters.locality,
@@ -1026,6 +1029,7 @@ class LeadService {
                 Lead_1.default.countDocuments({
                     ...baseQuery,
                     nextCallbackAt: { $lt: now },
+                    attempts: { $ne: 'max_reached' },
                 }),
                 Lead_1.default.countDocuments({
                     ...baseQuery,
@@ -1073,6 +1077,9 @@ class LeadService {
             else {
                 this.applyOwnerScope(query, filters.ownerBy, filters.ownerByAny);
             }
+            if (filters.attempts) {
+                query.attempts = filters.attempts;
+            }
             if (filters.dueType === 'callback') {
                 query.nextCallbackAt = { $exists: true, $ne: null };
             }
@@ -1112,7 +1119,7 @@ class LeadService {
                 if (bucket === 'today')
                     return item.dueAt >= startOfToday && item.dueAt <= endOfToday;
                 if (bucket === 'overdue')
-                    return item.dueAt < now;
+                    return item.dueAt < now && item.attempts !== 'max_reached';
                 if (bucket === 'upcoming')
                     return item.dueAt > endOfToday;
                 if (bucket === 'range') {
@@ -1201,9 +1208,9 @@ class LeadService {
             const callbackTotal = callbackItems.length;
             const onboardingTotal = onboardingItems.length;
             const callbackDueToday = callbackItems.filter((item) => item.dueAt >= startOfToday && item.dueAt <= endOfToday).length;
-            const callbackOverdue = callbackItems.filter((item) => item.dueAt < now).length;
+            const callbackOverdue = callbackItems.filter((item) => item.dueAt < now && item.attempts !== 'max_reached').length;
             const onboardingDueToday = onboardingItems.filter((item) => item.dueAt >= startOfToday && item.dueAt <= endOfToday).length;
-            const onboardingOverdue = onboardingItems.filter((item) => item.dueAt < now).length;
+            const onboardingOverdue = onboardingItems.filter((item) => item.dueAt < now && item.attempts !== 'max_reached').length;
             return {
                 callbackTotal,
                 onboardingTotal,
@@ -1246,17 +1253,15 @@ class LeadService {
                 leadMatch.gatedCommunityName = this.buildExactCaseInsensitiveMatch(filters.gatedCommunityName);
             }
             this.applyLeadLocationFilters(leadMatch, filters);
+            // Scope all stat cards to leads created in the selected date range,
+            // keeping parity with the leadsAdded count which also uses createdAt.
+            if (!filters.allTime && filters.from && filters.to) {
+                leadMatch.createdAt = { $gte: filters.from, $lte: filters.to };
+            }
             const basePipeline = [
                 { $match: leadMatch },
                 { $unwind: '$statusHistory' },
             ];
-            if (!filters.allTime && filters.from && filters.to) {
-                basePipeline.push({
-                    $match: {
-                        'statusHistory.changedAt': { $gte: filters.from, $lte: filters.to }
-                    }
-                });
-            }
             basePipeline.push({ $sort: { 'statusHistory.changedAt': 1 } });
             const latestStatusPipeline = [
                 ...basePipeline,
@@ -1572,6 +1577,7 @@ class LeadService {
         if (filters.gatedCommunityName) {
             leadMatch.gatedCommunityName = this.buildExactCaseInsensitiveMatch(filters.gatedCommunityName);
         }
+        this.applyLeadLocationFilters(leadMatch, filters);
         const leads = await Lead_1.default.find(leadMatch).sort({ createdAt: -1 }).lean();
         const reportRows = leads.map((lead) => {
             const latestHistory = [...(lead.statusHistory || [])].sort((a, b) => new Date(b.changedAt).getTime() - new Date(a.changedAt).getTime())[0];
@@ -1869,6 +1875,7 @@ class LeadService {
                 'landline',
                 'email',
                 'city',
+                'locality',
                 'state',
                 'address',
                 'pincode',
@@ -1883,10 +1890,46 @@ class LeadService {
                 'skills',
             ]);
             const hasProfileFieldChange = Object.keys(setData).some((key) => profileFieldKeys.has(key)) || Object.keys(unsetData).length > 0;
+            const buildFieldChanges = () => {
+                const fieldsToTrack = [
+                    'name',
+                    'phone',
+                    'landline',
+                    'email',
+                    'city',
+                    'locality',
+                    'state',
+                    'address',
+                    'pincode',
+                    'isGatedCommunity',
+                    'gatedCommunityName',
+                    'primarySkill',
+                    'secondarySkill',
+                    'source',
+                    'sourceDetails',
+                    'skills',
+                ];
+                return fieldsToTrack.reduce((changes, field) => {
+                    const hasSet = Object.prototype.hasOwnProperty.call(setData, field);
+                    const hasUnset = Object.prototype.hasOwnProperty.call(unsetData, field);
+                    if (!hasSet && !hasUnset)
+                        return changes;
+                    const previous = existingLead[field];
+                    const current = hasSet ? setData[field] : undefined;
+                    const changed = hasSet
+                        ? JSON.stringify(previous) !== JSON.stringify(current)
+                        : previous !== undefined;
+                    if (changed) {
+                        changes.push({ field, previous, current });
+                    }
+                    return changes;
+                }, []);
+            };
             if (hasProfileFieldChange && data._updatedBy) {
                 const editedAt = new Date();
                 setData.lastFieldEditedAt = editedAt;
             }
+            const fieldChanges = hasProfileFieldChange ? buildFieldChanges() : undefined;
             const updateQuery = {};
             if (Object.keys(setData).length > 0)
                 updateQuery.$set = setData;
@@ -1900,6 +1943,7 @@ class LeadService {
                         changedByName: data._updatedByName,
                         changedAt: new Date(),
                         notes: 'Lead details updated',
+                        fieldChanges: fieldChanges?.length ? fieldChanges : undefined,
                     },
                 };
             }
@@ -1968,6 +2012,12 @@ class LeadService {
             }
             else if (finalStatus === 'contacted_not_lifted') {
                 lead.lastNotLiftedBy = data.changedBy;
+            }
+            if (finalStatus === 'contacted_not_lifted') {
+                lead.attempts = data.attempts || undefined;
+            }
+            else {
+                lead.attempts = undefined;
             }
             lead.statusHistory.push({
                 status: finalStatus,

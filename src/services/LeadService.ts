@@ -76,6 +76,7 @@ export interface UpdateStatusData {
   statusReasonText?: string;
   callbackAt?: Date | string;
   expectedOnboardingAt?: Date | string;
+  attempts?: string;
   changedBy: string;
   changedByName?: string;
 }
@@ -111,6 +112,7 @@ export interface SearchFilters {
   unclaimed?: boolean;
   /** When true, only leads that have been claimed (pickedBy set) */
   claimed?: boolean;
+  attempts?: string;
 }
 
 export interface CallbackQueueFilters {
@@ -149,6 +151,7 @@ export interface FollowUpQueueFilters {
   endDate?: Date;
   dueType?: FollowUpDueType;
   bucket?: FollowUpBucket;
+  attempts?: string;
   page?: number;
   limit?: number;
 }
@@ -1206,6 +1209,10 @@ export class LeadService {
         query.status = filters.status;
       }
 
+      if (filters.attempts) {
+        query.attempts = filters.attempts;
+      }
+
       this.applyLeadLocationFilters(query, {
         city: filters.city,
         locality: filters.locality,
@@ -1452,6 +1459,7 @@ export class LeadService {
         Lead.countDocuments({
           ...baseQuery,
           nextCallbackAt: { $lt: now },
+          attempts: { $ne: 'max_reached' },
         }),
         Lead.countDocuments({
           ...baseQuery,
@@ -1507,6 +1515,10 @@ export class LeadService {
         this.applyOwnerScope(query, filters.ownerBy, filters.ownerByAny);
       }
 
+      if (filters.attempts) {
+        query.attempts = filters.attempts;
+      }
+
       if (filters.dueType === 'callback') {
         query.nextCallbackAt = { $exists: true, $ne: null };
       } else if (filters.dueType === 'onboarding') {
@@ -1546,7 +1558,7 @@ export class LeadService {
       const bucket = filters.bucket || 'all';
       items = items.filter((item) => {
         if (bucket === 'today') return item.dueAt >= startOfToday && item.dueAt <= endOfToday;
-        if (bucket === 'overdue') return item.dueAt < now;
+        if (bucket === 'overdue') return item.dueAt < now && item.attempts !== 'max_reached';
         if (bucket === 'upcoming') return item.dueAt > endOfToday;
         if (bucket === 'range') {
           if (filters.startDate && item.dueAt < filters.startDate) return false;
@@ -1642,9 +1654,9 @@ export class LeadService {
       const callbackTotal = callbackItems.length;
       const onboardingTotal = onboardingItems.length;
       const callbackDueToday = callbackItems.filter((item) => item.dueAt >= startOfToday && item.dueAt <= endOfToday).length;
-      const callbackOverdue = callbackItems.filter((item) => item.dueAt < now).length;
+      const callbackOverdue = callbackItems.filter((item) => item.dueAt < now && item.attempts !== 'max_reached').length;
       const onboardingDueToday = onboardingItems.filter((item) => item.dueAt >= startOfToday && item.dueAt <= endOfToday).length;
-      const onboardingOverdue = onboardingItems.filter((item) => item.dueAt < now).length;
+      const onboardingOverdue = onboardingItems.filter((item) => item.dueAt < now && item.attempts !== 'max_reached').length;
 
       return {
         callbackTotal,
@@ -2559,6 +2571,12 @@ export class LeadService {
         lead.lastNotInterestedBy = data.changedBy;
       } else if (finalStatus === 'contacted_not_lifted') {
         lead.lastNotLiftedBy = data.changedBy;
+      }
+
+      if (finalStatus === 'contacted_not_lifted') {
+        lead.attempts = data.attempts || undefined;
+      } else {
+        lead.attempts = undefined;
       }
 
       lead.statusHistory.push({

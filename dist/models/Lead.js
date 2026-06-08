@@ -232,6 +232,11 @@ const LeadSchema = new mongoose_1.Schema({
             changedByName: String,
             changedAt: { type: Date, default: Date.now },
             notes: String,
+            fieldChanges: [{
+                    field: String,
+                    previous: mongoose_1.Schema.Types.Mixed,
+                    current: mongoose_1.Schema.Types.Mixed,
+                }],
             statusReasonCode: String,
             statusReasonText: String,
             callbackAt: Date,
@@ -327,6 +332,11 @@ const LeadSchema = new mongoose_1.Schema({
     },
     lastNotLiftedBy: {
         type: String,
+        index: true
+    },
+    attempts: {
+        type: String,
+        enum: ['1', '2', '3', '4', 'max_reached'],
         index: true
     },
     lastUpdatedBy: {

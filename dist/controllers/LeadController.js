@@ -742,7 +742,7 @@ class LeadController {
                 });
                 return;
             }
-            const { status, city, primarySkill, source, addedBy, pickedBy, transferPendingTo, ownerBy, search, startDate, endDate, page, limit, registrationStatus, statusChangedBy, unclaimed, claimed, locality, localArea, } = req.query;
+            const { status, city, primarySkill, source, addedBy, pickedBy, transferPendingTo, ownerBy, search, startDate, endDate, page, limit, registrationStatus, statusChangedBy, unclaimed, claimed, locality, localArea, attempts, } = req.query;
             const role = req.admin.role;
             const filters = {
                 status: status,
@@ -764,6 +764,7 @@ class LeadController {
                 statusChangedBy: statusChangedBy,
                 unclaimed: unclaimed === 'true' || unclaimed === '1',
                 claimed: claimed === 'true' || claimed === '1',
+                attempts: attempts,
             };
             // Expand single id to userId + uid for owner/picked filters.
             const scopedIds = getScopedAddedByIds(req);
@@ -907,7 +908,7 @@ class LeadController {
                 });
                 return;
             }
-            const { city, primarySkill, startDate, endDate, dueType, bucket, page, limit, pickedBy, ownerBy, } = req.query;
+            const { city, primarySkill, startDate, endDate, dueType, bucket, page, limit, pickedBy, ownerBy, attempts, } = req.query;
             const role = req.admin.role;
             const scopedIds = getScopedAddedByIds(req);
             const rawStartDate = startDate;
@@ -925,6 +926,7 @@ class LeadController {
                 endDate: parsedEndDate,
                 dueType: dueType || 'all',
                 bucket: bucket || 'all',
+                attempts: attempts,
                 page: page ? parseInt(page) : undefined,
                 limit: limit ? parseInt(limit) : undefined,
             };
@@ -1353,7 +1355,7 @@ class LeadController {
                 return;
             }
             const { leadId } = req.params;
-            const { status, notes, statusReasonCode, statusReasonText, callbackAt, expectedOnboardingAt } = req.body;
+            const { status, notes, statusReasonCode, statusReasonText, callbackAt, expectedOnboardingAt, attempts } = req.body;
             if (!status) {
                 res.status(400).json({
                     success: false,
@@ -1385,6 +1387,7 @@ class LeadController {
                 statusReasonText,
                 callbackAt,
                 expectedOnboardingAt,
+                attempts,
                 changedBy: req.admin.uid || req.admin?.userId || "",
                 changedByName: req.admin.name
             };

@@ -64,6 +64,7 @@ export interface UpdateStatusData {
     statusReasonText?: string;
     callbackAt?: Date | string;
     expectedOnboardingAt?: Date | string;
+    attempts?: string;
     changedBy: string;
     changedByName?: string;
 }
@@ -97,6 +98,7 @@ export interface SearchFilters {
     unclaimed?: boolean;
     /** When true, only leads that have been claimed (pickedBy set) */
     claimed?: boolean;
+    attempts?: string;
 }
 export interface CallbackQueueFilters {
     city?: string;
@@ -131,6 +133,7 @@ export interface FollowUpQueueFilters {
     endDate?: Date;
     dueType?: FollowUpDueType;
     bucket?: FollowUpBucket;
+    attempts?: string;
     page?: number;
     limit?: number;
 }

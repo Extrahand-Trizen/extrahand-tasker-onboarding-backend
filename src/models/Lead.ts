@@ -177,6 +177,7 @@ export interface ILead extends Document {
   lastInterestedBy?: string;
   lastNotInterestedBy?: string;
   lastNotLiftedBy?: string;
+  attempts?: string;
   /** Tracks who last edited lead fields (name, phone, city, etc.) */
   lastUpdatedBy?: string;
   lastUpdatedByName?: string;
@@ -508,6 +509,11 @@ const LeadSchema = new Schema<ILead>({
   },
   lastNotLiftedBy: {
     type: String,
+    index: true
+  },
+  attempts: {
+    type: String,
+    enum: ['1', '2', '3', '4', 'max_reached'],
     index: true
   },
   lastUpdatedBy: {

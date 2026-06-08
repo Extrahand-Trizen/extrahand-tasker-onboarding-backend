@@ -884,6 +884,7 @@ export class LeadController {
         claimed,
         locality,
         localArea,
+        attempts,
       } = req.query;
 
       const role = req.admin.role as UserRole;
@@ -908,6 +909,7 @@ export class LeadController {
         statusChangedBy: statusChangedBy as string,
         unclaimed: unclaimed === 'true' || unclaimed === '1',
         claimed: claimed === 'true' || claimed === '1',
+        attempts: attempts as string,
       };
 
       // Expand single id to userId + uid for owner/picked filters.
@@ -1074,6 +1076,7 @@ export class LeadController {
         limit,
         pickedBy,
         ownerBy,
+        attempts,
       } = req.query;
       const role = req.admin.role as UserRole;
       const scopedIds = getScopedAddedByIds(req);
@@ -1094,6 +1097,7 @@ export class LeadController {
         endDate: parsedEndDate,
         dueType: (dueType as FollowUpQueueFilters['dueType']) || 'all',
         bucket: (bucket as FollowUpQueueFilters['bucket']) || 'all',
+        attempts: attempts as string,
         page: page ? parseInt(page as string) : undefined,
         limit: limit ? parseInt(limit as string) : undefined,
       };
@@ -1581,7 +1585,7 @@ export class LeadController {
       }
 
       const { leadId } = req.params;
-      const { status, notes, statusReasonCode, statusReasonText, callbackAt, expectedOnboardingAt } = req.body;
+      const { status, notes, statusReasonCode, statusReasonText, callbackAt, expectedOnboardingAt, attempts } = req.body;
 
       if (!status) {
         res.status(400).json({
@@ -1618,6 +1622,7 @@ export class LeadController {
         statusReasonText,
         callbackAt,
         expectedOnboardingAt,
+        attempts,
         changedBy: req.admin.uid || req.admin?.userId || "" ,
         changedByName: req.admin.name
       };

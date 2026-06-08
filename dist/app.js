@@ -30,18 +30,24 @@ app.use((0, helmet_1.default)());
 const corsOrigins = env_1.env.CORS_ORIGIN
     ? env_1.env.CORS_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean)
     : [];
-// CORS
+// CORS — use callback(null, false) for disallowed origins so preflight still gets a clean response
 app.use((0, cors_1.default)({
     origin: (origin, callback) => {
         if (!origin) {
             callback(null, true);
             return;
         }
+        if (corsOrigins.length === 0) {
+            logger_1.default.warn('CORS_ORIGIN is not set; blocking cross-origin browser requests', { origin });
+            callback(null, false);
+            return;
+        }
         if (corsOrigins.includes('*') || corsOrigins.includes(origin)) {
             callback(null, true);
             return;
         }
-        callback(new Error(`CORS blocked for origin: ${origin}`));
+        logger_1.default.warn('CORS blocked for origin', { origin, allowedOrigins: corsOrigins });
+        callback(null, false);
     },
     credentials: true,
 }));
