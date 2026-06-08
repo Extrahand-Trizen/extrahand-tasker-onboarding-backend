@@ -1701,18 +1701,16 @@ export class LeadService {
       }
       this.applyLeadLocationFilters(leadMatch, filters);
 
+      // Scope all stat cards to leads created in the selected date range,
+      // keeping parity with the leadsAdded count which also uses createdAt.
+      if (!filters.allTime && filters.from && filters.to) {
+        leadMatch.createdAt = { $gte: filters.from, $lte: filters.to };
+      }
+
       const basePipeline: any[] = [
         { $match: leadMatch },
         { $unwind: '$statusHistory' },
       ];
-
-      if (!filters.allTime && filters.from && filters.to) {
-        basePipeline.push({
-          $match: {
-            'statusHistory.changedAt': { $gte: filters.from, $lte: filters.to }
-          }
-        });
-      }
 
       basePipeline.push({ $sort: { 'statusHistory.changedAt': 1 } });
 
