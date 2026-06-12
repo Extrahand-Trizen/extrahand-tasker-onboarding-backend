@@ -2503,7 +2503,7 @@ class LeadService {
         }
     }
     static async getPerformanceOverview() {
-        const users = await AdminUser_1.default.find({ role: { $in: ['qualifier', 'onboarder'] } }).lean();
+        const users = await AdminUser_1.default.find({ role: { $in: ['qualifier', 'onboarder'] }, status: 'active' }).lean();
         const now = new Date();
         const userLocations = {
             "Rahul Mehta": "Mumbai",
@@ -2623,7 +2623,7 @@ class LeadService {
         const claims = await Lead_1.default.countDocuments(this.buildIdSelector('addedBy', identityIds));
         const currentClaims = await Lead_1.default.countDocuments(this.buildIdSelector('pickedBy', identityIds));
         // Get ranking on team by claims (currentClaims for onboarder, claims for qualifier)
-        const allUsers = await AdminUser_1.default.find({ role: user.role }).lean();
+        const allUsers = await AdminUser_1.default.find({ role: user.role, status: 'active' }).lean();
         const allUsersClaims = await Promise.all(allUsers.map(async (u) => {
             const scopedIds = this.getAdminIdentityIds(u);
             const uClaims = await Lead_1.default.countDocuments(user.role === 'onboarder'

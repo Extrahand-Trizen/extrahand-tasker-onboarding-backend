@@ -3242,7 +3242,7 @@ export class LeadService {
   }
 
   static async getPerformanceOverview(): Promise<any> {
-    const users = await AdminUser.find({ role: { $in: ['qualifier', 'onboarder'] } }).lean();
+    const users = await AdminUser.find({ role: { $in: ['qualifier', 'onboarder'] }, status: 'active' }).lean();
     const now = new Date();
 
     const userLocations: Record<string, string> = {
@@ -3387,7 +3387,7 @@ export class LeadService {
     const currentClaims = await Lead.countDocuments(this.buildIdSelector('pickedBy', identityIds));
 
     // Get ranking on team by claims (currentClaims for onboarder, claims for qualifier)
-    const allUsers = await AdminUser.find({ role: user.role }).lean();
+    const allUsers = await AdminUser.find({ role: user.role, status: 'active' }).lean();
     const allUsersClaims = await Promise.all(
       allUsers.map(async (u) => {
         const scopedIds = this.getAdminIdentityIds(u);
