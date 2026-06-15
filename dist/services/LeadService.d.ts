@@ -288,7 +288,11 @@ export declare class LeadService {
         limit: number;
         totalPages: number;
     }>;
-    static getFollowUpQueueStats(filters: Pick<FollowUpQueueFilters, 'addedBy' | 'addedByAny' | 'ownerBy' | 'ownerByAny' | 'pickedBy' | 'followUpOwnerBy' | 'followUpOwnerByAny'>): Promise<FollowUpQueueStats>;
+    static getFollowUpQueueStats(filters: Pick<FollowUpQueueFilters, 'addedBy' | 'addedByAny' | 'ownerBy' | 'ownerByAny' | 'pickedBy' | 'followUpOwnerBy' | 'followUpOwnerByAny'> & {
+        from?: Date;
+        to?: Date;
+        allTime?: boolean;
+    }): Promise<FollowUpQueueStats>;
     static getStatusAnalytics(filters: StatusAnalyticsFilters): Promise<{
         leadsAdded: number;
         touchedLeads: number;

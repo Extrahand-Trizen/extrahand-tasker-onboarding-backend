@@ -1591,7 +1591,16 @@ export class LeadService {
   }
 
   static async getFollowUpQueueStats(
-    filters: Pick<FollowUpQueueFilters, 'addedBy' | 'addedByAny' | 'ownerBy' | 'ownerByAny' | 'pickedBy' | 'followUpOwnerBy' | 'followUpOwnerByAny'>
+    filters: Pick<
+      FollowUpQueueFilters,
+      | 'addedBy'
+      | 'addedByAny'
+      | 'ownerBy'
+      | 'ownerByAny'
+      | 'pickedBy'
+      | 'followUpOwnerBy'
+      | 'followUpOwnerByAny'
+    > & { from?: Date; to?: Date; allTime?: boolean }
   ): Promise<FollowUpQueueStats> {
     try {
       const now = new Date();
@@ -1651,12 +1660,19 @@ export class LeadService {
       const callbackItems = items.filter((item) => item.dueType === 'callback');
       const onboardingItems = items.filter((item) => item.dueType === 'onboarding');
 
-      const callbackTotal = callbackItems.length;
-      const onboardingTotal = onboardingItems.length;
-      const callbackDueToday = callbackItems.filter((item) => item.dueAt >= startOfToday && item.dueAt <= endOfToday).length;
-      const callbackOverdue = callbackItems.filter((item) => item.dueAt < now && item.attempts !== 'max_reached').length;
-      const onboardingDueToday = onboardingItems.filter((item) => item.dueAt >= startOfToday && item.dueAt <= endOfToday).length;
-      const onboardingOverdue = onboardingItems.filter((item) => item.dueAt < now && item.attempts !== 'max_reached').length;
+      const filteredCallbackItems = !filters.allTime && filters.from && filters.to
+        ? callbackItems.filter((item) => item.dueAt >= filters.from! && item.dueAt <= filters.to!)
+        : callbackItems;
+      const filteredOnboardingItems = !filters.allTime && filters.from && filters.to
+        ? onboardingItems.filter((item) => item.dueAt >= filters.from! && item.dueAt <= filters.to!)
+        : onboardingItems;
+
+      const callbackTotal = filteredCallbackItems.length;
+      const onboardingTotal = filteredOnboardingItems.length;
+      const callbackDueToday = filteredCallbackItems.filter((item) => item.dueAt >= startOfToday && item.dueAt <= endOfToday).length;
+      const callbackOverdue = filteredCallbackItems.filter((item) => item.dueAt < now && item.attempts !== 'max_reached').length;
+      const onboardingDueToday = filteredOnboardingItems.filter((item) => item.dueAt >= startOfToday && item.dueAt <= endOfToday).length;
+      const onboardingOverdue = filteredOnboardingItems.filter((item) => item.dueAt < now && item.attempts !== 'max_reached').length;
 
       return {
         callbackTotal,
@@ -3384,18 +3400,26 @@ export class LeadService {
     };
 
     const claims = await Lead.countDocuments(this.buildIdSelector('addedBy', identityIds));
-    const currentClaims = await Lead.countDocuments(this.buildIdSelector('pickedBy', identityIds));
+    const currentClaims = await Lead.countDocuments({
+      ...this.buildIdSelector('pickedBy', identityIds),
+      ...(!filters.allTime && filters.from && filters.to ? { pickedAt: { $gte: filters.from, $lte: filters.to } } : {})
+    });
 
     // Get ranking on team by claims (currentClaims for onboarder, claims for qualifier)
     const allUsers = await AdminUser.find({ role: user.role, status: 'active' }).lean();
     const allUsersClaims = await Promise.all(
       allUsers.map(async (u) => {
         const scopedIds = this.getAdminIdentityIds(u);
-        const uClaims = await Lead.countDocuments(
-          user.role === 'onboarder'
+        const uClaims = await Lead.countDocuments({
+          ...(user.role === 'onboarder'
             ? this.buildIdSelector('pickedBy', scopedIds)
-            : this.buildIdSelector('addedBy', scopedIds)
-        );
+            : this.buildIdSelector('addedBy', scopedIds)),
+          ...(!filters.allTime && filters.from && filters.to
+            ? (user.role === 'onboarder'
+                ? { pickedAt: { $gte: filters.from, $lte: filters.to } }
+                : { createdAt: { $gte: filters.from, $lte: filters.to } })
+            : {})
+        });
         return { userId: u.userId, claims: uClaims };
       })
     );
@@ -3471,6 +3495,9 @@ export class LeadService {
 
       const followUpStats = await this.getFollowUpQueueStats({
         followUpOwnerByAny: identityIds,
+        from: filters.from,
+        to: filters.to,
+        allTime: filters.allTime,
       });
       const totalFollowUps = followUpStats.totalFollowUps;
       const overdue = followUpStats.callbackOverdue + followUpStats.onboardingOverdue;

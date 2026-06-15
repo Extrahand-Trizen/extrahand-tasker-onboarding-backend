@@ -1102,7 +1102,11 @@ class LeadController {
                 });
                 return;
             }
-            if (req.admin.role !== 'lead_access_manager') {
+            const requesterUserId = getUserId(req);
+            const isLeadAccessManager = req.admin.role === 'lead_access_manager';
+            const { userId, from, to, allTime } = req.query;
+            const isRequestingOwnPerformance = userId && requesterUserId && (String(userId) === String(requesterUserId));
+            if (!isLeadAccessManager && !isRequestingOwnPerformance) {
                 res.status(403).json({
                     success: false,
                     error: 'Forbidden',
@@ -1110,7 +1114,6 @@ class LeadController {
                 });
                 return;
             }
-            const { userId, from, to, allTime } = req.query;
             if (userId) {
                 const isAllTime = String(allTime) === 'true';
                 const defaultFrom = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);

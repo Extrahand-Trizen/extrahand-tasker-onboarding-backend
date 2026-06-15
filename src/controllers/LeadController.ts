@@ -1283,7 +1283,13 @@ export class LeadController {
         return;
       }
 
-      if (req.admin.role !== 'lead_access_manager') {
+      const requesterUserId = getUserId(req);
+      const isLeadAccessManager = req.admin.role === 'lead_access_manager';
+      const { userId, from, to, allTime } = req.query;
+
+      const isRequestingOwnPerformance = userId && requesterUserId && (String(userId) === String(requesterUserId));
+
+      if (!isLeadAccessManager && !isRequestingOwnPerformance) {
         res.status(403).json({
           success: false,
           error: 'Forbidden',
@@ -1291,8 +1297,6 @@ export class LeadController {
         });
         return;
       }
-
-      const { userId, from, to, allTime } = req.query;
 
       if (userId) {
         const isAllTime = String(allTime) === 'true';
