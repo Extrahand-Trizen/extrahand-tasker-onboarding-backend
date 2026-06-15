@@ -173,6 +173,7 @@ export interface FollowUpQueueStats {
   onboardingDueToday: number;
   onboardingOverdue: number;
   totalFollowUps: number;
+  rangeCount?: number;
 }
 
 export interface StatusAnalyticsFilters {
@@ -1591,16 +1592,8 @@ export class LeadService {
   }
 
   static async getFollowUpQueueStats(
-    filters: Pick<
-      FollowUpQueueFilters,
-      | 'addedBy'
-      | 'addedByAny'
-      | 'ownerBy'
-      | 'ownerByAny'
-      | 'pickedBy'
-      | 'followUpOwnerBy'
-      | 'followUpOwnerByAny'
-    > & { from?: Date; to?: Date; allTime?: boolean }
+    filters: Pick<FollowUpQueueFilters, 'addedBy' | 'addedByAny' | 'ownerBy' | 'ownerByAny' | 'pickedBy' | 'followUpOwnerBy' | 'followUpOwnerByAny'>,
+    dateRange?: { from?: Date; to?: Date }
   ): Promise<FollowUpQueueStats> {
     try {
       const now = new Date();
@@ -1660,19 +1653,16 @@ export class LeadService {
       const callbackItems = items.filter((item) => item.dueType === 'callback');
       const onboardingItems = items.filter((item) => item.dueType === 'onboarding');
 
-      const filteredCallbackItems = !filters.allTime && filters.from && filters.to
-        ? callbackItems.filter((item) => item.dueAt >= filters.from! && item.dueAt <= filters.to!)
-        : callbackItems;
-      const filteredOnboardingItems = !filters.allTime && filters.from && filters.to
-        ? onboardingItems.filter((item) => item.dueAt >= filters.from! && item.dueAt <= filters.to!)
-        : onboardingItems;
+      const callbackTotal = callbackItems.length;
+      const onboardingTotal = onboardingItems.length;
+      const callbackDueToday = callbackItems.filter((item) => item.dueAt >= startOfToday && item.dueAt <= endOfToday).length;
+      const callbackOverdue = callbackItems.filter((item) => item.dueAt < now && item.attempts !== 'max_reached').length;
+      const onboardingDueToday = onboardingItems.filter((item) => item.dueAt >= startOfToday && item.dueAt <= endOfToday).length;
+      const onboardingOverdue = onboardingItems.filter((item) => item.dueAt < now && item.attempts !== 'max_reached').length;
 
-      const callbackTotal = filteredCallbackItems.length;
-      const onboardingTotal = filteredOnboardingItems.length;
-      const callbackDueToday = filteredCallbackItems.filter((item) => item.dueAt >= startOfToday && item.dueAt <= endOfToday).length;
-      const callbackOverdue = filteredCallbackItems.filter((item) => item.dueAt < now && item.attempts !== 'max_reached').length;
-      const onboardingDueToday = filteredOnboardingItems.filter((item) => item.dueAt >= startOfToday && item.dueAt <= endOfToday).length;
-      const onboardingOverdue = filteredOnboardingItems.filter((item) => item.dueAt < now && item.attempts !== 'max_reached').length;
+      const rangeCount = dateRange && dateRange.from && dateRange.to
+        ? items.filter((item) => item.dueAt >= dateRange.from! && item.dueAt <= dateRange.to!).length
+        : undefined;
 
       return {
         callbackTotal,
@@ -1682,6 +1672,7 @@ export class LeadService {
         onboardingDueToday,
         onboardingOverdue,
         totalFollowUps: callbackTotal + onboardingTotal,
+        rangeCount,
       };
     } catch (error: any) {
       logger.error('Error fetching follow-up queue stats', {
@@ -3493,13 +3484,13 @@ export class LeadService {
         dateQuery.updatedAt = { $gte: filters.from, $lte: filters.to };
       }
 
-      const followUpStats = await this.getFollowUpQueueStats({
-        followUpOwnerByAny: identityIds,
-        from: filters.from,
-        to: filters.to,
-        allTime: filters.allTime,
-      });
-      const totalFollowUps = followUpStats.totalFollowUps;
+      const followUpStats = await this.getFollowUpQueueStats(
+        { followUpOwnerByAny: identityIds },
+        !filters.allTime ? { from: filters.from, to: filters.to } : undefined
+      );
+      const totalFollowUps = !filters.allTime && followUpStats.rangeCount !== undefined
+        ? followUpStats.rangeCount
+        : followUpStats.totalFollowUps;
       const overdue = followUpStats.callbackOverdue + followUpStats.onboardingOverdue;
       const dueToday = followUpStats.callbackDueToday + followUpStats.onboardingDueToday;
 
