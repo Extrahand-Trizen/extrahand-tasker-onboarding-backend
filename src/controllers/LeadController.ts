@@ -1402,11 +1402,11 @@ export class LeadController {
         return;
       }
 
-      if (!['touched_leads', 'interested', 'callback_scheduled', 'callback_overdue'].includes(String(reportCategory))) {
+      if (!['touched_leads', 'interested', 'callback_scheduled', 'callback_overdue', 'onboarded'].includes(String(reportCategory))) {
         res.status(400).json({
           success: false,
           error: 'Invalid report category',
-          message: 'reportCategory must be touched_leads, interested, callback_scheduled, or callback_overdue'
+          message: 'reportCategory must be touched_leads, interested, callback_scheduled, callback_overdue, or onboarded'
         });
         return;
       }
@@ -1441,7 +1441,7 @@ export class LeadController {
         to: parsedRange.to,
         format: format as 'csv' | 'xlsx',
         template: template as 'eod' | 'detailed',
-        reportCategory: reportCategory as 'touched_leads' | 'interested' | 'callback_scheduled' | 'callback_overdue',
+        reportCategory: reportCategory as 'touched_leads' | 'interested' | 'callback_scheduled' | 'callback_overdue' | 'onboarded',
         includeNotes: String(includeNotes) === 'true',
         category: category ? String(category) : undefined,
         exportLayout: exportLayout === 'qualifier' ? 'qualifier' : 'standard',

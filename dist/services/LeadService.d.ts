@@ -153,6 +153,7 @@ export interface FollowUpQueueStats {
     onboardingDueToday: number;
     onboardingOverdue: number;
     totalFollowUps: number;
+    rangeCount?: number;
 }
 export interface StatusAnalyticsFilters {
     from?: Date;
@@ -167,7 +168,7 @@ export interface StatusAnalyticsFilters {
     locality?: string;
     localArea?: string;
 }
-export type StatusReportCategory = 'touched_leads' | 'interested' | 'callback_scheduled' | 'callback_overdue';
+export type StatusReportCategory = 'touched_leads' | 'interested' | 'callback_scheduled' | 'callback_overdue' | 'onboarded';
 export interface StatusReportExportFilters extends StatusAnalyticsFilters {
     format: 'csv' | 'xlsx';
     template: 'eod' | 'detailed';
@@ -288,10 +289,9 @@ export declare class LeadService {
         limit: number;
         totalPages: number;
     }>;
-    static getFollowUpQueueStats(filters: Pick<FollowUpQueueFilters, 'addedBy' | 'addedByAny' | 'ownerBy' | 'ownerByAny' | 'pickedBy' | 'followUpOwnerBy' | 'followUpOwnerByAny'> & {
+    static getFollowUpQueueStats(filters: Pick<FollowUpQueueFilters, 'addedBy' | 'addedByAny' | 'ownerBy' | 'ownerByAny' | 'pickedBy' | 'followUpOwnerBy' | 'followUpOwnerByAny'>, dateRange?: {
         from?: Date;
         to?: Date;
-        allTime?: boolean;
     }): Promise<FollowUpQueueStats>;
     static getStatusAnalytics(filters: StatusAnalyticsFilters): Promise<{
         leadsAdded: number;
@@ -314,6 +314,14 @@ export declare class LeadService {
             category: string;
             count: number;
         }>;
+        onboardedCategoryBreakdown?: Array<{
+            category: string;
+            count: number;
+        }>;
+        interestedCategoryBreakdown?: Array<{
+            category: string;
+            count: number;
+        }>;
     }>;
     static exportStatusReport(filters: StatusReportExportFilters): Promise<{
         filename: string;
@@ -322,6 +330,7 @@ export declare class LeadService {
         rowCount: number;
     }>;
     private static exportLeadsAddedStandardReport;
+    private static exportOnboardedReport;
     private static exportQualifierStatusReport;
     /**
      * Update lead
