@@ -1194,11 +1194,11 @@ class LeadController {
                 });
                 return;
             }
-            if (!['touched_leads', 'interested', 'callback_scheduled', 'callback_overdue', 'onboarded'].includes(String(reportCategory))) {
+            if (!['touched_leads', 'interested', 'callback_scheduled', 'callback_overdue', 'onboarded', 'verified'].includes(String(reportCategory))) {
                 res.status(400).json({
                     success: false,
                     error: 'Invalid report category',
-                    message: 'reportCategory must be touched_leads, interested, callback_scheduled, callback_overdue, or onboarded'
+                    message: 'reportCategory must be touched_leads, interested, callback_scheduled, callback_overdue, onboarded, or verified'
                 });
                 return;
             }

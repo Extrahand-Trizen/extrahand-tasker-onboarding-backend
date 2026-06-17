@@ -168,7 +168,7 @@ export interface StatusAnalyticsFilters {
     locality?: string;
     localArea?: string;
 }
-export type StatusReportCategory = 'touched_leads' | 'interested' | 'callback_scheduled' | 'callback_overdue' | 'onboarded';
+export type StatusReportCategory = 'touched_leads' | 'interested' | 'callback_scheduled' | 'callback_overdue' | 'onboarded' | 'verified';
 export interface StatusReportExportFilters extends StatusAnalyticsFilters {
     format: 'csv' | 'xlsx';
     template: 'eod' | 'detailed';
@@ -301,6 +301,7 @@ export declare class LeadService {
         callbackScheduled: number;
         callbackOverdue: number;
         onboarded: number;
+        verified: number;
         statusCounts: Array<{
             status: string;
             count: number;
@@ -318,6 +319,10 @@ export declare class LeadService {
             category: string;
             count: number;
         }>;
+        verifiedCategoryBreakdown?: Array<{
+            category: string;
+            count: number;
+        }>;
         interestedCategoryBreakdown?: Array<{
             category: string;
             count: number;
@@ -331,6 +336,7 @@ export declare class LeadService {
     }>;
     private static exportLeadsAddedStandardReport;
     private static exportOnboardedReport;
+    private static exportVerifiedReport;
     private static exportQualifierStatusReport;
     /**
      * Update lead

@@ -278,7 +278,6 @@ class LeadService {
     static buildRegisteredOnlyPredicate() {
         return {
             ...this.buildRegisteredPredicate(),
-            $nor: [this.buildVerifiedPredicate()],
         };
     }
     static getAdminIdentityIds(user) {
@@ -1285,6 +1284,10 @@ class LeadService {
             const onboardedScopeMatch = Object.keys(leadMatch).length > 0
                 ? { $and: [leadMatch, registeredOnlyPredicate] }
                 : registeredOnlyPredicate;
+            const verifiedPredicate = this.buildVerifiedPredicate();
+            const verifiedScopeMatch = Object.keys(leadMatch).length > 0
+                ? { $and: [leadMatch, verifiedPredicate] }
+                : verifiedPredicate;
             const onboardedPromise = filters.allTime || !filters.from || !filters.to
                 ? Lead_1.default.countDocuments(onboardedScopeMatch)
                 : Lead_1.default.aggregate([
@@ -1338,7 +1341,60 @@ class LeadService {
                     },
                     { $sort: { count: -1 } },
                 ]);
-            const [statusCountsRaw, touchedRaw, qualifierRaw, callbackScheduledRaw, callbackOverdueRaw, onboardedRaw, onboardedCategoryBreakdownRaw, interestedCategoryBreakdownRaw,] = await Promise.all([
+            const verifiedPromise = filters.allTime || !filters.from || !filters.to
+                ? Lead_1.default.countDocuments(verifiedScopeMatch)
+                : Lead_1.default.aggregate([
+                    { $match: leadMatch },
+                    { $match: verifiedPredicate },
+                    { $unwind: '$statusHistory' },
+                    {
+                        $match: {
+                            'statusHistory.changedAt': { $gte: filters.from, $lte: filters.to },
+                        },
+                    },
+                    {
+                        $group: {
+                            _id: '$leadId',
+                        },
+                    },
+                    { $count: 'count' },
+                ]);
+            const verifiedCategoryBreakdownPromise = filters.allTime || !filters.from || !filters.to
+                ? Lead_1.default.aggregate([
+                    { $match: verifiedScopeMatch },
+                    {
+                        $group: {
+                            _id: { $ifNull: ['$primaryCategory', { $ifNull: ['$primarySkill', 'other'] }] },
+                            count: { $sum: 1 },
+                        },
+                    },
+                    { $sort: { count: -1 } },
+                ])
+                : Lead_1.default.aggregate([
+                    { $match: leadMatch },
+                    { $match: verifiedPredicate },
+                    { $unwind: '$statusHistory' },
+                    {
+                        $match: {
+                            'statusHistory.changedAt': { $gte: filters.from, $lte: filters.to },
+                        },
+                    },
+                    {
+                        $group: {
+                            _id: '$leadId',
+                            primaryCategory: { $first: '$primaryCategory' },
+                            primarySkill: { $first: '$primarySkill' },
+                        },
+                    },
+                    {
+                        $group: {
+                            _id: { $ifNull: ['$primaryCategory', { $ifNull: ['$primarySkill', 'other'] }] },
+                            count: { $sum: 1 },
+                        },
+                    },
+                    { $sort: { count: -1 } },
+                ]);
+            const [statusCountsRaw, touchedRaw, qualifierRaw, callbackScheduledRaw, callbackOverdueRaw, onboardedRaw, onboardedCategoryBreakdownRaw, verifiedRaw, verifiedCategoryBreakdownRaw, interestedCategoryBreakdownRaw,] = await Promise.all([
                 Lead_1.default.aggregate([
                     ...latestStatusPipeline,
                     {
@@ -1392,6 +1448,8 @@ class LeadService {
                 ]),
                 onboardedPromise,
                 onboardedCategoryBreakdownPromise,
+                verifiedPromise,
+                verifiedCategoryBreakdownPromise,
                 // Interested category breakdown — self-contained pipeline that keeps primaryCategory
                 Lead_1.default.aggregate([
                     { $match: leadMatch },
@@ -1433,6 +1491,13 @@ class LeadService {
                 category: row._id,
                 count: row.count,
             }));
+            const verified = typeof verifiedRaw === 'number'
+                ? verifiedRaw
+                : verifiedRaw[0]?.count || 0;
+            const verifiedCategoryBreakdown = (verifiedCategoryBreakdownRaw || []).map((row) => ({
+                category: row._id,
+                count: row.count,
+            }));
             const leadsAddedMatch = {};
             if (userId) {
                 leadsAddedMatch.addedBy = userId;
@@ -1471,6 +1536,7 @@ class LeadService {
                 callbackScheduled: callbackScheduledRaw[0]?.count || 0,
                 callbackOverdue,
                 onboarded,
+                verified,
                 statusCounts,
                 qualifierBreakdown: qualifierRaw.map((row) => ({
                     qualifierId: row.qualifierId,
@@ -1479,6 +1545,7 @@ class LeadService {
                 })),
                 categoryBreakdown,
                 onboardedCategoryBreakdown,
+                verifiedCategoryBreakdown,
                 interestedCategoryBreakdown: (interestedCategoryBreakdownRaw || []).map((row) => ({
                     category: row._id,
                     count: row.count,
@@ -1527,6 +1594,10 @@ class LeadService {
             // "Onboarded" export: matches the analytics card — filter by createdAt + registeredOnlyPredicate
             if (filters.reportCategory === 'onboarded') {
                 return this.exportOnboardedReport(filters);
+            }
+            // "Verified" export: matches the analytics card — filter by createdAt + verifiedPredicate
+            if (filters.reportCategory === 'verified') {
+                return this.exportVerifiedReport(filters);
             }
             const now = new Date();
             const rows = await Lead_1.default.aggregate([
@@ -1799,6 +1870,95 @@ class LeadService {
         xlsx_1.default.utils.book_append_sheet(workbook, worksheet, 'Onboarded');
         const dateStamp = new Date().toISOString().slice(0, 10);
         const filename = `onboarded-report-${filters.template}-${dateStamp}.${filters.format}`;
+        const mimeType = filters.format === 'xlsx'
+            ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            : 'text/csv';
+        const buffer = filters.format === 'xlsx'
+            ? xlsx_1.default.write(workbook, { type: 'buffer', bookType: 'xlsx' })
+            : Buffer.from(xlsx_1.default.utils.sheet_to_csv(worksheet), 'utf-8');
+        return {
+            filename,
+            mimeType,
+            buffer,
+            rowCount: reportRows.length,
+        };
+    }
+    static async exportVerifiedReport(filters) {
+        const verifiedPredicate = this.buildVerifiedPredicate();
+        const conditions = [];
+        const userId = filters.pickedBy || filters.qualifierId;
+        if (userId) {
+            if (filters.claimsScope === 'current') {
+                conditions.push({ pickedBy: userId });
+            }
+            else {
+                conditions.push({
+                    $or: [
+                        { pickedBy: userId },
+                        { addedBy: userId },
+                        { 'statusHistory.changedBy': userId },
+                    ],
+                });
+            }
+        }
+        if (filters.category) {
+            conditions.push(this.buildCategoryMatch(filters.category));
+        }
+        if (filters.gatedCommunityName) {
+            conditions.push({ gatedCommunityName: this.buildExactCaseInsensitiveMatch(filters.gatedCommunityName) });
+        }
+        const locationMatch = {};
+        this.applyLeadLocationFilters(locationMatch, filters);
+        if (Object.keys(locationMatch).length > 0) {
+            conditions.push(locationMatch);
+        }
+        if (!filters.allTime && filters.from && filters.to) {
+            conditions.push({ createdAt: { $gte: filters.from, $lte: filters.to } });
+        }
+        conditions.push(verifiedPredicate);
+        const matchQuery = conditions.length === 1 ? conditions[0] : { $and: conditions };
+        const leads = await Lead_1.default.find(matchQuery).sort({ createdAt: -1 }).lean();
+        const reportRows = leads.map((lead) => {
+            const latestHistory = [...(lead.statusHistory || [])].sort((a, b) => new Date(b.changedAt).getTime() - new Date(a.changedAt).getTime())[0];
+            const base = {
+                Date: this.formatIST(lead.createdAt),
+                'Qualifier Name': this.textForSpreadsheet(lead.addedByName || lead.pickedByName || 'Unknown'),
+                'Lead ID': this.textForSpreadsheet(lead.leadId),
+                'Lead Name': this.textForSpreadsheet(lead.name),
+                'Phone/Landline': this.textForSpreadsheet(lead.phone || lead.landline || ''),
+                City: this.textForSpreadsheet(lead.city),
+                Category: this.categoryLabelForExport(lead.primaryCategory || lead.primarySkill),
+                'Current Status': this.labelForReport(latestHistory?.status || lead.status),
+                'Status Reason': this.textForSpreadsheet(latestHistory?.statusReasonText || this.labelForReport(latestHistory?.statusReasonCode)),
+                'Callback Date': this.formatIST(latestHistory?.callbackAt),
+                'Expected Onboarding Date': this.formatIST(latestHistory?.expectedOnboardingAt),
+                'Last Updated At': this.formatIST(lead.updatedAt),
+                'Last Updated By': this.textForSpreadsheet(lead.lastUpdatedByName || lead.lastUpdatedBy || latestHistory?.changedByName || latestHistory?.changedBy || ''),
+            };
+            if (filters.template === 'detailed') {
+                base.State = this.textForSpreadsheet(lead.state);
+                base['Primary Category'] = this.textForSpreadsheet(lead.primaryCategory || lead.primarySkill);
+                base['Secondary Category'] = this.textForSpreadsheet(lead.secondaryCategory || lead.secondarySkill);
+                base.Source = this.textForSpreadsheet(lead.source);
+                base['Source Details'] = this.textForSpreadsheet(lead.sourceDetails);
+                base['Gated Community'] = lead.isGatedCommunity ? 'Yes' : 'No';
+                base['Gated Community Name'] = this.textForSpreadsheet(lead.gatedCommunityName);
+                base['Created At'] = this.formatIST(lead.createdAt);
+                base['Updated At'] = this.formatIST(lead.updatedAt);
+                if (filters.includeNotes) {
+                    base.Notes = this.textForSpreadsheet(latestHistory?.notes);
+                }
+                base['Is Duplicate'] = lead.isDuplicate ? 'Yes' : 'No';
+                base.Blacklisted = lead.blacklisted ? 'Yes' : 'No';
+            }
+            return base;
+        });
+        const worksheet = xlsx_1.default.utils.json_to_sheet(reportRows);
+        this.applyWorksheetLayout(worksheet, reportRows);
+        const workbook = xlsx_1.default.utils.book_new();
+        xlsx_1.default.utils.book_append_sheet(workbook, worksheet, 'Verified');
+        const dateStamp = new Date().toISOString().slice(0, 10);
+        const filename = `verified-report-${filters.template}-${dateStamp}.${filters.format}`;
         const mimeType = filters.format === 'xlsx'
             ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
             : 'text/csv';
