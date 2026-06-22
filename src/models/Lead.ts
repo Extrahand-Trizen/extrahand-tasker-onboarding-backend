@@ -200,6 +200,8 @@ export interface ILead extends Document {
   conversionData?: {
     platformUid?: string;
     isAadhaarVerified?: boolean;
+    registeredAt?: Date;  // Set once on first detection of registration
+    registeredVerifiedAt?: Date;  // Set once on first detection of registration + Aadhaar verified
     lastCheckedAt?: Date;
   };
   
@@ -564,6 +566,8 @@ const LeadSchema = new Schema<ILead>({
   conversionData: {
     platformUid: String,
     isAadhaarVerified: { type: Boolean, default: false },
+    registeredAt: Date,
+    registeredVerifiedAt: Date,
     lastCheckedAt: Date
   },
   creationMethod: {

@@ -408,17 +408,22 @@ export class LeadController {
         const status = await getConversionStatusByPhone(phone);
 
         if (status.converted && (status.platformUid || status.isAadhaarVerified !== undefined)) {
+          const update: Record<string, any> = {
+            $set: {
+              'conversionData.platformUid': status.platformUid,
+              'conversionData.isAadhaarVerified': status.isAadhaarVerified,
+              'conversionData.lastCheckedAt': new Date(),
+            },
+            $min: {
+              'conversionData.registeredAt': status.createdAt || new Date(),
+            }
+          };
+          if (status.isAadhaarVerified) {
+            update.$min['conversionData.registeredVerifiedAt'] = new Date();
+          }
           const refreshedLead = await Lead.findOneAndUpdate(
             { leadId },
-            {
-              $set: {
-                conversionData: {
-                  platformUid: status.platformUid,
-                  isAadhaarVerified: status.isAadhaarVerified,
-                  lastCheckedAt: new Date()
-                }
-              }
-            },
+            update,
             { new: true }
           );
 
@@ -493,17 +498,22 @@ export class LeadController {
 
       // Optionally cache on lead for list views
       if (status.converted && (status.platformUid || status.isAadhaarVerified !== undefined)) {
+        const update: Record<string, any> = {
+          $set: {
+            'conversionData.platformUid': status.platformUid,
+            'conversionData.isAadhaarVerified': status.isAadhaarVerified,
+            'conversionData.lastCheckedAt': new Date(),
+          },
+          $min: {
+            'conversionData.registeredAt': status.createdAt || new Date(),
+          }
+        };
+        if (status.isAadhaarVerified) {
+          update.$min['conversionData.registeredVerifiedAt'] = new Date();
+        }
         await Lead.findOneAndUpdate(
           { leadId },
-          {
-            $set: {
-              conversionData: {
-                platformUid: status.platformUid,
-                isAadhaarVerified: status.isAadhaarVerified,
-                lastCheckedAt: new Date()
-              }
-            }
-          }
+          update
         );
       }
 
@@ -582,19 +592,40 @@ export class LeadController {
         platformUid = conversion.platformUid;
 
         if (platformUid || conversion.isAadhaarVerified !== undefined) {
+          const registeredDate = lead.conversionData?.lastCheckedAt || new Date();
+          const update: Record<string, any> = {
+            $set: {
+              'conversionData.platformUid': platformUid,
+              'conversionData.isAadhaarVerified': conversion.isAadhaarVerified,
+              'conversionData.lastCheckedAt': new Date(),
+            },
+            $min: {
+              'conversionData.registeredAt': registeredDate,
+            }
+          };
+          if (conversion.isAadhaarVerified) {
+            update.$min['conversionData.registeredVerifiedAt'] = registeredDate;
+          }
           await Lead.findOneAndUpdate(
             { leadId },
-            {
-              $set: {
-                conversionData: {
-                  platformUid,
-                  isAadhaarVerified: conversion.isAadhaarVerified,
-                  lastCheckedAt: new Date()
-                }
-              }
-            }
+            update
           );
         }
+      } else {
+        // Backfill registeredAt/registeredVerifiedAt for existing platformUid
+        const registeredDate = lead.conversionData?.lastCheckedAt || new Date();
+        const backfillUpdate: Record<string, any> = {
+          $min: {
+            'conversionData.registeredAt': registeredDate,
+          }
+        };
+        if (lead.conversionData?.isAadhaarVerified) {
+          backfillUpdate.$min['conversionData.registeredVerifiedAt'] = registeredDate;
+        }
+        await Lead.findOneAndUpdate(
+          { leadId },
+          backfillUpdate
+        );
       }
 
       if (!platformUid) {
@@ -885,9 +916,16 @@ export class LeadController {
         locality,
         localArea,
         attempts,
+        strictOwner,
+        ownerDateMode,
       } = req.query;
 
       const role = req.admin.role as UserRole;
+
+      const parsedDates = LeadService.parseFilterRange(
+        startDate as string | undefined,
+        endDate as string | undefined
+      );
 
       const filters: SearchFilters = {
         status: status as any,
@@ -901,8 +939,8 @@ export class LeadController {
         transferPendingTo: transferPendingTo as string,
         ownerBy: ownerBy as string,
         search: search as string,
-        startDate: startDate ? new Date(startDate as string) : undefined,
-        endDate: endDate ? new Date(endDate as string) : undefined,
+        startDate: parsedDates.from,
+        endDate: parsedDates.to,
         page: page ? parseInt(page as string) : undefined,
         limit: limit ? parseInt(limit as string) : undefined,
         registrationStatus: registrationStatus as SearchFilters['registrationStatus'],
@@ -910,17 +948,46 @@ export class LeadController {
         unclaimed: unclaimed === 'true' || unclaimed === '1',
         claimed: claimed === 'true' || claimed === '1',
         attempts: attempts as string,
+        strictOwner: strictOwner === 'true',
+        ownerDateMode: ownerDateMode === 'owner' ? 'owner' : undefined,
       };
 
       // Expand single id to userId + uid for owner/picked filters.
-      const scopedIds = getScopedAddedByIds(req);
-      if (filters.ownerBy && scopedIds.length > 0) {
-        filters.ownerByAny = Array.from(new Set([...scopedIds, filters.ownerBy]));
-        delete filters.ownerBy;
+      // Resolve the TARGET user's IDs (not the authenticated user's) so that
+      // manager view of onboarder pages doesn't incorrectly include the manager's own leads.
+      if (filters.ownerBy) {
+        const targetUser = await AdminUser.findOne({
+          $or: [
+            { userId: filters.ownerBy },
+            { uid: filters.ownerBy }
+          ]
+        }).select('userId uid').lean();
+        if (targetUser) {
+          const targetIds = [targetUser.userId, targetUser.uid].filter(
+            (id): id is string => typeof id === 'string' && id.trim().length > 0
+          );
+          if (targetIds.length > 0) {
+            filters.ownerByAny = Array.from(new Set(targetIds));
+            delete filters.ownerBy;
+          }
+        }
       }
-      if (filters.pickedBy && scopedIds.length > 0) {
-        filters.pickedByAny = Array.from(new Set([...scopedIds, filters.pickedBy]));
-        delete filters.pickedBy;
+      if (filters.pickedBy) {
+        const targetUser = await AdminUser.findOne({
+          $or: [
+            { userId: filters.pickedBy },
+            { uid: filters.pickedBy }
+          ]
+        }).select('userId uid').lean();
+        if (targetUser) {
+          const targetIds = [targetUser.userId, targetUser.uid].filter(
+            (id): id is string => typeof id === 'string' && id.trim().length > 0
+          );
+          if (targetIds.length > 0) {
+            filters.pickedByAny = Array.from(new Set(targetIds));
+            delete filters.pickedBy;
+          }
+        }
       }
 
       // Keep search generic; caller (UI/page) decides whether to scope by addedBy.
@@ -969,12 +1036,16 @@ export class LeadController {
       const { city, primarySkill, startDate, endDate, page, limit } = req.query;
       const role = req.admin.role as UserRole;
       const scopedIds = getScopedAddedByIds(req);
+      const parsedDates = LeadService.parseFilterRange(
+        startDate as string | undefined,
+        endDate as string | undefined
+      );
 
       const filters: CallbackQueueFilters = {
         city: city as string,
         primarySkill: primarySkill as string,
-        startDate: startDate ? new Date(startDate as string) : undefined,
-        endDate: endDate ? new Date(endDate as string) : undefined,
+        startDate: parsedDates.from,
+        endDate: parsedDates.to,
         page: page ? parseInt(page as string) : undefined,
         limit: limit ? parseInt(limit as string) : undefined,
       };

@@ -742,8 +742,9 @@ class LeadController {
                 });
                 return;
             }
-            const { status, city, primarySkill, source, addedBy, pickedBy, transferPendingTo, ownerBy, search, startDate, endDate, page, limit, registrationStatus, statusChangedBy, unclaimed, claimed, locality, localArea, attempts, } = req.query;
+            const { status, city, primarySkill, source, addedBy, pickedBy, transferPendingTo, ownerBy, search, startDate, endDate, page, limit, registrationStatus, statusChangedBy, unclaimed, claimed, locality, localArea, attempts, strictOwner, ownerDateMode, } = req.query;
             const role = req.admin.role;
+            const parsedDates = LeadService_1.LeadService.parseFilterRange(startDate, endDate);
             const filters = {
                 status: status,
                 city: city,
@@ -756,8 +757,8 @@ class LeadController {
                 transferPendingTo: transferPendingTo,
                 ownerBy: ownerBy,
                 search: search,
-                startDate: startDate ? new Date(startDate) : undefined,
-                endDate: endDate ? new Date(endDate) : undefined,
+                startDate: parsedDates.from,
+                endDate: parsedDates.to,
                 page: page ? parseInt(page) : undefined,
                 limit: limit ? parseInt(limit) : undefined,
                 registrationStatus: registrationStatus,
@@ -765,16 +766,41 @@ class LeadController {
                 unclaimed: unclaimed === 'true' || unclaimed === '1',
                 claimed: claimed === 'true' || claimed === '1',
                 attempts: attempts,
+                strictOwner: strictOwner === 'true',
+                ownerDateMode: ownerDateMode === 'owner' ? 'owner' : undefined,
             };
             // Expand single id to userId + uid for owner/picked filters.
-            const scopedIds = getScopedAddedByIds(req);
-            if (filters.ownerBy && scopedIds.length > 0) {
-                filters.ownerByAny = Array.from(new Set([...scopedIds, filters.ownerBy]));
-                delete filters.ownerBy;
+            // Resolve the TARGET user's IDs (not the authenticated user's) so that
+            // manager view of onboarder pages doesn't incorrectly include the manager's own leads.
+            if (filters.ownerBy) {
+                const targetUser = await AdminUser_1.default.findOne({
+                    $or: [
+                        { userId: filters.ownerBy },
+                        { uid: filters.ownerBy }
+                    ]
+                }).select('userId uid').lean();
+                if (targetUser) {
+                    const targetIds = [targetUser.userId, targetUser.uid].filter((id) => typeof id === 'string' && id.trim().length > 0);
+                    if (targetIds.length > 0) {
+                        filters.ownerByAny = Array.from(new Set(targetIds));
+                        delete filters.ownerBy;
+                    }
+                }
             }
-            if (filters.pickedBy && scopedIds.length > 0) {
-                filters.pickedByAny = Array.from(new Set([...scopedIds, filters.pickedBy]));
-                delete filters.pickedBy;
+            if (filters.pickedBy) {
+                const targetUser = await AdminUser_1.default.findOne({
+                    $or: [
+                        { userId: filters.pickedBy },
+                        { uid: filters.pickedBy }
+                    ]
+                }).select('userId uid').lean();
+                if (targetUser) {
+                    const targetIds = [targetUser.userId, targetUser.uid].filter((id) => typeof id === 'string' && id.trim().length > 0);
+                    if (targetIds.length > 0) {
+                        filters.pickedByAny = Array.from(new Set(targetIds));
+                        delete filters.pickedBy;
+                    }
+                }
             }
             // Keep search generic; caller (UI/page) decides whether to scope by addedBy.
             // This is required so "All Leads" can remain truly global for allowed roles.
@@ -819,11 +845,12 @@ class LeadController {
             const { city, primarySkill, startDate, endDate, page, limit } = req.query;
             const role = req.admin.role;
             const scopedIds = getScopedAddedByIds(req);
+            const parsedDates = LeadService_1.LeadService.parseFilterRange(startDate, endDate);
             const filters = {
                 city: city,
                 primarySkill: primarySkill,
-                startDate: startDate ? new Date(startDate) : undefined,
-                endDate: endDate ? new Date(endDate) : undefined,
+                startDate: parsedDates.from,
+                endDate: parsedDates.to,
                 page: page ? parseInt(page) : undefined,
                 limit: limit ? parseInt(limit) : undefined,
             };

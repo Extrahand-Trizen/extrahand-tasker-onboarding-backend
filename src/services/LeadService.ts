@@ -113,10 +113,28 @@ export interface SearchFilters {
   /** When true, only leads that have been claimed (pickedBy set) */
   claimed?: boolean;
   attempts?: string;
+  /**
+   * When true, owner scope uses only pickedBy OR addedBy (no statusHistory.changedBy).
+   * This matches exactly how the Performance page counts outcomes.
+   */
+  strictOwner?: boolean;
+  /**
+   * When set to 'owner', the date filter (startDate/endDate) is applied to
+   * (pickedAt OR createdAt) instead of just createdAt.
+   * This matches the Performance page date logic for onboarder outcomes.
+   */
+  ownerDateMode?: 'owner';
+  /**
+   * Broad location search — case-insensitive substring match across city, locality,
+   * address, state, and pincode fields. Applied only when user presses Enter in the UI.
+   */
+  locationSearch?: string;
 }
 
 export interface CallbackQueueFilters {
   city?: string;
+  /** Broad location search across city/locality/address/state/pincode (Enter-triggered). */
+  locationSearch?: string;
   primarySkill?: string;
   addedBy?: string;
   addedByAny?: string[];
@@ -139,6 +157,8 @@ export type FollowUpBucket = 'all' | 'today' | 'overdue' | 'upcoming' | 'range';
 
 export interface FollowUpQueueFilters {
   city?: string;
+  /** Broad location search across city/locality/address/state/pincode (Enter-triggered). */
+  locationSearch?: string;
   primarySkill?: string;
   addedBy?: string;
   addedByAny?: string[];
@@ -485,10 +505,7 @@ export class LeadService {
     const trimmed = city.trim();
     const escaped = this.escapeRegex(trimmed);
     return {
-      $or: [
-        { city: this.buildExactCaseInsensitiveMatch(trimmed) },
-        { city: { $regex: new RegExp(`,\\s*${escaped}(\\s*,|\\s*$)`, 'i') } },
-      ],
+      city: { $regex: new RegExp(escaped, 'i') },
     };
   }
 
@@ -517,10 +534,29 @@ export class LeadService {
     };
   }
 
+  private static buildLocationSearchMatch(term: string): Record<string, unknown> {
+    const escaped = this.escapeRegex(term.trim());
+    const rx = new RegExp(escaped, 'i');
+    return {
+      $or: [
+        { city: { $regex: rx } },
+        { locality: { $regex: rx } },
+        { address: { $regex: rx } },
+        { state: { $regex: rx } },
+        { pincode: { $regex: rx } },
+      ],
+    };
+  }
+
   private static applyLeadLocationFilters(
     match: Record<string, unknown>,
-    filters: { city?: string; locality?: string; localArea?: string },
+    filters: { city?: string; locality?: string; localArea?: string; locationSearch?: string },
   ): void {
+    if (filters.locationSearch) {
+      // Broad Enter-triggered search across all location fields — takes precedence over city
+      this.pushLocationFilterClause(match, this.buildLocationSearchMatch(filters.locationSearch));
+      return;
+    }
     if (filters.city) {
       this.pushLocationFilterClause(match, this.buildCityFilterMatch(filters.city));
     }
@@ -581,6 +617,19 @@ export class LeadService {
         this.buildIdSelector('pickedBy', ownerIds),
         this.buildIdSelector('addedBy', ownerIds),
         this.buildIdSelector('statusHistory.changedBy', ownerIds),
+      ],
+    };
+  }
+
+  /**
+   * Strict owner scope — only pickedBy OR addedBy.
+   * Used when matching the Performance page counting logic exactly.
+   */
+  private static buildStrictOwnerScopeClause(ownerIds: string[]): { $or: Array<Record<string, unknown>> } {
+    return {
+      $or: [
+        this.buildIdSelector('pickedBy', ownerIds),
+        this.buildIdSelector('addedBy', ownerIds),
       ],
     };
   }
@@ -695,6 +744,144 @@ export class LeadService {
       from: from ? toISTBound(from, false) : undefined,
       to: to ? toISTBound(to, true) : undefined,
     };
+  }
+
+  private static buildBoundedDateRange(startDate?: Date, endDate?: Date): Record<string, Date> | null {
+    if (!startDate && !endDate) return null;
+    const dateRange: Record<string, Date> = {};
+    if (startDate) dateRange.$gte = startDate;
+    if (endDate) dateRange.$lte = endDate;
+    return dateRange;
+  }
+
+  private static isContactOutcomeStatus(status?: LeadStatus): boolean {
+    return (
+      status === 'contacted_interested' ||
+      status === 'contacted_not_interested' ||
+      status === 'contacted_not_lifted'
+    );
+  }
+
+  /** Date filter for registered-candidate list pages. */
+  private static buildRegistrationDateFilterClause(
+    registrationStatus: RegistrationStatusFilter,
+    startDate?: Date,
+    endDate?: Date
+  ): Record<string, unknown> | null {
+    const dateRange = this.buildBoundedDateRange(startDate, endDate);
+    if (!dateRange) return null;
+    const field = registrationStatus === 'registered_verified'
+      ? 'conversionData.registeredVerifiedAt'
+      : 'conversionData.registeredAt';
+    return { [field]: dateRange };
+  }
+
+  /** Date filter for interested / not interested / not lifted queues. */
+  private static buildStatusTransitionDateFilterClause(
+    status: LeadStatus,
+    startDate?: Date,
+    endDate?: Date
+  ): Record<string, unknown> | null {
+    const dateRange = this.buildBoundedDateRange(startDate, endDate);
+    if (!dateRange) return null;
+    return {
+      statusHistory: {
+        $elemMatch: {
+          status,
+          changedAt: dateRange,
+        },
+      },
+    };
+  }
+
+  private static buildOwnerActivityDateFilterClause(
+    startDate?: Date,
+    endDate?: Date
+  ): Record<string, unknown> | null {
+    const dateRange = this.buildBoundedDateRange(startDate, endDate);
+    if (!dateRange) return null;
+    return {
+      $or: [{ pickedAt: dateRange }, { createdAt: dateRange }],
+    };
+  }
+
+  private static buildSearchDateFilterClause(filters: SearchFilters): Record<string, unknown> | null {
+    if (!filters.startDate && !filters.endDate) return null;
+
+    if (
+      filters.registrationStatus === 'registered' ||
+      filters.registrationStatus === 'registered_verified'
+    ) {
+      return this.buildRegistrationDateFilterClause(filters.registrationStatus, filters.startDate, filters.endDate);
+    }
+
+    if (filters.status && this.isContactOutcomeStatus(filters.status)) {
+      return this.buildStatusTransitionDateFilterClause(
+        filters.status,
+        filters.startDate,
+        filters.endDate
+      );
+    }
+
+    if (filters.ownerDateMode === 'owner') {
+      return this.buildOwnerActivityDateFilterClause(filters.startDate, filters.endDate);
+    }
+
+    const dateRange = this.buildBoundedDateRange(filters.startDate, filters.endDate);
+    return dateRange ? { createdAt: dateRange } : null;
+  }
+
+  private static isDateInFilterRange(
+    value: Date | string | null | undefined,
+    filters: { from?: Date; to?: Date; allTime?: boolean }
+  ): boolean {
+    if (filters.allTime || !filters.from || !filters.to) return true;
+    if (!value) return false;
+    const timestamp = new Date(value).getTime();
+    if (Number.isNaN(timestamp)) return false;
+    return timestamp >= filters.from.getTime() && timestamp <= filters.to.getTime();
+  }
+
+  private static getLatestStatusTransitionAt(lead: any, status: LeadStatus): Date | undefined {
+    const history = Array.isArray(lead.statusHistory) ? lead.statusHistory : [];
+    const latest = history
+      .filter((entry: any) => entry?.status === status && entry?.changedAt)
+      .sort(
+        (a: any, b: any) =>
+          new Date(b.changedAt).getTime() - new Date(a.changedAt).getTime()
+      )[0];
+    return latest?.changedAt ? new Date(latest.changedAt) : undefined;
+  }
+
+  private static getRegistrationActivityAt(lead: any): Date | undefined {
+    const candidates = [
+      lead.conversionData?.lastCheckedAt,
+      lead.updatedAt,
+      lead.pickedAt,
+      lead.createdAt,
+    ];
+    for (const candidate of candidates) {
+      if (candidate) return new Date(candidate);
+    }
+    return undefined;
+  }
+
+  private static leadIsRegistered(lead: any): boolean {
+    const platformUid = lead.conversionData?.platformUid;
+    const firebaseUid = lead.activationData?.firebaseUid;
+    const status = lead.accountStatus;
+    return (
+      (platformUid !== undefined && platformUid !== null && platformUid !== '') ||
+      (firebaseUid !== undefined && firebaseUid !== null && firebaseUid !== '') ||
+      ['invited', 'activated', 'suspended'].includes(status)
+    );
+  }
+
+  private static leadIsVerified(lead: any): boolean {
+    return (
+      lead.conversionData?.isAadhaarVerified === true ||
+      lead.verificationStatus?.aadhaar?.status === 'verified'
+    );
   }
 
   static normalizeLeadForResponse(lead: any): any {
@@ -971,7 +1158,7 @@ export class LeadService {
     return lead;
   }
 
-  private static applyOwnerScope(query: any, ownerBy?: string, ownerByAny?: string[]): void {
+  private static applyOwnerScope(query: any, ownerBy?: string, ownerByAny?: string[], strictOwner?: boolean): void {
     const ownerIds = Array.from(
       new Set(
         (ownerByAny && ownerByAny.length > 0
@@ -988,7 +1175,11 @@ export class LeadService {
     }
 
     query.$and = query.$and || [];
-    query.$and.push(this.buildOwnerScopeClause(ownerIds));
+    if (strictOwner) {
+      query.$and.push(this.buildStrictOwnerScopeClause(ownerIds));
+    } else {
+      query.$and.push(this.buildOwnerScopeClause(ownerIds));
+    }
   }
 
   private static latestFollowUpHistoryEntry(
@@ -1264,16 +1455,14 @@ export class LeadService {
       const hasPickedFilter =
         !!filters.pickedBy || (filters.pickedByAny && filters.pickedByAny.length > 0);
       if (!hasPickedFilter && !filters.unclaimed && !filters.claimed) {
-        this.applyOwnerScope(query, filters.ownerBy, filters.ownerByAny);
+        this.applyOwnerScope(query, filters.ownerBy, filters.ownerByAny, filters.strictOwner);
       }
 
       if (filters.startDate || filters.endDate) {
-        query.createdAt = {};
-        if (filters.startDate) {
-          query.createdAt.$gte = filters.startDate;
-        }
-        if (filters.endDate) {
-          query.createdAt.$lte = filters.endDate;
+        const dateClause = this.buildSearchDateFilterClause(filters);
+        if (dateClause) {
+          query.$and = query.$and || [];
+          query.$and.push(dateClause);
         }
       }
 
@@ -3679,65 +3868,160 @@ export class LeadService {
 
     const registeredOnlyQuery = this.buildRegisteredOnlyPredicate();
 
-    const performanceList = await Promise.all(
-      users.map(async (user) => {
-        const userId = user.userId;
-        const identityIds = this.getAdminIdentityIds(user);
-        const name = user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Unknown';
-        const location = userLocations[name] || user.team || user.department || 'Headquarters';
+    const userIds = users.flatMap(u => this.getAdminIdentityIds(u));
 
-        // Claims Count (Only leads added by them)
-        const claims = await Lead.countDocuments(this.buildIdSelector('addedBy', identityIds));
+    // 1. Bulk aggregate addedBy (claims) - scoped to active user IDs for index scan
+    const addedByAgg = await Lead.aggregate([
+      { $match: { addedBy: { $in: userIds } } },
+      { $group: { _id: '$addedBy', count: { $sum: 1 } } }
+    ]);
+    const addedByMap = new Map<string, number>();
+    for (const item of addedByAgg) {
+      if (item._id) addedByMap.set(String(item._id), item.count);
+    }
 
-        if (user.role === 'qualifier') {
-          return {
-            userId,
-            name,
-            role: 'qualifier',
-            location,
-            claims,
-            totalLeads: claims,
-            overdue: 0,
-          };
-        } else {
-          // Onboarder: Current Claims
-          const currentClaims = await Lead.countDocuments(this.buildIdSelector('pickedBy', identityIds));
+    // 2. Bulk aggregate pickedBy (currentClaims) - scoped to active user IDs for index scan
+    const pickedByAgg = await Lead.aggregate([
+      { $match: { pickedBy: { $in: userIds } } },
+      { $group: { _id: '$pickedBy', count: { $sum: 1 } } }
+    ]);
+    const pickedByMap = new Map<string, number>();
+    for (const item of pickedByAgg) {
+      if (item._id) pickedByMap.set(String(item._id), item.count);
+    }
 
-          const onboarderMatch = {
-            ...this.buildOwnerScopeClause(identityIds),
-          };
+    // 3. Bulk fetch follow-up leads and aggregate stats in memory to avoid N+1 queries
+    const followUpLeads = await Lead.find({
+      $or: [
+        { nextCallbackAt: { $exists: true, $ne: null } },
+        { expectedOnboardingAt: { $exists: true, $ne: null } },
+      ],
+    }).lean();
 
-          const followUpStats = await this.getFollowUpQueueStats({
-            followUpOwnerByAny: identityIds,
-          });
-          const followUps = followUpStats.totalFollowUps;
+    const followUpItems = followUpLeads.flatMap((lead) => {
+      const itemsList: Array<{ dueType: 'callback' | 'onboarding'; dueAt: Date; changedBy?: string; attempts?: string }> = [];
+      const history = Array.isArray(lead.statusHistory) ? lead.statusHistory : [];
+      const latestHistoryEntry = [...history].sort(
+        (a, b) => new Date(b?.changedAt || 0).getTime() - new Date(a?.changedAt || 0).getTime()
+      )[0];
+      const changedBy = latestHistoryEntry?.changedBy;
 
-          // Onboarder: Registered (but not verified, touched leads)
-          const registered = await Lead.countDocuments({
-            $and: [
-              onboarderMatch,
-              registeredOnlyQuery,
-            ]
-          });
+      if (lead.nextCallbackAt) {
+        itemsList.push({
+          dueType: 'callback',
+          dueAt: new Date(lead.nextCallbackAt),
+          changedBy,
+          attempts: lead.attempts,
+        });
+      }
+      if (lead.expectedOnboardingAt) {
+        itemsList.push({
+          dueType: 'onboarding',
+          dueAt: new Date(lead.expectedOnboardingAt),
+          changedBy,
+          attempts: lead.attempts,
+        });
+      }
+      return itemsList;
+    });
 
-          // Onboarder: Overdue follow-ups (align with follow-up queue stats)
-          const overdue = followUpStats.callbackOverdue + followUpStats.onboardingOverdue;
+    const followUpStatsMap = new Map<string, { total: number; overdue: number }>();
+    for (const item of followUpItems) {
+      if (!item.changedBy) continue;
+      const key = item.changedBy;
+      const current = followUpStatsMap.get(key) || { total: 0, overdue: 0 };
+      current.total += 1;
+      const isOverdue = item.dueAt < now && item.attempts !== 'max_reached';
+      if (isOverdue) {
+        current.overdue += 1;
+      }
+      followUpStatsMap.set(key, current);
+    }
 
-          return {
-            userId,
-            name,
-            role: 'onboarder',
-            location,
-            claims,
-            totalLeads: claims,
-            currentClaims,
-            followUps,
-            registered,
-            overdue,
-          };
+    // 4. Bulk fetch registered leads (scoped to active users) and calculate in memory to avoid N+1 queries
+    const registeredLeads = await Lead.find({
+      $and: [
+        registeredOnlyQuery,
+        {
+          $or: [
+            { pickedBy: { $in: userIds } },
+            { addedBy: { $in: userIds } },
+            { 'statusHistory.changedBy': { $in: userIds } },
+          ],
+        },
+      ],
+    }, { pickedBy: 1, addedBy: 1, statusHistory: 1 }).lean();
+
+    const performanceList = users.map((user) => {
+      const userId = user.userId;
+      const identityIds = this.getAdminIdentityIds(user);
+      const name = user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Unknown';
+      const location = userLocations[name] || user.team || user.department || 'Headquarters';
+
+      // Claims Count (Only leads added by them)
+      let claims = 0;
+      for (const id of identityIds) {
+        claims += addedByMap.get(id) || 0;
+      }
+
+      if (user.role === 'qualifier') {
+        return {
+          userId,
+          name,
+          role: 'qualifier',
+          location,
+          claims,
+          totalLeads: claims,
+          overdue: 0,
+        };
+      } else {
+        // Onboarder: Current Claims
+        let currentClaims = 0;
+        for (const id of identityIds) {
+          currentClaims += pickedByMap.get(id) || 0;
         }
-      })
-    );
+
+        // Onboarder: Follow-up stats
+        let followUps = 0;
+        let overdue = 0;
+        for (const id of identityIds) {
+          const stats = followUpStatsMap.get(id);
+          if (stats) {
+            followUps += stats.total;
+            overdue += stats.overdue;
+          }
+        }
+
+        // Onboarder: Registered (owned leads, not just touched)
+        const idSet = new Set(identityIds);
+        let registered = 0;
+        for (const lead of registeredLeads) {
+          const isMatched =
+            (lead.pickedBy && idSet.has(String(lead.pickedBy))) ||
+            (lead.addedBy && idSet.has(String(lead.addedBy))) ||
+            (Array.isArray(lead.statusHistory) &&
+              lead.statusHistory.some(
+                (entry: any) => entry?.changedBy && idSet.has(String(entry.changedBy))
+              ));
+          if (isMatched) {
+            registered++;
+          }
+        }
+
+        return {
+          userId,
+          name,
+          role: 'onboarder',
+          location,
+          claims,
+          totalLeads: claims,
+          currentClaims,
+          followUps,
+          registered,
+          overdue,
+        };
+      }
+    });
 
     // Calculate Top KPI Cards
     const totalTeam = users.length;
@@ -3762,6 +4046,16 @@ export class LeadService {
     };
   }
 
+  /** Count-only variant of searchLeads — aligns performance metrics with list pages. */
+  private static async countSearchLeads(filters: SearchFilters): Promise<number> {
+    const { total } = await this.searchLeads({
+      ...filters,
+      page: 1,
+      limit: 1,
+    });
+    return total;
+  }
+
   static async getPerformanceDetails(
     userId: string,
     filters: { from?: Date; to?: Date; allTime?: boolean }
@@ -3783,14 +4077,6 @@ export class LeadService {
       "Vikram Iyer": "Bangalore",
     };
     const location = userLocations[name] || user.team || user.department || 'Headquarters';
-
-    const now = new Date();
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    const todayEnd = new Date();
-    todayEnd.setHours(23, 59, 59, 999);
-
-    const baseMatch: any = this.buildOwnerScopeClause(identityIds);
 
     const registeredQuery = {
       $or: [
@@ -3815,22 +4101,39 @@ export class LeadService {
 
     // Get ranking on team by claims (currentClaims for onboarder, claims for qualifier)
     const allUsers = await AdminUser.find({ role: user.role, status: 'active' }).lean();
-    const allUsersClaims = await Promise.all(
-      allUsers.map(async (u) => {
-        const scopedIds = this.getAdminIdentityIds(u);
-        const uClaims = await Lead.countDocuments({
-          ...(user.role === 'onboarder'
-            ? this.buildIdSelector('pickedBy', scopedIds)
-            : this.buildIdSelector('addedBy', scopedIds)),
-          ...(!filters.allTime && filters.from && filters.to
-            ? (user.role === 'onboarder'
-                ? { pickedAt: { $gte: filters.from, $lte: filters.to } }
-                : { createdAt: { $gte: filters.from, $lte: filters.to } })
-            : {})
-        });
-        return { userId: u.userId, claims: uClaims };
-      })
-    );
+
+    const fieldName = user.role === 'onboarder' ? 'pickedBy' : 'addedBy';
+    const dateField = user.role === 'onboarder' ? 'pickedAt' : 'createdAt';
+
+    const allUserIds = allUsers.flatMap(u => this.getAdminIdentityIds(u));
+
+    const matchStage: any = {
+      [fieldName]: { $in: allUserIds }
+    };
+    if (!filters.allTime && filters.from && filters.to) {
+      matchStage[dateField] = { $gte: filters.from, $lte: filters.to };
+    }
+
+    const aggregations = await Lead.aggregate([
+      { $match: matchStage },
+      { $group: { _id: `$${fieldName}`, count: { $sum: 1 } } }
+    ]);
+
+    const claimsMap = new Map<string, number>();
+    for (const item of aggregations) {
+      if (item._id) {
+        claimsMap.set(String(item._id), item.count);
+      }
+    }
+
+    const allUsersClaims = allUsers.map((u) => {
+      const scopedIds = this.getAdminIdentityIds(u);
+      let totalClaims = 0;
+      for (const id of scopedIds) {
+        totalClaims += claimsMap.get(id) || 0;
+      }
+      return { userId: u.userId, claims: totalClaims };
+    });
     allUsersClaims.sort((a, b) => b.claims - a.claims);
     const rankIndex = allUsersClaims.findIndex((u) => u.userId === userId);
     
@@ -3894,13 +4197,6 @@ export class LeadService {
         outcomes: {}
       };
     } else {
-      // Onboarder: date filter on updatedAt (when the lead was last worked),
-      // not createdAt (when it was added).
-      const dateQuery: any = {};
-      if (!filters.allTime && filters.from && filters.to) {
-        dateQuery.updatedAt = { $gte: filters.from, $lte: filters.to };
-      }
-
       const followUpStats = await this.getFollowUpQueueStats(
         { followUpOwnerByAny: identityIds },
         !filters.allTime ? { from: filters.from, to: filters.to } : undefined
@@ -3911,59 +4207,49 @@ export class LeadService {
       const overdue = followUpStats.callbackOverdue + followUpStats.onboardingOverdue;
       const dueToday = followUpStats.callbackDueToday + followUpStats.onboardingDueToday;
 
-      const interested = await Lead.countDocuments({
-        ...baseMatch,
-        ...dateQuery,
-        status: 'contacted_interested'
+      const ownerDateRange =
+        !filters.allTime && filters.from && filters.to
+          ? { startDate: filters.from, endDate: filters.to }
+          : {};
+
+      const ownerScopeFilters: SearchFilters = {
+        ownerByAny: identityIds,
+        strictOwner: false,
+        ...ownerDateRange,
+      };
+
+      const interested = await this.countSearchLeads({
+        ...ownerScopeFilters,
+        status: 'contacted_interested',
       });
 
-      const notInterested = await Lead.countDocuments({
-        ...baseMatch,
-        ...dateQuery,
-        status: 'contacted_not_interested'
+      const notInterested = await this.countSearchLeads({
+        ...ownerScopeFilters,
+        status: 'contacted_not_interested',
       });
 
-      const registered = await Lead.countDocuments({
-        $and: [
-          baseMatch,
-          registeredQuery,
-          ...(dateQuery.updatedAt ? [{ updatedAt: dateQuery.updatedAt }] : []),
-        ],
-        $nor: [
-          { 'conversionData.isAadhaarVerified': true },
-          { 'verificationStatus.aadhaar.status': 'verified' }
-        ]
+      const registered = await this.countSearchLeads({
+        ...ownerScopeFilters,
+        registrationStatus: 'registered',
       });
 
-      const notRegistered = await Lead.countDocuments({
-        ...baseMatch,
-        ...this.buildIdSelector('statusHistory.changedBy', identityIds),
-        ...dateQuery,
-        status: { $ne: 'inactive' },
-        $nor: [
-          { 'conversionData.platformUid': { $exists: true, $nin: [null, ''] } },
-          { 'activationData.firebaseUid': { $exists: true, $nin: [null, ''] } },
-          { accountStatus: { $in: ['invited', 'activated', 'suspended'] } }
-        ]
+      const verified = await this.countSearchLeads({
+        ...ownerScopeFilters,
+        registrationStatus: 'registered_verified',
       });
 
-      const verified = await Lead.countDocuments({
-        $and: [
-          baseMatch,
-          registeredQuery,
-          isVerifiedQuery,
-          ...(dateQuery.updatedAt ? [{ updatedAt: dateQuery.updatedAt }] : []),
-        ],
+      const notRegistered = await this.countSearchLeads({
+        ...ownerScopeFilters,
+        registrationStatus: 'not_registered',
+        ownerDateMode: 'owner',
       });
 
       const totalRegistered = registered + verified;
-
-      // Leads in range added by this user
       const totalLeadsInRange = filters.allTime
         ? claims
-        : await Lead.countDocuments({
-            ...this.buildOwnerScopeClause(identityIds),
-            createdAt: { $gte: filters.from!, $lte: filters.to! },
+        : await this.countSearchLeads({
+            ...ownerScopeFilters,
+            ownerDateMode: 'owner',
           });
 
       const editedDateFilter =

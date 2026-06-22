@@ -99,9 +99,27 @@ export interface SearchFilters {
     /** When true, only leads that have been claimed (pickedBy set) */
     claimed?: boolean;
     attempts?: string;
+    /**
+     * When true, owner scope uses only pickedBy OR addedBy (no statusHistory.changedBy).
+     * This matches exactly how the Performance page counts outcomes.
+     */
+    strictOwner?: boolean;
+    /**
+     * When set to 'owner', the date filter (startDate/endDate) is applied to
+     * (pickedAt OR createdAt) instead of just createdAt.
+     * This matches the Performance page date logic for onboarder outcomes.
+     */
+    ownerDateMode?: 'owner';
+    /**
+     * Broad location search — case-insensitive substring match across city, locality,
+     * address, state, and pincode fields. Applied only when user presses Enter in the UI.
+     */
+    locationSearch?: string;
 }
 export interface CallbackQueueFilters {
     city?: string;
+    /** Broad location search across city/locality/address/state/pincode (Enter-triggered). */
+    locationSearch?: string;
     primarySkill?: string;
     addedBy?: string;
     addedByAny?: string[];
@@ -121,6 +139,8 @@ export type FollowUpDueType = 'all' | 'callback' | 'onboarding';
 export type FollowUpBucket = 'all' | 'today' | 'overdue' | 'upcoming' | 'range';
 export interface FollowUpQueueFilters {
     city?: string;
+    /** Broad location search across city/locality/address/state/pincode (Enter-triggered). */
+    locationSearch?: string;
     primarySkill?: string;
     addedBy?: string;
     addedByAny?: string[];
@@ -208,6 +228,7 @@ export declare class LeadService {
     private static buildCityFilterMatch;
     private static buildLocalAreaFilterMatch;
     private static buildLocalityFilterMatch;
+    private static buildLocationSearchMatch;
     private static applyLeadLocationFilters;
     private static buildRegisteredPredicate;
     private static buildVerifiedPredicate;
@@ -215,6 +236,11 @@ export declare class LeadService {
     private static getAdminIdentityIds;
     private static buildIdSelector;
     private static buildOwnerScopeClause;
+    /**
+     * Strict owner scope — only pickedBy OR addedBy.
+     * Used when matching the Performance page counting logic exactly.
+     */
+    private static buildStrictOwnerScopeClause;
     private static textForSpreadsheet;
     private static applyWorksheetLayout;
     /**
@@ -225,6 +251,19 @@ export declare class LeadService {
         from?: Date;
         to?: Date;
     };
+    private static buildBoundedDateRange;
+    private static isContactOutcomeStatus;
+    /** Date filter for registered-candidate list pages (aligns with conversion lastCheckedAt). */
+    private static buildRegistrationDateFilterClause;
+    /** Date filter for interested / not interested / not lifted queues. */
+    private static buildStatusTransitionDateFilterClause;
+    private static buildOwnerActivityDateFilterClause;
+    private static buildSearchDateFilterClause;
+    private static isDateInFilterRange;
+    private static getLatestStatusTransitionAt;
+    private static getRegistrationActivityAt;
+    private static leadIsRegistered;
+    private static leadIsVerified;
     static normalizeLeadForResponse(lead: any): any;
     private static getISTDayBounds;
     /**
@@ -407,6 +446,8 @@ export declare class LeadService {
      */
     static logActivity(leadId: string, type: string, action: string, performedBy: string, performedByName?: string, metadata?: Record<string, any>): Promise<void>;
     static getPerformanceOverview(): Promise<any>;
+    /** Count-only variant of searchLeads — aligns performance metrics with list pages. */
+    private static countSearchLeads;
     static getPerformanceDetails(userId: string, filters: {
         from?: Date;
         to?: Date;
