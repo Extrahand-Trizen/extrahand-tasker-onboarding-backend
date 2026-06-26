@@ -145,6 +145,8 @@ export interface ILead extends Document {
     conversionData?: {
         platformUid?: string;
         isAadhaarVerified?: boolean;
+        registeredAt?: Date;
+        registeredVerifiedAt?: Date;
         lastCheckedAt?: Date;
     };
     creationMethod?: CreationMethod;

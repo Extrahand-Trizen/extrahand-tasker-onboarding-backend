@@ -387,6 +387,8 @@ const LeadSchema = new mongoose_1.Schema({
     conversionData: {
         platformUid: String,
         isAadhaarVerified: { type: Boolean, default: false },
+        registeredAt: Date,
+        registeredVerifiedAt: Date,
         lastCheckedAt: Date
     },
     creationMethod: {

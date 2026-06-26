@@ -4,12 +4,20 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.disconnectDatabase = exports.connectDatabase = void 0;
+const node_dns_1 = __importDefault(require("node:dns"));
 const mongoose_1 = __importDefault(require("mongoose"));
 const logger_1 = __importDefault(require("./logger"));
 const env_1 = require("./env");
+// Temporary workaround for local machine DNS issue.
+// Do NOT commit this to Git.
+node_dns_1.default.setServers(['8.8.8.8', '8.8.4.4']);
 const connectDatabase = async () => {
     try {
-        await mongoose_1.default.connect(env_1.env.MONGODB_URI, { dbName: env_1.env.MONGO_DB });
+        await mongoose_1.default.connect(env_1.env.MONGODB_URI, {
+            dbName: env_1.env.MONGO_DB,
+            serverSelectionTimeoutMS: 10000,
+            connectTimeoutMS: 10000,
+        });
         logger_1.default.info('✅ MongoDB connected');
     }
     catch (error) {

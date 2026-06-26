@@ -1182,6 +1182,42 @@ export class LeadService {
     }
   }
 
+  private static applyPrioritizedOwnerScope(query: any, ownerBy?: string, ownerByAny?: string[]): void {
+    const ownerIds = Array.from(
+      new Set(
+        (ownerByAny && ownerByAny.length > 0
+          ? ownerByAny
+          : ownerBy
+            ? [ownerBy]
+            : []
+        ).filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+      )
+    );
+
+    if (!ownerIds.length) {
+      return;
+    }
+
+    query.$and = query.$and || [];
+    query.$and.push({
+      $or: [
+        this.buildIdSelector('pickedBy', ownerIds),
+        {
+          $and: [
+            {
+              $or: [
+                { pickedBy: null },
+                { pickedBy: { $exists: false } },
+                { pickedBy: '' }
+              ]
+            },
+            this.buildIdSelector('addedBy', ownerIds)
+          ]
+        }
+      ]
+    });
+  }
+
   private static latestFollowUpHistoryEntry(
     lead: { statusHistory?: Array<Record<string, any>> },
     dueType: 'callback' | 'onboarding'
@@ -1455,7 +1491,11 @@ export class LeadService {
       const hasPickedFilter =
         !!filters.pickedBy || (filters.pickedByAny && filters.pickedByAny.length > 0);
       if (!hasPickedFilter && !filters.unclaimed && !filters.claimed) {
-        this.applyOwnerScope(query, filters.ownerBy, filters.ownerByAny, filters.strictOwner);
+        if (filters.registrationStatus) {
+          this.applyPrioritizedOwnerScope(query, filters.ownerBy, filters.ownerByAny);
+        } else {
+          this.applyOwnerScope(query, filters.ownerBy, filters.ownerByAny, filters.strictOwner);
+        }
       }
 
       if (filters.startDate || filters.endDate) {
@@ -2324,6 +2364,7 @@ export class LeadService {
             phone: { $first: '$phone' },
             landline: { $first: '$landline' },
             city: { $first: '$city' },
+            locality: { $first: '$locality' },
             address: { $first: '$address' },
             state: { $first: '$state' },
             primaryCategory: { $first: '$primaryCategory' },
@@ -2374,6 +2415,9 @@ export class LeadService {
           'Lead Name': this.textForSpreadsheet(row.name),
           'Phone/Landline': this.textForSpreadsheet(row.phone || row.landline || ''),
           City: this.textForSpreadsheet(row.city),
+          Locality: this.textForSpreadsheet(row.locality || ''),
+          'Local Area': this.textForSpreadsheet(row.address || row.city || ''),
+          'Gated Community': this.textForSpreadsheet(row.gatedCommunityName || ''),
           Category: this.categoryLabelForExport(row.primaryCategory || row.primarySkill),
           'Current Status': this.labelForReport(row.latestHistory?.status || row.currentStatus),
           'Status Reason': this.textForSpreadsheet(
@@ -2391,7 +2435,7 @@ export class LeadService {
           base['Secondary Category'] = this.textForSpreadsheet(row.secondaryCategory);
           base.Source = this.textForSpreadsheet(row.source);
           base['Source Details'] = this.textForSpreadsheet(row.sourceDetails);
-          base['Gated Community'] = row.isGatedCommunity ? 'Yes' : 'No';
+          base['Is Gated Community'] = row.isGatedCommunity ? 'Yes' : 'No';
           base['Gated Community Name'] = this.textForSpreadsheet(row.gatedCommunityName);
           base['Created At'] = this.formatIST(row.createdAt);
           base['Updated At'] = this.formatIST(row.updatedAt);
@@ -2475,6 +2519,9 @@ export class LeadService {
         'Lead Name': this.textForSpreadsheet(lead.name),
         'Phone/Landline': this.textForSpreadsheet(lead.phone || lead.landline || ''),
         City: this.textForSpreadsheet(lead.city),
+        Locality: this.textForSpreadsheet(lead.locality || ''),
+        'Local Area': this.textForSpreadsheet(lead.address || lead.city || ''),
+        'Gated Community': this.textForSpreadsheet(lead.gatedCommunityName || ''),
         Category: this.categoryLabelForExport(lead.primaryCategory || lead.primarySkill),
         'Current Status': this.labelForReport(latestHistory?.status || lead.status),
         'Status Reason': this.textForSpreadsheet(
@@ -2494,7 +2541,7 @@ export class LeadService {
         base['Secondary Category'] = this.textForSpreadsheet(lead.secondaryCategory || lead.secondarySkill);
         base.Source = this.textForSpreadsheet(lead.source);
         base['Source Details'] = this.textForSpreadsheet(lead.sourceDetails);
-        base['Gated Community'] = lead.isGatedCommunity ? 'Yes' : 'No';
+        base['Is Gated Community'] = lead.isGatedCommunity ? 'Yes' : 'No';
         base['Gated Community Name'] = this.textForSpreadsheet(lead.gatedCommunityName);
         base['Created At'] = this.formatIST(lead.createdAt);
         base['Updated At'] = this.formatIST(lead.updatedAt);
@@ -2596,6 +2643,9 @@ export class LeadService {
         'Lead Name': this.textForSpreadsheet(lead.name),
         'Phone/Landline': this.textForSpreadsheet(lead.phone || lead.landline || ''),
         City: this.textForSpreadsheet(lead.city),
+        Locality: this.textForSpreadsheet(lead.locality || ''),
+        'Local Area': this.textForSpreadsheet(lead.address || lead.city || ''),
+        'Gated Community': this.textForSpreadsheet(lead.gatedCommunityName || ''),
         Category: this.categoryLabelForExport(lead.primaryCategory || lead.primarySkill),
         'Current Status': this.labelForReport(latestHistory?.status || lead.status),
         'Status Reason': this.textForSpreadsheet(
@@ -2615,7 +2665,7 @@ export class LeadService {
         base['Secondary Category'] = this.textForSpreadsheet(lead.secondaryCategory || lead.secondarySkill);
         base.Source = this.textForSpreadsheet(lead.source);
         base['Source Details'] = this.textForSpreadsheet(lead.sourceDetails);
-        base['Gated Community'] = lead.isGatedCommunity ? 'Yes' : 'No';
+        base['Is Gated Community'] = lead.isGatedCommunity ? 'Yes' : 'No';
         base['Gated Community Name'] = this.textForSpreadsheet(lead.gatedCommunityName);
         base['Created At'] = this.formatIST(lead.createdAt);
         base['Updated At'] = this.formatIST(lead.updatedAt);
@@ -2712,6 +2762,9 @@ export class LeadService {
         'Lead Name': this.textForSpreadsheet(lead.name),
         'Phone/Landline': this.textForSpreadsheet(lead.phone || lead.landline || ''),
         City: this.textForSpreadsheet(lead.city),
+        Locality: this.textForSpreadsheet(lead.locality || ''),
+        'Local Area': this.textForSpreadsheet(lead.address || lead.city || ''),
+        'Gated Community': this.textForSpreadsheet(lead.gatedCommunityName || ''),
         Category: this.categoryLabelForExport(lead.primaryCategory || lead.primarySkill),
         'Current Status': this.labelForReport(latestHistory?.status || lead.status),
         'Status Reason': this.textForSpreadsheet(
@@ -2731,7 +2784,7 @@ export class LeadService {
         base['Secondary Category'] = this.textForSpreadsheet(lead.secondaryCategory || lead.secondarySkill);
         base.Source = this.textForSpreadsheet(lead.source);
         base['Source Details'] = this.textForSpreadsheet(lead.sourceDetails);
-        base['Gated Community'] = lead.isGatedCommunity ? 'Yes' : 'No';
+        base['Is Gated Community'] = lead.isGatedCommunity ? 'Yes' : 'No';
         base['Gated Community Name'] = this.textForSpreadsheet(lead.gatedCommunityName);
         base['Created At'] = this.formatIST(lead.createdAt);
         base['Updated At'] = this.formatIST(lead.updatedAt);
@@ -2828,6 +2881,9 @@ export class LeadService {
         Category: this.categoryLabelForExport(lead.primaryCategory || lead.primarySkill),
         'Sub Category': this.textForSpreadsheet(lead.secondaryCategory || lead.secondarySkill),
         City: this.textForSpreadsheet(lead.city),
+        Locality: this.textForSpreadsheet(lead.locality || ''),
+        'Local Area': this.textForSpreadsheet(lead.address || lead.city || ''),
+        'Gated Community': this.textForSpreadsheet(lead.gatedCommunityName || ''),
         'Added Date': this.formatIST(lead.createdAt),
         'Picked By': this.textForSpreadsheet(lead.pickedByName || ''),
         'Contact Status': this.contactStatusForExport(lead),
@@ -2838,7 +2894,7 @@ export class LeadService {
       if (lead.state) row.State = this.textForSpreadsheet(lead.state);
       if (lead.pincode) row.Pincode = this.textForSpreadsheet(lead.pincode);
       if (lead.isGatedCommunity) {
-        row['Gated Community'] = 'Yes';
+        row['Is Gated Community'] = 'Yes';
         row['Gated Community Name'] = this.textForSpreadsheet(lead.gatedCommunityName);
       }
 
@@ -3996,13 +4052,8 @@ export class LeadService {
         const idSet = new Set(identityIds);
         let registered = 0;
         for (const lead of registeredLeads) {
-          const isMatched =
-            (lead.pickedBy && idSet.has(String(lead.pickedBy))) ||
-            (lead.addedBy && idSet.has(String(lead.addedBy))) ||
-            (Array.isArray(lead.statusHistory) &&
-              lead.statusHistory.some(
-                (entry: any) => entry?.changedBy && idSet.has(String(entry.changedBy))
-              ));
+          const ownerId = lead.pickedBy || lead.addedBy;
+          const isMatched = ownerId && idSet.has(String(ownerId));
           if (isMatched) {
             registered++;
           }

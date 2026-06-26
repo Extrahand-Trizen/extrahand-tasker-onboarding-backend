@@ -433,19 +433,15 @@ class LeadService {
             status === 'contacted_not_interested' ||
             status === 'contacted_not_lifted');
     }
-    /** Date filter for registered-candidate list pages (aligns with conversion lastCheckedAt). */
-    static buildRegistrationDateFilterClause(startDate, endDate) {
+    /** Date filter for registered-candidate list pages. */
+    static buildRegistrationDateFilterClause(registrationStatus, startDate, endDate) {
         const dateRange = this.buildBoundedDateRange(startDate, endDate);
         if (!dateRange)
             return null;
-        return {
-            $or: [
-                { 'conversionData.lastCheckedAt': dateRange },
-                { updatedAt: dateRange },
-                { pickedAt: dateRange },
-                { createdAt: dateRange },
-            ],
-        };
+        const field = registrationStatus === 'registered_verified'
+            ? 'conversionData.registeredVerifiedAt'
+            : 'conversionData.registeredAt';
+        return { [field]: dateRange };
     }
     /** Date filter for interested / not interested / not lifted queues. */
     static buildStatusTransitionDateFilterClause(status, startDate, endDate) {
@@ -474,7 +470,7 @@ class LeadService {
             return null;
         if (filters.registrationStatus === 'registered' ||
             filters.registrationStatus === 'registered_verified') {
-            return this.buildRegistrationDateFilterClause(filters.startDate, filters.endDate);
+            return this.buildRegistrationDateFilterClause(filters.registrationStatus, filters.startDate, filters.endDate);
         }
         if (filters.status && this.isContactOutcomeStatus(filters.status)) {
             return this.buildStatusTransitionDateFilterClause(filters.status, filters.startDate, filters.endDate);
@@ -755,6 +751,34 @@ class LeadService {
             query.$and.push(this.buildOwnerScopeClause(ownerIds));
         }
     }
+    static applyPrioritizedOwnerScope(query, ownerBy, ownerByAny) {
+        const ownerIds = Array.from(new Set((ownerByAny && ownerByAny.length > 0
+            ? ownerByAny
+            : ownerBy
+                ? [ownerBy]
+                : []).filter((id) => typeof id === 'string' && id.trim().length > 0)));
+        if (!ownerIds.length) {
+            return;
+        }
+        query.$and = query.$and || [];
+        query.$and.push({
+            $or: [
+                this.buildIdSelector('pickedBy', ownerIds),
+                {
+                    $and: [
+                        {
+                            $or: [
+                                { pickedBy: null },
+                                { pickedBy: { $exists: false } },
+                                { pickedBy: '' }
+                            ]
+                        },
+                        this.buildIdSelector('addedBy', ownerIds)
+                    ]
+                }
+            ]
+        });
+    }
     static latestFollowUpHistoryEntry(lead, dueType) {
         const history = Array.isArray(lead.statusHistory) ? lead.statusHistory : [];
         void dueType;
@@ -995,7 +1019,12 @@ class LeadService {
             }
             const hasPickedFilter = !!filters.pickedBy || (filters.pickedByAny && filters.pickedByAny.length > 0);
             if (!hasPickedFilter && !filters.unclaimed && !filters.claimed) {
-                this.applyOwnerScope(query, filters.ownerBy, filters.ownerByAny, filters.strictOwner);
+                if (filters.registrationStatus) {
+                    this.applyPrioritizedOwnerScope(query, filters.ownerBy, filters.ownerByAny);
+                }
+                else {
+                    this.applyOwnerScope(query, filters.ownerBy, filters.ownerByAny, filters.strictOwner);
+                }
             }
             if (filters.startDate || filters.endDate) {
                 const dateClause = this.buildSearchDateFilterClause(filters);
@@ -3107,10 +3136,8 @@ class LeadService {
                 const idSet = new Set(identityIds);
                 let registered = 0;
                 for (const lead of registeredLeads) {
-                    const isMatched = (lead.pickedBy && idSet.has(String(lead.pickedBy))) ||
-                        (lead.addedBy && idSet.has(String(lead.addedBy))) ||
-                        (Array.isArray(lead.statusHistory) &&
-                            lead.statusHistory.some((entry) => entry?.changedBy && idSet.has(String(entry.changedBy))));
+                    const ownerId = lead.pickedBy || lead.addedBy;
+                    const isMatched = ownerId && idSet.has(String(ownerId));
                     if (isMatched) {
                         registered++;
                     }

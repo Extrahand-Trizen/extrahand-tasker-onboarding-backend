@@ -3,6 +3,7 @@ export interface ConversionStatus {
     platformUid?: string;
     isAadhaarVerified?: boolean;
     name?: string;
+    createdAt?: Date;
 }
 /**
  * Look up platform user by phone (for onboarding conversion status).

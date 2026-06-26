@@ -60,6 +60,7 @@ async function getConversionStatusByPhone(phone) {
             platformUid: data.uid,
             isAadhaarVerified: !!data.isAadhaarVerified,
             name: data.name,
+            createdAt: data.createdAt ? new Date(data.createdAt) : undefined,
         };
     }
     catch (err) {

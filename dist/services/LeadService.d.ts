@@ -253,7 +253,7 @@ export declare class LeadService {
     };
     private static buildBoundedDateRange;
     private static isContactOutcomeStatus;
-    /** Date filter for registered-candidate list pages (aligns with conversion lastCheckedAt). */
+    /** Date filter for registered-candidate list pages. */
     private static buildRegistrationDateFilterClause;
     /** Date filter for interested / not interested / not lifted queues. */
     private static buildStatusTransitionDateFilterClause;
@@ -282,6 +282,7 @@ export declare class LeadService {
      */
     private static normalizeLeadData;
     private static applyOwnerScope;
+    private static applyPrioritizedOwnerScope;
     private static latestFollowUpHistoryEntry;
     private static filterFollowUpsByOwner;
     /**

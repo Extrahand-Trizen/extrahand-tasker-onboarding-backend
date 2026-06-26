@@ -81,7 +81,10 @@ function shouldRefreshConversionSnapshot(lead) {
     if (!hasPhone) {
         return false;
     }
-    if (lead.conversionData?.platformUid && lead.conversionData?.isAadhaarVerified !== true) {
+    // Refresh if registered but aadhaar not yet verified, OR if registeredAt timestamp
+    // is missing (backfill for older records that pre-date the registeredAt field)
+    if (lead.conversionData?.platformUid &&
+        (lead.conversionData?.isAadhaarVerified !== true || !lead.conversionData?.registeredAt)) {
         return true;
     }
     const lastCheckedAt = lead.conversionData?.lastCheckedAt
@@ -328,15 +331,20 @@ class LeadController {
                 const phone = lead.phone || lead.landline;
                 const status = await (0, UserLookupService_1.getConversionStatusByPhone)(phone);
                 if (status.converted && (status.platformUid || status.isAadhaarVerified !== undefined)) {
-                    const refreshedLead = await Lead_1.default.findOneAndUpdate({ leadId }, {
+                    const update = {
                         $set: {
-                            conversionData: {
-                                platformUid: status.platformUid,
-                                isAadhaarVerified: status.isAadhaarVerified,
-                                lastCheckedAt: new Date()
-                            }
+                            'conversionData.platformUid': status.platformUid,
+                            'conversionData.isAadhaarVerified': status.isAadhaarVerified,
+                            'conversionData.lastCheckedAt': new Date(),
+                        },
+                        $min: {
+                            'conversionData.registeredAt': status.createdAt || new Date(),
                         }
-                    }, { new: true });
+                    };
+                    if (status.isAadhaarVerified) {
+                        update.$min['conversionData.registeredVerifiedAt'] = new Date();
+                    }
+                    const refreshedLead = await Lead_1.default.findOneAndUpdate({ leadId }, update, { new: true });
                     if (refreshedLead) {
                         leadToReturn = refreshedLead;
                     }
@@ -401,15 +409,20 @@ class LeadController {
             const status = await (0, UserLookupService_1.getConversionStatusByPhone)(phone);
             // Optionally cache on lead for list views
             if (status.converted && (status.platformUid || status.isAadhaarVerified !== undefined)) {
-                await Lead_1.default.findOneAndUpdate({ leadId }, {
+                const update = {
                     $set: {
-                        conversionData: {
-                            platformUid: status.platformUid,
-                            isAadhaarVerified: status.isAadhaarVerified,
-                            lastCheckedAt: new Date()
-                        }
+                        'conversionData.platformUid': status.platformUid,
+                        'conversionData.isAadhaarVerified': status.isAadhaarVerified,
+                        'conversionData.lastCheckedAt': new Date(),
+                    },
+                    $min: {
+                        'conversionData.registeredAt': status.createdAt || new Date(),
                     }
-                });
+                };
+                if (status.isAadhaarVerified) {
+                    update.$min['conversionData.registeredVerifiedAt'] = new Date();
+                }
+                await Lead_1.default.findOneAndUpdate({ leadId }, update);
             }
             res.json({
                 success: true,
@@ -479,16 +492,35 @@ class LeadController {
                 const conversion = await (0, UserLookupService_1.getConversionStatusByPhone)(phone);
                 platformUid = conversion.platformUid;
                 if (platformUid || conversion.isAadhaarVerified !== undefined) {
-                    await Lead_1.default.findOneAndUpdate({ leadId }, {
+                    const registeredDate = lead.conversionData?.lastCheckedAt || new Date();
+                    const update = {
                         $set: {
-                            conversionData: {
-                                platformUid,
-                                isAadhaarVerified: conversion.isAadhaarVerified,
-                                lastCheckedAt: new Date()
-                            }
+                            'conversionData.platformUid': platformUid,
+                            'conversionData.isAadhaarVerified': conversion.isAadhaarVerified,
+                            'conversionData.lastCheckedAt': new Date(),
+                        },
+                        $min: {
+                            'conversionData.registeredAt': registeredDate,
                         }
-                    });
+                    };
+                    if (conversion.isAadhaarVerified) {
+                        update.$min['conversionData.registeredVerifiedAt'] = registeredDate;
+                    }
+                    await Lead_1.default.findOneAndUpdate({ leadId }, update);
                 }
+            }
+            else {
+                // Backfill registeredAt/registeredVerifiedAt for existing platformUid
+                const registeredDate = lead.conversionData?.lastCheckedAt || new Date();
+                const backfillUpdate = {
+                    $min: {
+                        'conversionData.registeredAt': registeredDate,
+                    }
+                };
+                if (lead.conversionData?.isAadhaarVerified) {
+                    backfillUpdate.$min['conversionData.registeredVerifiedAt'] = registeredDate;
+                }
+                await Lead_1.default.findOneAndUpdate({ leadId }, backfillUpdate);
             }
             if (!platformUid) {
                 res.json({

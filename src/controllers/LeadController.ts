@@ -93,6 +93,7 @@ function shouldRefreshConversionSnapshot(lead: {
   conversionData?: {
     platformUid?: string;
     isAadhaarVerified?: boolean;
+    registeredAt?: Date;
     lastCheckedAt?: Date;
   };
 }): boolean {
@@ -101,7 +102,12 @@ function shouldRefreshConversionSnapshot(lead: {
     return false;
   }
 
-  if (lead.conversionData?.platformUid && lead.conversionData?.isAadhaarVerified !== true) {
+  // Refresh if registered but aadhaar not yet verified, OR if registeredAt timestamp
+  // is missing (backfill for older records that pre-date the registeredAt field)
+  if (
+    lead.conversionData?.platformUid &&
+    (lead.conversionData?.isAadhaarVerified !== true || !lead.conversionData?.registeredAt)
+  ) {
     return true;
   }
 
