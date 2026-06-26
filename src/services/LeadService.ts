@@ -502,34 +502,34 @@ export class LeadService {
   }
 
   private static buildCityFilterMatch(city: string): Record<string, unknown> {
-    const trimmed = city.trim();
-    const escaped = this.escapeRegex(trimmed);
+    const escaped = this.escapeRegex(city.trim());
     return {
-      city: { $regex: new RegExp(escaped, 'i') },
+      $or: [
+        { city: { $regex: new RegExp(escaped, 'i') } },
+        { address: { $regex: new RegExp(escaped, 'i') } },
+        { locality: { $regex: new RegExp(escaped, 'i') } },
+      ],
     };
   }
 
   private static buildLocalAreaFilterMatch(localArea: string): Record<string, unknown> {
-    const trimmed = localArea.trim();
-    const escaped = this.escapeRegex(trimmed);
+    const escaped = this.escapeRegex(localArea.trim());
     return {
       $or: [
-        { address: this.buildExactCaseInsensitiveMatch(trimmed) },
-        { address: { $regex: new RegExp(`,\\s*${escaped}\\s*,`, 'i') } },
-        { address: { $regex: new RegExp(`^${escaped}\\s*,`, 'i') } },
-        { city: { $regex: new RegExp(`,\\s*${escaped}\\s*,`, 'i') } },
-        { city: { $regex: new RegExp(`^${escaped}\\s*,`, 'i') } },
+        { address: { $regex: new RegExp(escaped, 'i') } },
+        { city: { $regex: new RegExp(escaped, 'i') } },
+        { locality: { $regex: new RegExp(escaped, 'i') } },
       ],
     };
   }
 
   private static buildLocalityFilterMatch(locality: string): Record<string, unknown> {
-    const trimmed = locality.trim();
-    const escaped = this.escapeRegex(trimmed);
+    const escaped = this.escapeRegex(locality.trim());
     return {
       $or: [
-        { locality: this.buildExactCaseInsensitiveMatch(trimmed) },
-        { locality: { $regex: new RegExp(`,\\s*${escaped}(\\s*,|\\s*$)`, 'i') } },
+        { locality: { $regex: new RegExp(escaped, 'i') } },
+        { address: { $regex: new RegExp(escaped, 'i') } },
+        { city: { $regex: new RegExp(escaped, 'i') } },
       ],
     };
   }
@@ -557,14 +557,26 @@ export class LeadService {
       this.pushLocationFilterClause(match, this.buildLocationSearchMatch(filters.locationSearch));
       return;
     }
+
+    const locationConditions: Record<string, unknown>[] = [];
+
     if (filters.city) {
-      this.pushLocationFilterClause(match, this.buildCityFilterMatch(filters.city));
+      locationConditions.push(this.buildCityFilterMatch(filters.city));
     }
     if (filters.locality) {
-      this.pushLocationFilterClause(match, this.buildLocalityFilterMatch(filters.locality));
+      locationConditions.push(this.buildLocalityFilterMatch(filters.locality));
     }
     if (filters.localArea) {
-      this.pushLocationFilterClause(match, this.buildLocalAreaFilterMatch(filters.localArea));
+      locationConditions.push(this.buildLocalAreaFilterMatch(filters.localArea));
+    }
+
+    if (locationConditions.length === 0) return;
+
+    if (locationConditions.length === 1) {
+      this.pushLocationFilterClause(match, locationConditions[0]);
+    } else {
+      const existingAnd = match.$and as Record<string, unknown>[] | undefined;
+      match.$and = [...(existingAnd || []), ...locationConditions];
     }
   }
 
@@ -639,6 +651,42 @@ export class LeadService {
     return String(value).trim();
   }
 
+  /** City column — prefer plain city name; parse legacy full addresses stored in city. */
+  private static cityForExport(city?: string | null, address?: string | null): string {
+    const cityVal = (city || '').trim();
+    const addressVal = (address || '').trim();
+
+    if (cityVal && !this.isFullAddressLike(cityVal)) {
+      return cityVal;
+    }
+
+    return (
+      this.extractCityFromStoredValue(cityVal) ||
+      this.extractCityFromStoredValue(addressVal) ||
+      cityVal
+    );
+  }
+
+  /**
+   * Local Area column — matches lead detail UI (`lead.address`).
+   * Falls back to city only when address is empty and city is a short label.
+   * Legacy full Google-style addresses stored in city are not used as fallback
+   * (dashboard shows "—" for Local Area in that case).
+   */
+  private static localAreaForExport(city?: string | null, address?: string | null): string {
+    const addressVal = (address || '').trim();
+    if (addressVal) {
+      return addressVal;
+    }
+
+    const cityVal = (city || '').trim();
+    if (!cityVal || this.isFullAddressLike(cityVal)) {
+      return '';
+    }
+
+    return cityVal;
+  }
+
   private static applyWorksheetLayout(
     worksheet: XLSX.WorkSheet,
     rows: Array<Record<string, string>>
@@ -654,6 +702,9 @@ export class LeadService {
       'Lead Name': { min: 24, max: 40 },
       'Phone/Landline': { min: 18, max: 25 },
       City: { min: 18, max: 28 },
+      Locality: { min: 16, max: 28 },
+      'Local Area': { min: 28, max: 55 },
+      'Gated Community': { min: 18, max: 32 },
       State: { min: 16, max: 22 },
       'Current Status': { min: 24, max: 35 },
       'Status Reason': { min: 24, max: 45 },
@@ -1617,7 +1668,12 @@ export class LeadService {
       };
 
       if (filters.city) {
-        query.city = { $regex: new RegExp(filters.city, 'i') };
+        const escaped = this.escapeRegex(filters.city.trim());
+        query.$or = [
+          { city: { $regex: new RegExp(escaped, 'i') } },
+          { address: { $regex: new RegExp(escaped, 'i') } },
+          { locality: { $regex: new RegExp(escaped, 'i') } },
+        ];
       }
 
       if (filters.primarySkill) {
@@ -1729,7 +1785,12 @@ export class LeadService {
 
       const query: any = {};
       if (filters.city) {
-        query.city = { $regex: new RegExp(filters.city, 'i') };
+        const escaped = this.escapeRegex(filters.city.trim());
+        query.$or = [
+          { city: { $regex: new RegExp(escaped, 'i') } },
+          { address: { $regex: new RegExp(escaped, 'i') } },
+          { locality: { $regex: new RegExp(escaped, 'i') } },
+        ];
       }
       if (filters.primarySkill) {
         query.$and = query.$and || [];
@@ -2414,9 +2475,9 @@ export class LeadService {
           'Lead ID': this.textForSpreadsheet(row.leadId),
           'Lead Name': this.textForSpreadsheet(row.name),
           'Phone/Landline': this.textForSpreadsheet(row.phone || row.landline || ''),
-          City: this.textForSpreadsheet(row.city),
+          City: this.textForSpreadsheet(this.cityForExport(row.city, row.address)),
           Locality: this.textForSpreadsheet(row.locality || ''),
-          'Local Area': this.textForSpreadsheet(row.address || row.city || ''),
+          'Local Area': this.textForSpreadsheet(this.localAreaForExport(row.city, row.address)),
           'Gated Community': this.textForSpreadsheet(row.gatedCommunityName || ''),
           Category: this.categoryLabelForExport(row.primaryCategory || row.primarySkill),
           'Current Status': this.labelForReport(row.latestHistory?.status || row.currentStatus),
@@ -2518,9 +2579,9 @@ export class LeadService {
         'Lead ID': this.textForSpreadsheet(lead.leadId),
         'Lead Name': this.textForSpreadsheet(lead.name),
         'Phone/Landline': this.textForSpreadsheet(lead.phone || lead.landline || ''),
-        City: this.textForSpreadsheet(lead.city),
+        City: this.textForSpreadsheet(this.cityForExport(lead.city, lead.address)),
         Locality: this.textForSpreadsheet(lead.locality || ''),
-        'Local Area': this.textForSpreadsheet(lead.address || lead.city || ''),
+        'Local Area': this.textForSpreadsheet(this.localAreaForExport(lead.city, lead.address)),
         'Gated Community': this.textForSpreadsheet(lead.gatedCommunityName || ''),
         Category: this.categoryLabelForExport(lead.primaryCategory || lead.primarySkill),
         'Current Status': this.labelForReport(latestHistory?.status || lead.status),
@@ -2642,9 +2703,9 @@ export class LeadService {
         'Lead ID': this.textForSpreadsheet(lead.leadId),
         'Lead Name': this.textForSpreadsheet(lead.name),
         'Phone/Landline': this.textForSpreadsheet(lead.phone || lead.landline || ''),
-        City: this.textForSpreadsheet(lead.city),
+        City: this.textForSpreadsheet(this.cityForExport(lead.city, lead.address)),
         Locality: this.textForSpreadsheet(lead.locality || ''),
-        'Local Area': this.textForSpreadsheet(lead.address || lead.city || ''),
+        'Local Area': this.textForSpreadsheet(this.localAreaForExport(lead.city, lead.address)),
         'Gated Community': this.textForSpreadsheet(lead.gatedCommunityName || ''),
         Category: this.categoryLabelForExport(lead.primaryCategory || lead.primarySkill),
         'Current Status': this.labelForReport(latestHistory?.status || lead.status),
@@ -2761,9 +2822,9 @@ export class LeadService {
         'Lead ID': this.textForSpreadsheet(lead.leadId),
         'Lead Name': this.textForSpreadsheet(lead.name),
         'Phone/Landline': this.textForSpreadsheet(lead.phone || lead.landline || ''),
-        City: this.textForSpreadsheet(lead.city),
+        City: this.textForSpreadsheet(this.cityForExport(lead.city, lead.address)),
         Locality: this.textForSpreadsheet(lead.locality || ''),
-        'Local Area': this.textForSpreadsheet(lead.address || lead.city || ''),
+        'Local Area': this.textForSpreadsheet(this.localAreaForExport(lead.city, lead.address)),
         'Gated Community': this.textForSpreadsheet(lead.gatedCommunityName || ''),
         Category: this.categoryLabelForExport(lead.primaryCategory || lead.primarySkill),
         'Current Status': this.labelForReport(latestHistory?.status || lead.status),
@@ -2880,9 +2941,9 @@ export class LeadService {
         Phone: this.textForSpreadsheet(lead.phone || lead.landline || ''),
         Category: this.categoryLabelForExport(lead.primaryCategory || lead.primarySkill),
         'Sub Category': this.textForSpreadsheet(lead.secondaryCategory || lead.secondarySkill),
-        City: this.textForSpreadsheet(lead.city),
+        City: this.textForSpreadsheet(this.cityForExport(lead.city, lead.address)),
         Locality: this.textForSpreadsheet(lead.locality || ''),
-        'Local Area': this.textForSpreadsheet(lead.address || lead.city || ''),
+        'Local Area': this.textForSpreadsheet(this.localAreaForExport(lead.city, lead.address)),
         'Gated Community': this.textForSpreadsheet(lead.gatedCommunityName || ''),
         'Added Date': this.formatIST(lead.createdAt),
         'Picked By': this.textForSpreadsheet(lead.pickedByName || ''),

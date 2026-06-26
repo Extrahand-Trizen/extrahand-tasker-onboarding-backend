@@ -242,6 +242,15 @@ export declare class LeadService {
      */
     private static buildStrictOwnerScopeClause;
     private static textForSpreadsheet;
+    /** City column — prefer plain city name; parse legacy full addresses stored in city. */
+    private static cityForExport;
+    /**
+     * Local Area column — matches lead detail UI (`lead.address`).
+     * Falls back to city only when address is empty and city is a short label.
+     * Legacy full Google-style addresses stored in city are not used as fallback
+     * (dashboard shows "—" for Local Area in that case).
+     */
+    private static localAreaForExport;
     private static applyWorksheetLayout;
     /**
      * Parse from/to query params into IST day bounds (inclusive).
