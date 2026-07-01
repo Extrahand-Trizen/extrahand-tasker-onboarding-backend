@@ -371,7 +371,9 @@ export class UserManagementController {
         createdBy: actorId,
       });
 
-      const resetLink = `${env.FRONTEND_URL}/reset-password?token=${resetToken.token}`;
+      const origin = req.get('origin') || req.get('referer')?.replace(/\/$/, '') || env.FRONTEND_URL;
+      const baseUrl = origin.replace(/\/$/, '');
+      const resetLink = `${baseUrl}/reset-password?token=${resetToken.token}`;
 
       logger.info('Password reset token created', {
         userId: user.userId,

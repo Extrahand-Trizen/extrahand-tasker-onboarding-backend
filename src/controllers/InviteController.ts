@@ -11,9 +11,9 @@ import { EmailServiceClient } from '../services/EmailServiceClient';
  * - Production: https://partner.extrahand.in
  * - Development: http://localhost:3000
  */
-function getInviteLink(token: string): string {
-  // Ensure FRONTEND_URL doesn't have trailing slash
-  const baseUrl = env.FRONTEND_URL.replace(/\/$/, '');
+function getInviteLink(token: string, requestOrigin?: string): string {
+  // Use origin from request if available, fallback to FRONTEND_URL
+  const baseUrl = (requestOrigin || env.FRONTEND_URL).replace(/\/$/, '');
   return `${baseUrl}/invite/${token}`;
 }
 
@@ -83,7 +83,8 @@ export class InviteController {
         expiresAt: new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000),
       });
 
-      const inviteLink = getInviteLink(invite.token);
+      const origin = req.get('origin') || req.get('referer')?.replace(/\/$/, '');
+      const inviteLink = getInviteLink(invite.token, origin);
 
       // Send invite email (fire and forget - don't block on email)
       EmailServiceClient.sendAdminInviteEmail(
@@ -355,7 +356,8 @@ export class InviteController {
       invite.status = 'pending';
       await invite.save();
 
-      const inviteLink = getInviteLink(invite.token);
+      const origin = req.get('origin') || req.get('referer')?.replace(/\/$/, '');
+      const inviteLink = getInviteLink(invite.token, origin);
 
       logger.info('Invite resent', {
         inviteId,
