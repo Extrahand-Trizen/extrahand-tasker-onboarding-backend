@@ -102,13 +102,8 @@ function shouldRefreshConversionSnapshot(lead: {
     return false;
   }
 
-  // Refresh if registered but aadhaar not yet verified, OR if registeredAt timestamp
-  // is missing (backfill for older records that pre-date the registeredAt field)
-  if (
-    lead.conversionData?.platformUid &&
-    (lead.conversionData?.isAadhaarVerified !== true || !lead.conversionData?.registeredAt)
-  ) {
-    return true;
+  if (lead.conversionData?.isAadhaarVerified === true) {
+    return false;
   }
 
   const lastCheckedAt = lead.conversionData?.lastCheckedAt
@@ -119,7 +114,8 @@ function shouldRefreshConversionSnapshot(lead: {
     Number.isNaN(lastCheckedAt) ||
     Date.now() - lastCheckedAt >= CONVERSION_STATUS_CACHE_MS;
 
-  return isSnapshotStale && !lead.conversionData?.platformUid;
+  // Respect lastCheckedAt for all cases (including registered, awaiting Aadhaar).
+  return isSnapshotStale;
 }
 
 export class LeadController {
@@ -188,6 +184,37 @@ export class LeadController {
         success: false,
         error: 'Failed to fetch dashboard metrics',
         message: error.message
+      });
+    }
+  }
+
+  static async getDashboardSummary(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      if (!req.admin) {
+        res.status(401).json({
+          success: false,
+          error: 'Authentication required',
+        });
+        return;
+      }
+
+      const role = req.admin.role as UserRole;
+      const userId = getUserId(req);
+      const summary = await LeadService.getDashboardSummary({ role, userId });
+
+      res.json({
+        success: true,
+        data: summary,
+      });
+    } catch (error: any) {
+      logger.error('Error in getDashboardSummary controller', {
+        error: error.message,
+        stack: error.stack,
+      });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch dashboard summary',
+        message: error.message,
       });
     }
   }

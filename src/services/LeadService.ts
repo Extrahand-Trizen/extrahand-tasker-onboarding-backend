@@ -5,6 +5,11 @@ import { DuplicateCheckService } from './DuplicateCheckService';
 import { ApprovalService } from './ApprovalService';
 import { canUpdateStatus, UserRole } from '../lib/permissions';
 import logger from '../config/logger';
+import {
+  buildFollowUpStatsCacheKey,
+  getCachedFollowUpStats,
+  setCachedFollowUpStats,
+} from '../utils/followUpStatsCache';
 import { v4 as uuidv4 } from 'uuid';
 import { validateAndNormalizeLeadStatusUpdate } from '../validators/leadStatusValidator';
 import XLSX from 'xlsx';
@@ -82,6 +87,17 @@ export interface UpdateStatusData {
 }
 
 export type RegistrationStatusFilter = 'not_registered' | 'registered' | 'registered_verified';
+
+export interface DashboardSummary {
+  total: number;
+  myLeadsAdded?: number;
+  approved: number;
+  interested: number;
+  notInterested: number;
+  notRegistered?: number;
+  registered?: number;
+  registeredVerified?: number;
+}
 
 export interface SearchFilters {
   status?: LeadStatus;
@@ -501,13 +517,17 @@ export class LeadService {
     Object.assign(match, clause);
   }
 
+  /** City filter: match city (prefix), address, and locality so partial/embedded place names still match. */
   private static buildCityFilterMatch(city: string): Record<string, unknown> {
-    const escaped = this.escapeRegex(city.trim());
+    const trimmed = city.trim();
+    if (!trimmed) return {};
+    const escaped = this.escapeRegex(trimmed);
+    const substringRx = new RegExp(escaped, 'i');
     return {
       $or: [
-        { city: { $regex: new RegExp(escaped, 'i') } },
-        { address: { $regex: new RegExp(escaped, 'i') } },
-        { locality: { $regex: new RegExp(escaped, 'i') } },
+        { city: { $regex: new RegExp(`^${escaped}`, 'i') } },
+        { address: { $regex: substringRx } },
+        { locality: { $regex: substringRx } },
       ],
     };
   }
@@ -1307,6 +1327,175 @@ export class LeadService {
     });
   }
 
+  private static buildFollowUpStatsDocumentMatch(
+    filters: Pick<FollowUpQueueFilters, 'addedBy' | 'addedByAny' | 'ownerBy' | 'ownerByAny' | 'pickedBy'>,
+  ): Record<string, unknown> {
+    const scope: Record<string, unknown> = {};
+    if (filters.addedByAny && filters.addedByAny.length > 0) {
+      scope.addedBy = { $in: filters.addedByAny };
+    } else if (filters.addedBy) {
+      scope.addedBy = filters.addedBy;
+    }
+
+    if (filters.pickedBy) {
+      scope.pickedBy = filters.pickedBy;
+    } else {
+      this.applyOwnerScope(scope, filters.ownerBy, filters.ownerByAny);
+    }
+
+    const existingScopeAnd = Array.isArray(scope.$and) ? scope.$and : [];
+    delete scope.$and;
+
+    return {
+      ...scope,
+      $and: [
+        ...existingScopeAnd,
+        {
+          $or: [
+            { nextCallbackAt: { $exists: true, $ne: null } },
+            { expectedOnboardingAt: { $exists: true, $ne: null } },
+          ],
+        },
+      ],
+    };
+  }
+
+  private static buildFollowUpStatsOwnerStage(
+    filters: Pick<FollowUpQueueFilters, 'followUpOwnerBy' | 'followUpOwnerByAny'>,
+  ): Record<string, unknown>[] {
+    const ownerIds = Array.from(
+      new Set(
+        (filters.followUpOwnerByAny && filters.followUpOwnerByAny.length > 0
+          ? filters.followUpOwnerByAny
+          : filters.followUpOwnerBy
+            ? [filters.followUpOwnerBy]
+            : []
+        ).filter((id): id is string => typeof id === 'string' && id.trim().length > 0),
+      ),
+    );
+
+    if (!ownerIds.length) {
+      return [];
+    }
+
+    return [{ $match: { latestChangedBy: { $in: ownerIds } } }];
+  }
+
+  private static buildFollowUpQueueLeadMatch(filters: FollowUpQueueFilters): Record<string, unknown> {
+    const query: Record<string, unknown> = {};
+
+    if (filters.city) {
+      this.pushLocationFilterClause(query, this.buildCityFilterMatch(filters.city));
+    }
+    if (filters.primarySkill) {
+      query.$and = query.$and || [];
+      (query.$and as Record<string, unknown>[]).push(this.buildCategoryMatch(filters.primarySkill));
+    }
+    if (filters.addedByAny && filters.addedByAny.length > 0) {
+      query.addedBy = { $in: filters.addedByAny };
+    } else if (filters.addedBy) {
+      query.addedBy = filters.addedBy;
+    }
+
+    if (filters.pickedBy) {
+      query.pickedBy = filters.pickedBy;
+    } else {
+      this.applyOwnerScope(query, filters.ownerBy, filters.ownerByAny);
+    }
+
+    if (filters.attempts) {
+      query.attempts = filters.attempts;
+    }
+
+    const dueType = filters.dueType || 'all';
+    if (dueType === 'callback') {
+      query.nextCallbackAt = { $exists: true, $ne: null };
+    } else if (dueType === 'onboarding') {
+      query.expectedOnboardingAt = { $exists: true, $ne: null };
+    } else {
+      query.$and = query.$and || [];
+      (query.$and as Record<string, unknown>[]).push({
+        $or: [
+          { nextCallbackAt: { $exists: true, $ne: null } },
+          { expectedOnboardingAt: { $exists: true, $ne: null } },
+        ],
+      });
+    }
+
+    return query;
+  }
+
+  private static buildFollowUpBucketMatch(
+    filters: FollowUpQueueFilters,
+    startOfToday: Date,
+    endOfToday: Date,
+    now: Date,
+  ): Record<string, unknown> {
+    const bucket = filters.bucket || 'all';
+
+    if (bucket === 'today') {
+      return { dueAt: { $gte: startOfToday, $lte: endOfToday } };
+    }
+    if (bucket === 'overdue') {
+      return {
+        $and: [
+          { dueAt: { $lt: now } },
+          { attempts: { $ne: 'max_reached' } },
+        ],
+      };
+    }
+    if (bucket === 'upcoming') {
+      return { dueAt: { $gt: endOfToday } };
+    }
+
+    const dueAt: Record<string, unknown> = {};
+    if (filters.startDate) {
+      dueAt.$gte = filters.startDate;
+    }
+    if (filters.endDate) {
+      dueAt.$lte = filters.endDate;
+    }
+    if (Object.keys(dueAt).length > 0) {
+      return { dueAt };
+    }
+
+    return {};
+  }
+
+  private static buildFollowUpDueTodayAccumulator(field: string, startOfToday: Date, endOfToday: Date) {
+    return {
+      $sum: {
+        $cond: [
+          {
+            $and: [
+              { $gte: [`$${field}`, startOfToday] },
+              { $lte: [`$${field}`, endOfToday] },
+            ],
+          },
+          1,
+          0,
+        ],
+      },
+    };
+  }
+
+  private static buildFollowUpOverdueAccumulator(field: string, now: Date) {
+    return {
+      $sum: {
+        $cond: [
+          {
+            $and: [
+              { $lt: [`$${field}`, now] },
+              { $ne: ['$attempts', 'max_reached'] },
+            ],
+          },
+          1,
+          0,
+        ],
+      },
+    };
+  }
+
   /**
    * Get lead by ID
    */
@@ -1668,12 +1857,7 @@ export class LeadService {
       };
 
       if (filters.city) {
-        const escaped = this.escapeRegex(filters.city.trim());
-        query.$or = [
-          { city: { $regex: new RegExp(escaped, 'i') } },
-          { address: { $regex: new RegExp(escaped, 'i') } },
-          { locality: { $regex: new RegExp(escaped, 'i') } },
-        ];
+        this.pushLocationFilterClause(query, this.buildCityFilterMatch(filters.city));
       }
 
       if (filters.primarySkill) {
@@ -1783,96 +1967,96 @@ export class LeadService {
       const now = new Date();
       const { startOfToday, endOfToday } = this.getISTDayBounds(now);
 
-      const query: any = {};
-      if (filters.city) {
-        const escaped = this.escapeRegex(filters.city.trim());
-        query.$or = [
-          { city: { $regex: new RegExp(escaped, 'i') } },
-          { address: { $regex: new RegExp(escaped, 'i') } },
-          { locality: { $regex: new RegExp(escaped, 'i') } },
+      const leadMatch = this.buildFollowUpQueueLeadMatch(filters);
+      const bucketMatch = this.buildFollowUpBucketMatch(filters, startOfToday, endOfToday, now);
+      const dueType = filters.dueType || 'all';
+      const includeCallback = dueType === 'all' || dueType === 'callback';
+      const includeOnboarding = dueType === 'all' || dueType === 'onboarding';
+
+      const expandFacet: Record<string, object[]> = {};
+      if (includeCallback) {
+        expandFacet.callbacks = [
+          { $match: { nextCallbackAt: { $exists: true, $ne: null } } },
+          { $addFields: { dueType: 'callback', dueAt: '$nextCallbackAt' } },
         ];
       }
-      if (filters.primarySkill) {
-        query.$and = query.$and || [];
-        query.$and.push(this.buildCategoryMatch(filters.primarySkill));
-      }
-      if (filters.addedByAny && filters.addedByAny.length > 0) {
-        query.addedBy = { $in: filters.addedByAny };
-      } else if (filters.addedBy) {
-        query.addedBy = filters.addedBy;
+      if (includeOnboarding) {
+        expandFacet.onboardings = [
+          { $match: { expectedOnboardingAt: { $exists: true, $ne: null } } },
+          { $addFields: { dueType: 'onboarding', dueAt: '$expectedOnboardingAt' } },
+        ];
       }
 
-      if (filters.pickedBy) {
-        query.pickedBy = filters.pickedBy;
-      } else {
-        this.applyOwnerScope(query, filters.ownerBy, filters.ownerByAny);
+      const pipeline: Record<string, unknown>[] = [
+        { $match: leadMatch },
+        {
+          $addFields: {
+            latestChangedBy: {
+              $let: {
+                vars: {
+                  latestEntry: {
+                    $arrayElemAt: [
+                      {
+                        $sortArray: {
+                          input: { $ifNull: ['$statusHistory', []] },
+                          sortBy: { changedAt: -1 },
+                        },
+                      },
+                      0,
+                    ],
+                  },
+                },
+                in: '$$latestEntry.changedBy',
+              },
+            },
+          },
+        },
+        ...this.buildFollowUpStatsOwnerStage({
+          followUpOwnerBy: filters.followUpOwnerBy,
+          followUpOwnerByAny: filters.followUpOwnerByAny,
+        }),
+        { $facet: expandFacet },
+        {
+          $project: {
+            items: {
+              $concatArrays: [
+                { $ifNull: ['$callbacks', []] },
+                { $ifNull: ['$onboardings', []] },
+              ],
+            },
+          },
+        },
+        { $unwind: '$items' },
+        { $replaceRoot: { newRoot: '$items' } },
+      ];
+
+      if (Object.keys(bucketMatch).length > 0) {
+        pipeline.push({ $match: bucketMatch });
       }
 
-      if (filters.attempts) {
-        query.attempts = filters.attempts;
-      }
-
-      if (filters.dueType === 'callback') {
-        query.nextCallbackAt = { $exists: true, $ne: null };
-      } else if (filters.dueType === 'onboarding') {
-        query.expectedOnboardingAt = { $exists: true, $ne: null };
-      } else {
-        query.$and = query.$and || [];
-        query.$and.push({
-          $or: [
-            { nextCallbackAt: { $exists: true, $ne: null } },
-            { expectedOnboardingAt: { $exists: true, $ne: null } },
+      pipeline.push({
+        $facet: {
+          metadata: [{ $count: 'total' }],
+          data: [
+            { $sort: { dueAt: 1 } },
+            { $skip: skip },
+            { $limit: limit },
           ],
-        });
-      }
-
-      const leads = await Lead.find(query).lean();
-
-      let items: FollowUpQueueItem[] = [];
-      for (const lead of leads) {
-        if ((filters.dueType === 'all' || !filters.dueType || filters.dueType === 'callback') && lead.nextCallbackAt) {
-          items.push({
-            ...(this.normalizeLeadData(lead) as ILead),
-            dueType: 'callback',
-            dueAt: new Date(lead.nextCallbackAt),
-          });
-        }
-        if ((filters.dueType === 'all' || !filters.dueType || filters.dueType === 'onboarding') && lead.expectedOnboardingAt) {
-          items.push({
-            ...(this.normalizeLeadData(lead) as ILead),
-            dueType: 'onboarding',
-            dueAt: new Date(lead.expectedOnboardingAt),
-          });
-        }
-      }
-
-      items = this.filterFollowUpsByOwner(items, filters);
-
-      const bucket = filters.bucket || 'all';
-      items = items.filter((item) => {
-        if (bucket === 'today') return item.dueAt >= startOfToday && item.dueAt <= endOfToday;
-        if (bucket === 'overdue') return item.dueAt < now && item.attempts !== 'max_reached';
-        if (bucket === 'upcoming') return item.dueAt > endOfToday;
-        if (bucket === 'range') {
-          if (filters.startDate && item.dueAt < filters.startDate) return false;
-          if (filters.endDate && item.dueAt > filters.endDate) return false;
-          return true;
-        }
-        if (filters.startDate && item.dueAt < filters.startDate) return false;
-        if (filters.endDate && item.dueAt > filters.endDate) return false;
-        return true;
+        },
       });
 
-      items.sort((a, b) => a.dueAt.getTime() - b.dueAt.getTime());
-      const total = items.length;
-      const paged = items.slice(skip, skip + limit);
+      const [aggregated] = await Lead.aggregate(pipeline as any[]);
+      const total = aggregated?.metadata?.[0]?.total || 0;
+      const leads = (aggregated?.data || []).map((lead: Record<string, unknown>) =>
+        this.normalizeLeadData(lead) as FollowUpQueueItem,
+      );
 
       return {
-        leads: paged,
+        leads,
         total,
         page,
         limit,
-        totalPages: Math.ceil(total / limit),
+        totalPages: total > 0 ? Math.ceil(total / limit) : 0,
       };
     } catch (error: any) {
       logger.error('Error fetching follow-up queue', {
@@ -1888,84 +2072,114 @@ export class LeadService {
     dateRange?: { from?: Date; to?: Date }
   ): Promise<FollowUpQueueStats> {
     try {
+      const cacheKey = buildFollowUpStatsCacheKey(filters, dateRange);
+      const cached = getCachedFollowUpStats(cacheKey);
+      if (cached) {
+        return cached;
+      }
+
       const now = new Date();
       const { startOfToday, endOfToday } = this.getISTDayBounds(now);
+      const baseMatch = this.buildFollowUpStatsDocumentMatch(filters);
 
-      const scope: any = {};
-      if (filters.addedByAny && filters.addedByAny.length > 0) {
-        scope.addedBy = { $in: filters.addedByAny };
-      } else if (filters.addedBy) {
-        scope.addedBy = filters.addedBy;
-      }
-
-      if (filters.pickedBy) {
-        scope.pickedBy = filters.pickedBy;
-      } else {
-        this.applyOwnerScope(scope, filters.ownerBy, filters.ownerByAny);
-      }
-
-      const existingScopeAnd = Array.isArray(scope.$and) ? scope.$and : [];
-      delete scope.$and;
-
-      const leads = await Lead.find({
-        ...scope,
-        $and: [
-          ...existingScopeAnd,
+      const facet: Record<string, object[]> = {
+        callbacks: [
+          { $match: { nextCallbackAt: { $exists: true, $ne: null } } },
           {
-            $or: [
-              { nextCallbackAt: { $exists: true, $ne: null } },
-              { expectedOnboardingAt: { $exists: true, $ne: null } },
-            ],
+            $group: {
+              _id: null,
+              total: { $sum: 1 },
+              dueToday: this.buildFollowUpDueTodayAccumulator('nextCallbackAt', startOfToday, endOfToday),
+              overdue: this.buildFollowUpOverdueAccumulator('nextCallbackAt', now),
+            },
           },
         ],
-      }).lean();
+        onboarding: [
+          { $match: { expectedOnboardingAt: { $exists: true, $ne: null } } },
+          {
+            $group: {
+              _id: null,
+              total: { $sum: 1 },
+              dueToday: this.buildFollowUpDueTodayAccumulator('expectedOnboardingAt', startOfToday, endOfToday),
+              overdue: this.buildFollowUpOverdueAccumulator('expectedOnboardingAt', now),
+            },
+          },
+        ],
+      };
 
-      const items = this.filterFollowUpsByOwner(
-        leads.flatMap((lead) => {
-          const followUps: FollowUpQueueItem[] = [];
-          if (lead.nextCallbackAt) {
-            followUps.push({
-              ...(this.normalizeLeadData(lead) as ILead),
-              dueType: 'callback',
-              dueAt: new Date(lead.nextCallbackAt),
-            });
-          }
-          if (lead.expectedOnboardingAt) {
-            followUps.push({
-              ...(this.normalizeLeadData(lead) as ILead),
-              dueType: 'onboarding',
-              dueAt: new Date(lead.expectedOnboardingAt),
-            });
-          }
-          return followUps;
-        }),
-        filters
-      );
+      if (dateRange?.from && dateRange?.to) {
+        facet.rangeCallbacks = [
+          {
+            $match: {
+              nextCallbackAt: { $gte: dateRange.from, $lte: dateRange.to },
+            },
+          },
+          { $count: 'count' },
+        ];
+        facet.rangeOnboarding = [
+          {
+            $match: {
+              expectedOnboardingAt: { $gte: dateRange.from, $lte: dateRange.to },
+            },
+          },
+          { $count: 'count' },
+        ];
+      }
 
-      const callbackItems = items.filter((item) => item.dueType === 'callback');
-      const onboardingItems = items.filter((item) => item.dueType === 'onboarding');
+      const pipeline: Record<string, unknown>[] = [
+        { $match: baseMatch },
+        {
+          $addFields: {
+            latestChangedBy: {
+              $let: {
+                vars: {
+                  latestEntry: {
+                    $arrayElemAt: [
+                      {
+                        $sortArray: {
+                          input: { $ifNull: ['$statusHistory', []] },
+                          sortBy: { changedAt: -1 },
+                        },
+                      },
+                      0,
+                    ],
+                  },
+                },
+                in: '$$latestEntry.changedBy',
+              },
+            },
+          },
+        },
+        ...this.buildFollowUpStatsOwnerStage(filters),
+        { $facet: facet },
+      ];
 
-      const callbackTotal = callbackItems.length;
-      const onboardingTotal = onboardingItems.length;
-      const callbackDueToday = callbackItems.filter((item) => item.dueAt >= startOfToday && item.dueAt <= endOfToday).length;
-      const callbackOverdue = callbackItems.filter((item) => item.dueAt < now && item.attempts !== 'max_reached').length;
-      const onboardingDueToday = onboardingItems.filter((item) => item.dueAt >= startOfToday && item.dueAt <= endOfToday).length;
-      const onboardingOverdue = onboardingItems.filter((item) => item.dueAt < now && item.attempts !== 'max_reached').length;
+      const [aggregated] = await Lead.aggregate(pipeline as any[]);
 
-      const rangeCount = dateRange && dateRange.from && dateRange.to
-        ? items.filter((item) => item.dueAt >= dateRange.from! && item.dueAt <= dateRange.to!).length
-        : undefined;
+      const callbackGroup = aggregated?.callbacks?.[0] || {};
+      const onboardingGroup = aggregated?.onboarding?.[0] || {};
+      const callbackTotal = callbackGroup.total || 0;
+      const onboardingTotal = onboardingGroup.total || 0;
 
-      return {
+      const rangeCount =
+        dateRange?.from && dateRange?.to
+          ? (aggregated?.rangeCallbacks?.[0]?.count || 0) +
+            (aggregated?.rangeOnboarding?.[0]?.count || 0)
+          : undefined;
+
+      const stats: FollowUpQueueStats = {
         callbackTotal,
         onboardingTotal,
-        callbackDueToday,
-        callbackOverdue,
-        onboardingDueToday,
-        onboardingOverdue,
+        callbackDueToday: callbackGroup.dueToday || 0,
+        callbackOverdue: callbackGroup.overdue || 0,
+        onboardingDueToday: onboardingGroup.dueToday || 0,
+        onboardingOverdue: onboardingGroup.overdue || 0,
         totalFollowUps: callbackTotal + onboardingTotal,
         rangeCount,
       };
+
+      setCachedFollowUpStats(cacheKey, stats);
+      return stats;
     } catch (error: any) {
       logger.error('Error fetching follow-up queue stats', {
         error: error.message,
@@ -4156,6 +4370,104 @@ export class LeadService {
       },
       users: performanceList,
     };
+  }
+
+  /** Role-scoped lead counts for the dashboard — mirrors frontend searchLeads filters. */
+  static async getDashboardSummary(params: {
+    role: UserRole;
+    userId?: string;
+  }): Promise<DashboardSummary> {
+    const { role, userId } = params;
+    const isQualifier = role === 'qualifier';
+    const isOnboarder = role === 'onboarder';
+    const canViewRegistration =
+      isOnboarder || role === 'lead_access_manager' || (isQualifier && !!userId);
+
+    const totalFilters: SearchFilters = {};
+    if (isQualifier && userId) totalFilters.addedBy = userId;
+    if (isOnboarder && userId) totalFilters.pickedBy = userId;
+
+    const interestedFilters: SearchFilters = { status: 'contacted_interested' };
+    if (isQualifier && userId) interestedFilters.addedBy = userId;
+    if (isOnboarder && userId) interestedFilters.pickedBy = userId;
+
+    const notInterestedFilters: SearchFilters = { status: 'contacted_not_interested' };
+    if (isQualifier && userId) notInterestedFilters.addedBy = userId;
+    if (isOnboarder && userId) notInterestedFilters.pickedBy = userId;
+
+    const approvedFilters: SearchFilters = { status: 'approved' };
+    if (isOnboarder && userId) approvedFilters.pickedBy = userId;
+
+    const registrationScopeOwner: SearchFilters = {};
+    if (isOnboarder && userId) {
+      registrationScopeOwner.ownerBy = userId;
+    } else if (isQualifier && userId) {
+      registrationScopeOwner.addedBy = userId;
+    }
+
+    const registrationScopeRegisteredCard: SearchFilters = {};
+    if (isOnboarder && userId) {
+      registrationScopeRegisteredCard.pickedBy = userId;
+    } else if (isQualifier && userId) {
+      registrationScopeRegisteredCard.addedBy = userId;
+    }
+
+    const countTasks: Array<Promise<void>> = [];
+    const summary: DashboardSummary = {
+      total: 0,
+      approved: 0,
+      interested: 0,
+      notInterested: 0,
+    };
+
+    countTasks.push(
+      this.countSearchLeads(totalFilters).then((n) => {
+        summary.total = n;
+      }),
+      this.countSearchLeads(approvedFilters).then((n) => {
+        summary.approved = n;
+      }),
+      this.countSearchLeads(interestedFilters).then((n) => {
+        summary.interested = n;
+      }),
+      this.countSearchLeads(notInterestedFilters).then((n) => {
+        summary.notInterested = n;
+      }),
+    );
+
+    if (isOnboarder && userId) {
+      countTasks.push(
+        this.countSearchLeads({ addedBy: userId }).then((n) => {
+          summary.myLeadsAdded = n;
+        }),
+      );
+    }
+
+    if (canViewRegistration) {
+      countTasks.push(
+        this.countSearchLeads({
+          ...registrationScopeOwner,
+          registrationStatus: 'not_registered',
+        }).then((n) => {
+          summary.notRegistered = n;
+        }),
+        this.countSearchLeads({
+          ...registrationScopeRegisteredCard,
+          registrationStatus: 'registered',
+        }).then((n) => {
+          summary.registered = n;
+        }),
+        this.countSearchLeads({
+          ...registrationScopeOwner,
+          registrationStatus: 'registered_verified',
+        }).then((n) => {
+          summary.registeredVerified = n;
+        }),
+      );
+    }
+
+    await Promise.all(countTasks);
+    return summary;
   }
 
   /** Count-only variant of searchLeads — aligns performance metrics with list pages. */

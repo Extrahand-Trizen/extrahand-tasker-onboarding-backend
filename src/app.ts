@@ -27,7 +27,9 @@ app.use(helmet());
 
 const corsOrigins = env.CORS_ORIGIN
   ? env.CORS_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean)
-  : [];
+  : env.NODE_ENV === 'development'
+    ? [env.FRONTEND_URL, 'http://localhost:3000']
+    : [];
 
 // CORS — use callback(null, false) for disallowed origins so preflight still gets a clean response
 app.use(cors({

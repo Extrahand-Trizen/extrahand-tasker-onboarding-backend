@@ -533,6 +533,9 @@ export class ActivationService {
             userId: uid,
             type: record.type,
             maskedValue: record.maskedValue,
+            ...(record.type === 'aadhaar' && data.aadhaarNumber
+              ? { aadhaarNumber: data.aadhaarNumber.replace(/\D/g, '') }
+              : {}),
             status: 'verified',
             verifiedAt: new Date().toISOString(),
             provider: options?.provider || 'admin_manual', // ✅ Use provided provider

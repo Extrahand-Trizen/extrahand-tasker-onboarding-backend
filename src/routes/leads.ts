@@ -121,6 +121,11 @@ router.get(
   requirePermission('canViewLeads'),
   LeadController.getDashboardMetrics
 );
+router.get(
+  '/dashboard-summary',
+  requirePermission('canViewLeads'),
+  LeadController.getDashboardSummary
+);
 
 // Check for duplicates
 router.post(
