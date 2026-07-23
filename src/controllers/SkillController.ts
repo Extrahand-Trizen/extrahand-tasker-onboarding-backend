@@ -1,11 +1,28 @@
 import { Response } from 'express';
 import { AdminRequest } from '../middleware/adminAuth';
 import { LeadService } from '../services/LeadService';
-import { isLeadCreator } from '../utils/leadCreatorAccess';
+import { UserRole } from '../lib/permissions';
 import logger from '../config/logger';
 import { ILeadSkill } from '../models/Lead';
 
 export class SkillController {
+  private static getUserId(req: AdminRequest): string | undefined {
+    return req.admin?.userId || req.admin?.uid;
+  }
+
+  private static canMutatePickedLead(req: AdminRequest, lead: { addedBy: string; pickedBy?: string | null }): boolean {
+    const role = req.admin?.role as UserRole;
+    const userId = this.getUserId(req);
+
+    if (!userId) return false;
+    if (lead.pickedBy && lead.pickedBy !== userId) return false;
+
+    if (role === 'qualifier') {
+      return lead.pickedBy ? lead.pickedBy === userId : lead.addedBy === userId;
+    }
+
+    return true;
+  }
   /**
    * Add skill to a lead
    * POST /api/v1/admin/caos/leads/:leadId/skills
@@ -40,11 +57,11 @@ export class SkillController {
         return;
       }
 
-      if (!isLeadCreator(req, lead.addedBy)) {
+      if (!this.canMutatePickedLead(req, lead)) {
         res.status(403).json({
           success: false,
           error: 'Permission denied',
-          message: 'Only the user who created this lead can edit skills.',
+          message: 'Only the picked qualifier can update this lead.'
         });
         return;
       }
@@ -123,11 +140,11 @@ export class SkillController {
         return;
       }
 
-      if (!isLeadCreator(req, lead.addedBy)) {
+      if (!this.canMutatePickedLead(req, lead)) {
         res.status(403).json({
           success: false,
           error: 'Permission denied',
-          message: 'Only the user who created this lead can edit skills.',
+          message: 'Only the picked qualifier can update this lead.'
         });
         return;
       }
@@ -201,11 +218,11 @@ export class SkillController {
         return;
       }
 
-      if (!isLeadCreator(req, lead.addedBy)) {
+      if (!this.canMutatePickedLead(req, lead)) {
         res.status(403).json({
           success: false,
           error: 'Permission denied',
-          message: 'Only the user who created this lead can edit skills.',
+          message: 'Only the picked qualifier can update this lead.'
         });
         return;
       }

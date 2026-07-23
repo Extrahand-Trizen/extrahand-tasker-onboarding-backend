@@ -22,19 +22,12 @@ export type LeadSource = 'referral' | 'campaign' | 'walk-in' | 'agent' | 'other'
 
 export type CreationMethod = 'manual_onboarding' | 'bulk_upload' | 'direct_activation';
 
-export interface IStatusChange {
-  field: string;
-  previous?: any;
-  current?: any;
-}
-
 export interface IStatusHistory {
   status: LeadStatus;
   changedBy: string;
   changedByName?: string;
   changedAt: Date;
   notes?: string;
-  fieldChanges?: IStatusChange[];
   statusReasonCode?: string;
   statusReasonText?: string;
   callbackAt?: Date;
@@ -114,7 +107,6 @@ export interface ILead extends Document {
   landline?: string;
   email?: string;
   city?: string;
-  locality?: string;
   state?: string;
   address?: string; // Local Area
   pincode?: string;
@@ -177,12 +169,6 @@ export interface ILead extends Document {
   lastInterestedBy?: string;
   lastNotInterestedBy?: string;
   lastNotLiftedBy?: string;
-  attempts?: string;
-  /** Tracks who last edited lead fields (name, phone, city, etc.) */
-  lastUpdatedBy?: string;
-  lastUpdatedByName?: string;
-  /** When lead profile fields were last edited (excludes status-only updates) */
-  lastFieldEditedAt?: Date;
   communicationLog: ICommunicationLog[];
   
   // Internal notes
@@ -200,8 +186,6 @@ export interface ILead extends Document {
   conversionData?: {
     platformUid?: string;
     isAadhaarVerified?: boolean;
-    registeredAt?: Date;  // Set once on first detection of registration
-    registeredVerifiedAt?: Date;  // Set once on first detection of registration + Aadhaar verified
     lastCheckedAt?: Date;
   };
   
@@ -248,12 +232,6 @@ const LeadSchema = new Schema<ILead>({
     type: String,
     trim: true,
     index: true
-  },
-  locality: {
-    type: String,
-    trim: true,
-    index: true,
-    sparse: true
   },
   state: {
     type: String,
@@ -411,11 +389,6 @@ const LeadSchema = new Schema<ILead>({
     changedByName: String,
     changedAt: { type: Date, default: Date.now },
     notes: String,
-    fieldChanges: [{
-      field: String,
-      previous: Schema.Types.Mixed,
-      current: Schema.Types.Mixed,
-    }],
     statusReasonCode: String,
     statusReasonText: String,
     callbackAt: Date,
@@ -513,23 +486,6 @@ const LeadSchema = new Schema<ILead>({
     type: String,
     index: true
   },
-  attempts: {
-    type: String,
-    enum: ['1', '2', '3', '4', 'max_reached'],
-    index: true
-  },
-  lastUpdatedBy: {
-    type: String,
-    index: true
-  },
-  lastUpdatedByName: {
-    type: String,
-    trim: true
-  },
-  lastFieldEditedAt: {
-    type: Date,
-    index: true
-  },
   communicationLog: [{
     type: {
       type: String,
@@ -566,8 +522,6 @@ const LeadSchema = new Schema<ILead>({
   conversionData: {
     platformUid: String,
     isAadhaarVerified: { type: Boolean, default: false },
-    registeredAt: Date,
-    registeredVerifiedAt: Date,
     lastCheckedAt: Date
   },
   creationMethod: {

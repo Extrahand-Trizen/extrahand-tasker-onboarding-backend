@@ -5,11 +5,6 @@ import { DuplicateCheckService } from './DuplicateCheckService';
 import { ApprovalService } from './ApprovalService';
 import { canUpdateStatus, UserRole } from '../lib/permissions';
 import logger from '../config/logger';
-import {
-  buildFollowUpStatsCacheKey,
-  getCachedFollowUpStats,
-  setCachedFollowUpStats,
-} from '../utils/followUpStatsCache';
 import { v4 as uuidv4 } from 'uuid';
 import { validateAndNormalizeLeadStatusUpdate } from '../validators/leadStatusValidator';
 import XLSX from 'xlsx';
@@ -20,7 +15,6 @@ export interface CreateLeadData {
   landline?: string;
   email?: string;
   city?: string;
-  locality?: string;
   state?: string;
   address?: string; // Local Area
   pincode?: string;
@@ -56,7 +50,6 @@ export interface UpdateLeadData {
   landline?: string | null;
   email?: string | null;
   city?: string | null;
-  locality?: string | null;
   state?: string | null;
   address?: string | null;
   pincode?: string | null;
@@ -69,9 +62,6 @@ export interface UpdateLeadData {
   source?: LeadSource | null;
   sourceDetails?: string | null;
   skills?: ILeadSkill[];
-  /** Actor who performed the update — set by controller, not from request body */
-  _updatedBy?: string;
-  _updatedByName?: string;
 }
 
 export interface UpdateStatusData {
@@ -81,23 +71,11 @@ export interface UpdateStatusData {
   statusReasonText?: string;
   callbackAt?: Date | string;
   expectedOnboardingAt?: Date | string;
-  attempts?: string;
   changedBy: string;
   changedByName?: string;
 }
 
 export type RegistrationStatusFilter = 'not_registered' | 'registered' | 'registered_verified';
-
-export interface DashboardSummary {
-  total: number;
-  myLeadsAdded?: number;
-  approved: number;
-  interested: number;
-  notInterested: number;
-  notRegistered?: number;
-  registered?: number;
-  registeredVerified?: number;
-}
 
 export interface SearchFilters {
   status?: LeadStatus;
@@ -107,7 +85,6 @@ export interface SearchFilters {
   addedBy?: string;
   addedByAny?: string[];
   pickedBy?: string;
-  pickedByAny?: string[];
   transferPendingTo?: string;
   ownerBy?: string;
   ownerByAny?: string[];
@@ -116,41 +93,14 @@ export interface SearchFilters {
   endDate?: Date;
   page?: number;
   limit?: number;
-  /** Locality filter — stored on lead.locality */
-  locality?: string;
-  /** Exact local area filter — stored on lead.address */
-  localArea?: string;
   /** Filter by conversion/registration on main website */
   registrationStatus?: RegistrationStatusFilter;
   /** Filter by user who moved lead into current contact status */
   statusChangedBy?: string;
-  /** When true, only leads with no picker (unclaimed) */
-  unclaimed?: boolean;
-  /** When true, only leads that have been claimed (pickedBy set) */
-  claimed?: boolean;
-  attempts?: string;
-  /**
-   * When true, owner scope uses only pickedBy OR addedBy (no statusHistory.changedBy).
-   * This matches exactly how the Performance page counts outcomes.
-   */
-  strictOwner?: boolean;
-  /**
-   * When set to 'owner', the date filter (startDate/endDate) is applied to
-   * (pickedAt OR createdAt) instead of just createdAt.
-   * This matches the Performance page date logic for onboarder outcomes.
-   */
-  ownerDateMode?: 'owner';
-  /**
-   * Broad location search — case-insensitive substring match across city, locality,
-   * address, state, and pincode fields. Applied only when user presses Enter in the UI.
-   */
-  locationSearch?: string;
 }
 
 export interface CallbackQueueFilters {
   city?: string;
-  /** Broad location search across city/locality/address/state/pincode (Enter-triggered). */
-  locationSearch?: string;
   primarySkill?: string;
   addedBy?: string;
   addedByAny?: string[];
@@ -173,21 +123,16 @@ export type FollowUpBucket = 'all' | 'today' | 'overdue' | 'upcoming' | 'range';
 
 export interface FollowUpQueueFilters {
   city?: string;
-  /** Broad location search across city/locality/address/state/pincode (Enter-triggered). */
-  locationSearch?: string;
   primarySkill?: string;
   addedBy?: string;
   addedByAny?: string[];
   ownerBy?: string;
   ownerByAny?: string[];
   pickedBy?: string;
-  followUpOwnerBy?: string;
-  followUpOwnerByAny?: string[];
   startDate?: Date;
   endDate?: Date;
   dueType?: FollowUpDueType;
   bucket?: FollowUpBucket;
-  attempts?: string;
   page?: number;
   limit?: number;
 }
@@ -209,7 +154,6 @@ export interface FollowUpQueueStats {
   onboardingDueToday: number;
   onboardingOverdue: number;
   totalFollowUps: number;
-  rangeCount?: number;
 }
 
 export interface StatusAnalyticsFilters {
@@ -221,18 +165,13 @@ export interface StatusAnalyticsFilters {
   claimsScope?: 'current' | 'total';
   allTime?: boolean;
   gatedCommunityName?: string;
-  city?: string;
-  locality?: string;
-  localArea?: string;
 }
 
 export type StatusReportCategory =
   | 'touched_leads'
   | 'interested'
   | 'callback_scheduled'
-  | 'callback_overdue'
-  | 'onboarded'
-  | 'verified';
+  | 'callback_overdue';
 
 export interface StatusReportExportFilters extends StatusAnalyticsFilters {
   format: 'csv' | 'xlsx';
@@ -281,21 +220,9 @@ export class LeadService {
     return this.STATUS_REPORT_LABELS[value] || value.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
   }
 
-  /** Extra stored values matched when filtering by canonical category id */
-  private static readonly CATEGORY_FILTER_ALIASES: Record<string, string[]> = {
-    electrical: ['electrical', 'electrician'],
-    plumbing: ['plumbing', 'plumber'],
-    carpenter: ['carpenter', 'carpentry'],
-    painting: ['painting', 'painter'],
-  };
-
   private static readonly PRIMARY_CATEGORY_LABELS: Record<string, string> = {
     cleaning: 'Cleaning',
     handyperson: 'Handyperson',
-    plumbing: 'Plumbing',
-    electrical: 'Electrician',
-    carpenter: 'Carpentry',
-    painting: 'Home Painting',
     moving: 'Moving & Delivery',
     gardening: 'Gardening',
     business: 'Business Services',
@@ -344,30 +271,25 @@ export class LeadService {
   }
 
   private static buildCategoryMatch(category: string): Record<string, unknown> {
-    const keys = this.CATEGORY_FILTER_ALIASES[category] ?? [category];
-    const matchConditions: any[] = [];
+    const label = this.PRIMARY_CATEGORY_LABELS[category];
+    const matchConditions: any[] = [
+      { primaryCategory: category },
+      { primarySkill: category },
+    ];
 
-    for (const key of keys) {
-      const label = this.PRIMARY_CATEGORY_LABELS[key];
-      matchConditions.push({ primaryCategory: key }, { primarySkill: key });
-
-      if (label) {
-        matchConditions.push(
-          { primaryCategory: label },
-          { primarySkill: label },
-          { primaryCategory: { $regex: new RegExp(`^${this.escapeRegex(label)}$`, 'i') } },
-          { primarySkill: { $regex: new RegExp(`^${this.escapeRegex(label)}$`, 'i') } },
-        );
-      }
-
-      const escapedKey = this.escapeRegex(key);
-      matchConditions.push(
-        { primaryCategory: { $regex: new RegExp(`^${escapedKey}$`, 'i') } },
-        { primarySkill: { $regex: new RegExp(`^${escapedKey}$`, 'i') } },
-      );
+    if (label) {
+      matchConditions.push({ primaryCategory: label });
+      matchConditions.push({ primarySkill: label });
+      matchConditions.push({ primaryCategory: { $regex: new RegExp(`^${label.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i') } });
+      matchConditions.push({ primarySkill: { $regex: new RegExp(`^${label.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i') } });
     }
 
-    return { $or: matchConditions };
+    matchConditions.push({ primaryCategory: { $regex: new RegExp(`^${category.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i') } });
+    matchConditions.push({ primarySkill: { $regex: new RegExp(`^${category.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i') } });
+
+    return {
+      $or: matchConditions,
+    };
   }
 
   private static escapeRegex(value: string): string {
@@ -376,228 +298,6 @@ export class LeadService {
 
   private static buildExactCaseInsensitiveMatch(value: string): { $regex: RegExp } {
     return { $regex: new RegExp(`^${this.escapeRegex(value)}$`, 'i') };
-  }
-
-  private static normalizeDistinctLocationValues(values: unknown[]): string[] {
-    return this.collectLocationDropdownValues(
-      values
-        .filter((value): value is string => typeof value === 'string')
-        .map((value) => value.trim())
-        .filter(Boolean),
-    );
-  }
-
-  /** Dropdown options must be place names — not pin codes, plot numbers, or numeric-only text. */
-  private static isValidLocationDropdownValue(value: string): boolean {
-    const v = value.trim();
-    if (!v || v.length < 2) return false;
-    if (!/[A-Za-z]/.test(v)) return false;
-    if (/^\d+$/.test(v)) return false;
-    if (/^\d{6}$/.test(v)) return false;
-    if (/^[A-Z0-9]+\+[A-Z0-9]+$/i.test(v)) return false;
-    if (/^[\d\s\-#./]+$/.test(v)) return false;
-    if (/^(plot\s*(no\.?|number)?|no\.?|#)\s*\d+$/i.test(v)) return false;
-    if (/^(first floor|floor|door\s*no\.?)\b/i.test(v)) return false;
-    if (/mangalagiri|tadepalligudem|tadepalli/i.test(v)) return false;
-    return true;
-  }
-
-  /** Case-insensitive dedupe; dropdown labels shown in uppercase. */
-  private static collectLocationDropdownValues(values: Iterable<string>): string[] {
-    const byKey = new Map<string, string>();
-    for (const raw of values) {
-      const v = raw.trim();
-      if (!this.isValidLocationDropdownValue(v)) continue;
-      const key = v.toLowerCase();
-      if (!byKey.has(key)) {
-        byKey.set(key, v.toUpperCase());
-      }
-    }
-    return Array.from(byKey.values()).sort((a, b) =>
-      a.localeCompare(b, undefined, { sensitivity: 'base' }),
-    );
-  }
-
-  /** Full Google-style address stored in city field by mistake. */
-  private static isFullAddressLike(value: string): boolean {
-    const v = value.trim();
-    if (!v) return false;
-    if (v.includes(',')) return true;
-    if (v.length > 60) return true;
-    if (/[A-Z0-9]+\+[A-Z0-9]+/i.test(v)) return true;
-    return false;
-  }
-
-  /** Parse city name from plain city or comma-separated address text. */
-  private static extractCityFromStoredValue(raw: string): string | null {
-    const v = raw.trim();
-    if (!v) return null;
-
-    if (!this.isFullAddressLike(v)) {
-      return this.isValidLocationDropdownValue(v) ? v : null;
-    }
-
-    const parts = v.split(',').map((part) => part.trim()).filter(Boolean);
-    if (parts.length < 2) return null;
-
-    const last = parts[parts.length - 1];
-    const stateWithPin = last.match(/^(.+?)\s+(\d{6})$/);
-    if (stateWithPin && parts.length >= 2) {
-      const city = parts[parts.length - 2];
-      return this.isValidLocationDropdownValue(city) ? city : null;
-    }
-
-    if (parts.length === 2 && parts[1].length <= 40) {
-      const city = parts[1];
-      return this.isValidLocationDropdownValue(city) ? city : null;
-    }
-
-    return null;
-  }
-
-  private static isSkippableAddressPart(part: string): boolean {
-    const v = part.trim();
-    if (!v) return true;
-    if (!this.isValidLocationDropdownValue(v)) return true;
-    if (/[A-Z0-9]+\+[A-Z0-9]+/i.test(v)) return true;
-    if (/^\d{6}$/.test(v)) return true;
-    if (/^(Telangana|Andhra Pradesh|Karnataka|Maharashtra|Tamil Nadu|Delhi)$/i.test(v)) {
-      return true;
-    }
-    if (/^(first floor|plot no|floor)/i.test(v)) return true;
-    return false;
-  }
-
-  /** Parse local area from plain text or comma-separated address (not full address in dropdown). */
-  private static extractLocalAreasFromStoredValue(raw: string): string[] {
-    const v = raw.trim();
-    if (!v) return [];
-
-    if (!this.isFullAddressLike(v)) {
-      return this.isValidLocationDropdownValue(v) ? [v] : [];
-    }
-
-    const parts = v.split(',').map((part) => part.trim()).filter(Boolean);
-    if (!parts.length) return [];
-
-    const city = this.extractCityFromStoredValue(v);
-    const candidates: string[] = [];
-
-    if (city) {
-      const cityIndex = parts.findIndex(
-        (part) => part.toLowerCase() === city.toLowerCase(),
-      );
-      if (cityIndex > 0) {
-        const beforeCity = parts[cityIndex - 1];
-        if (beforeCity && !this.isSkippableAddressPart(beforeCity)) {
-          candidates.push(beforeCity);
-        }
-      }
-      if (parts.length === 2 && parts[0].toLowerCase() !== city.toLowerCase()) {
-        candidates.push(parts[0]);
-      }
-    }
-
-    return this.collectLocationDropdownValues(candidates);
-  }
-
-  private static pushLocationFilterClause(
-    match: Record<string, unknown>,
-    clause: Record<string, unknown>,
-  ): void {
-    if (match.$and) {
-      (match.$and as Record<string, unknown>[]).push(clause);
-      return;
-    }
-    if (match.$or) {
-      match.$and = [{ $or: match.$or }, clause];
-      delete match.$or;
-      return;
-    }
-    Object.assign(match, clause);
-  }
-
-  /** City filter: match city (prefix), address, and locality so partial/embedded place names still match. */
-  private static buildCityFilterMatch(city: string): Record<string, unknown> {
-    const trimmed = city.trim();
-    if (!trimmed) return {};
-    const escaped = this.escapeRegex(trimmed);
-    const substringRx = new RegExp(escaped, 'i');
-    return {
-      $or: [
-        { city: { $regex: new RegExp(`^${escaped}`, 'i') } },
-        { address: { $regex: substringRx } },
-        { locality: { $regex: substringRx } },
-      ],
-    };
-  }
-
-  private static buildLocalAreaFilterMatch(localArea: string): Record<string, unknown> {
-    const escaped = this.escapeRegex(localArea.trim());
-    return {
-      $or: [
-        { address: { $regex: new RegExp(escaped, 'i') } },
-        { city: { $regex: new RegExp(escaped, 'i') } },
-        { locality: { $regex: new RegExp(escaped, 'i') } },
-      ],
-    };
-  }
-
-  private static buildLocalityFilterMatch(locality: string): Record<string, unknown> {
-    const escaped = this.escapeRegex(locality.trim());
-    return {
-      $or: [
-        { locality: { $regex: new RegExp(escaped, 'i') } },
-        { address: { $regex: new RegExp(escaped, 'i') } },
-        { city: { $regex: new RegExp(escaped, 'i') } },
-      ],
-    };
-  }
-
-  private static buildLocationSearchMatch(term: string): Record<string, unknown> {
-    const escaped = this.escapeRegex(term.trim());
-    const rx = new RegExp(escaped, 'i');
-    return {
-      $or: [
-        { city: { $regex: rx } },
-        { locality: { $regex: rx } },
-        { address: { $regex: rx } },
-        { state: { $regex: rx } },
-        { pincode: { $regex: rx } },
-      ],
-    };
-  }
-
-  private static applyLeadLocationFilters(
-    match: Record<string, unknown>,
-    filters: { city?: string; locality?: string; localArea?: string; locationSearch?: string },
-  ): void {
-    if (filters.locationSearch) {
-      // Broad Enter-triggered search across all location fields — takes precedence over city
-      this.pushLocationFilterClause(match, this.buildLocationSearchMatch(filters.locationSearch));
-      return;
-    }
-
-    const locationConditions: Record<string, unknown>[] = [];
-
-    if (filters.city) {
-      locationConditions.push(this.buildCityFilterMatch(filters.city));
-    }
-    if (filters.locality) {
-      locationConditions.push(this.buildLocalityFilterMatch(filters.locality));
-    }
-    if (filters.localArea) {
-      locationConditions.push(this.buildLocalAreaFilterMatch(filters.localArea));
-    }
-
-    if (locationConditions.length === 0) return;
-
-    if (locationConditions.length === 1) {
-      this.pushLocationFilterClause(match, locationConditions[0]);
-    } else {
-      const existingAnd = match.$and as Record<string, unknown>[] | undefined;
-      match.$and = [...(existingAnd || []), ...locationConditions];
-    }
   }
 
   private static buildRegisteredPredicate(): Record<string, unknown> {
@@ -622,6 +322,7 @@ export class LeadService {
   private static buildRegisteredOnlyPredicate(): Record<string, unknown> {
     return {
       ...this.buildRegisteredPredicate(),
+      $nor: [this.buildVerifiedPredicate()],
     };
   }
 
@@ -653,58 +354,9 @@ export class LeadService {
     };
   }
 
-  /**
-   * Strict owner scope — only pickedBy OR addedBy.
-   * Used when matching the Performance page counting logic exactly.
-   */
-  private static buildStrictOwnerScopeClause(ownerIds: string[]): { $or: Array<Record<string, unknown>> } {
-    return {
-      $or: [
-        this.buildIdSelector('pickedBy', ownerIds),
-        this.buildIdSelector('addedBy', ownerIds),
-      ],
-    };
-  }
-
   private static textForSpreadsheet(value?: string | number | null): string {
     if (value === null || value === undefined) return '';
     return String(value).trim();
-  }
-
-  /** City column — prefer plain city name; parse legacy full addresses stored in city. */
-  private static cityForExport(city?: string | null, address?: string | null): string {
-    const cityVal = (city || '').trim();
-    const addressVal = (address || '').trim();
-
-    if (cityVal && !this.isFullAddressLike(cityVal)) {
-      return cityVal;
-    }
-
-    return (
-      this.extractCityFromStoredValue(cityVal) ||
-      this.extractCityFromStoredValue(addressVal) ||
-      cityVal
-    );
-  }
-
-  /**
-   * Local Area column — matches lead detail UI (`lead.address`).
-   * Falls back to city only when address is empty and city is a short label.
-   * Legacy full Google-style addresses stored in city are not used as fallback
-   * (dashboard shows "—" for Local Area in that case).
-   */
-  private static localAreaForExport(city?: string | null, address?: string | null): string {
-    const addressVal = (address || '').trim();
-    if (addressVal) {
-      return addressVal;
-    }
-
-    const cityVal = (city || '').trim();
-    if (!cityVal || this.isFullAddressLike(cityVal)) {
-      return '';
-    }
-
-    return cityVal;
   }
 
   private static applyWorksheetLayout(
@@ -722,9 +374,6 @@ export class LeadService {
       'Lead Name': { min: 24, max: 40 },
       'Phone/Landline': { min: 18, max: 25 },
       City: { min: 18, max: 28 },
-      Locality: { min: 16, max: 28 },
-      'Local Area': { min: 28, max: 55 },
-      'Gated Community': { min: 18, max: 32 },
       State: { min: 16, max: 22 },
       'Current Status': { min: 24, max: 35 },
       'Status Reason': { min: 24, max: 45 },
@@ -779,184 +428,6 @@ export class LeadService {
         };
       }
     }
-  }
-
-  /**
-   * Parse from/to query params into IST day bounds (inclusive).
-   * Accepts YYYY-MM-DD or full ISO timestamps.
-   */
-  static parseFilterRange(
-    from?: string | Date,
-    to?: string | Date
-  ): { from?: Date; to?: Date } {
-    const istOffsetMs = 5.5 * 60 * 60 * 1000;
-
-    const toISTBound = (value: string | Date, end: boolean): Date => {
-      if (value instanceof Date) {
-        return value;
-      }
-
-      const str = String(value).trim();
-      const dateOnly = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
-      if (dateOnly) {
-        const year = Number(dateOnly[1]);
-        const month = Number(dateOnly[2]);
-        const day = Number(dateOnly[3]);
-        if (end) {
-          return new Date(Date.UTC(year, month - 1, day, 23, 59, 59, 999) - istOffsetMs);
-        }
-        return new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0) - istOffsetMs);
-      }
-
-      return new Date(str);
-    };
-
-    return {
-      from: from ? toISTBound(from, false) : undefined,
-      to: to ? toISTBound(to, true) : undefined,
-    };
-  }
-
-  private static buildBoundedDateRange(startDate?: Date, endDate?: Date): Record<string, Date> | null {
-    if (!startDate && !endDate) return null;
-    const dateRange: Record<string, Date> = {};
-    if (startDate) dateRange.$gte = startDate;
-    if (endDate) dateRange.$lte = endDate;
-    return dateRange;
-  }
-
-  private static isContactOutcomeStatus(status?: LeadStatus): boolean {
-    return (
-      status === 'contacted_interested' ||
-      status === 'contacted_not_interested' ||
-      status === 'contacted_not_lifted'
-    );
-  }
-
-  /** Date filter for registered-candidate list pages. */
-  private static buildRegistrationDateFilterClause(
-    registrationStatus: RegistrationStatusFilter,
-    startDate?: Date,
-    endDate?: Date
-  ): Record<string, unknown> | null {
-    const dateRange = this.buildBoundedDateRange(startDate, endDate);
-    if (!dateRange) return null;
-    const field = registrationStatus === 'registered_verified'
-      ? 'conversionData.registeredVerifiedAt'
-      : 'conversionData.registeredAt';
-    return { [field]: dateRange };
-  }
-
-  /** Date filter for interested / not interested / not lifted queues. */
-  private static buildStatusTransitionDateFilterClause(
-    status: LeadStatus,
-    startDate?: Date,
-    endDate?: Date
-  ): Record<string, unknown> | null {
-    const dateRange = this.buildBoundedDateRange(startDate, endDate);
-    if (!dateRange) return null;
-    return {
-      statusHistory: {
-        $elemMatch: {
-          status,
-          changedAt: dateRange,
-        },
-      },
-    };
-  }
-
-  private static buildOwnerActivityDateFilterClause(
-    startDate?: Date,
-    endDate?: Date
-  ): Record<string, unknown> | null {
-    const dateRange = this.buildBoundedDateRange(startDate, endDate);
-    if (!dateRange) return null;
-    return {
-      $or: [{ pickedAt: dateRange }, { createdAt: dateRange }],
-    };
-  }
-
-  private static buildSearchDateFilterClause(filters: SearchFilters): Record<string, unknown> | null {
-    if (!filters.startDate && !filters.endDate) return null;
-
-    if (
-      filters.registrationStatus === 'registered' ||
-      filters.registrationStatus === 'registered_verified'
-    ) {
-      return this.buildRegistrationDateFilterClause(filters.registrationStatus, filters.startDate, filters.endDate);
-    }
-
-    if (filters.status && this.isContactOutcomeStatus(filters.status)) {
-      return this.buildStatusTransitionDateFilterClause(
-        filters.status,
-        filters.startDate,
-        filters.endDate
-      );
-    }
-
-    if (filters.ownerDateMode === 'owner') {
-      return this.buildOwnerActivityDateFilterClause(filters.startDate, filters.endDate);
-    }
-
-    const dateRange = this.buildBoundedDateRange(filters.startDate, filters.endDate);
-    return dateRange ? { createdAt: dateRange } : null;
-  }
-
-  private static isDateInFilterRange(
-    value: Date | string | null | undefined,
-    filters: { from?: Date; to?: Date; allTime?: boolean }
-  ): boolean {
-    if (filters.allTime || !filters.from || !filters.to) return true;
-    if (!value) return false;
-    const timestamp = new Date(value).getTime();
-    if (Number.isNaN(timestamp)) return false;
-    return timestamp >= filters.from.getTime() && timestamp <= filters.to.getTime();
-  }
-
-  private static getLatestStatusTransitionAt(lead: any, status: LeadStatus): Date | undefined {
-    const history = Array.isArray(lead.statusHistory) ? lead.statusHistory : [];
-    const latest = history
-      .filter((entry: any) => entry?.status === status && entry?.changedAt)
-      .sort(
-        (a: any, b: any) =>
-          new Date(b.changedAt).getTime() - new Date(a.changedAt).getTime()
-      )[0];
-    return latest?.changedAt ? new Date(latest.changedAt) : undefined;
-  }
-
-  private static getRegistrationActivityAt(lead: any): Date | undefined {
-    const candidates = [
-      lead.conversionData?.lastCheckedAt,
-      lead.updatedAt,
-      lead.pickedAt,
-      lead.createdAt,
-    ];
-    for (const candidate of candidates) {
-      if (candidate) return new Date(candidate);
-    }
-    return undefined;
-  }
-
-  private static leadIsRegistered(lead: any): boolean {
-    const platformUid = lead.conversionData?.platformUid;
-    const firebaseUid = lead.activationData?.firebaseUid;
-    const status = lead.accountStatus;
-    return (
-      (platformUid !== undefined && platformUid !== null && platformUid !== '') ||
-      (firebaseUid !== undefined && firebaseUid !== null && firebaseUid !== '') ||
-      ['invited', 'activated', 'suspended'].includes(status)
-    );
-  }
-
-  private static leadIsVerified(lead: any): boolean {
-    return (
-      lead.conversionData?.isAadhaarVerified === true ||
-      lead.verificationStatus?.aadhaar?.status === 'verified'
-    );
-  }
-
-  static normalizeLeadForResponse(lead: any): any {
-    return this.normalizeLeadData(lead);
   }
 
   private static getISTDayBounds(reference = new Date()): { startOfToday: Date; endOfToday: Date } {
@@ -1093,10 +564,6 @@ export class LeadService {
       const primarySkillNameMap: Record<string, string> = {
         'cleaning': 'Cleaning',
         'handyperson': 'Handyperson',
-        'plumbing': 'Plumbing',
-        'electrical': 'Electrician',
-        'carpenter': 'Carpentry',
-        'painting': 'Home Painting',
         'moving': 'Moving & Delivery',
         'gardening': 'Gardening',
         'business': 'Business Services',
@@ -1123,7 +590,6 @@ export class LeadService {
         landline: normalizedLandline || undefined,
         email: data.email?.trim().toLowerCase(),
         city: data.city?.trim() || undefined,
-        locality: data.locality?.trim() || undefined,
         state: data.state?.trim() || undefined,
         address: data.address?.trim() || undefined,
         pincode: data.pincode?.trim() || undefined,
@@ -1229,7 +695,7 @@ export class LeadService {
     return lead;
   }
 
-  private static applyOwnerScope(query: any, ownerBy?: string, ownerByAny?: string[], strictOwner?: boolean): void {
+  private static applyOwnerScope(query: any, ownerBy?: string, ownerByAny?: string[]): void {
     const ownerIds = Array.from(
       new Set(
         (ownerByAny && ownerByAny.length > 0
@@ -1246,254 +712,7 @@ export class LeadService {
     }
 
     query.$and = query.$and || [];
-    if (strictOwner) {
-      query.$and.push(this.buildStrictOwnerScopeClause(ownerIds));
-    } else {
-      query.$and.push(this.buildOwnerScopeClause(ownerIds));
-    }
-  }
-
-  private static applyPrioritizedOwnerScope(query: any, ownerBy?: string, ownerByAny?: string[]): void {
-    const ownerIds = Array.from(
-      new Set(
-        (ownerByAny && ownerByAny.length > 0
-          ? ownerByAny
-          : ownerBy
-            ? [ownerBy]
-            : []
-        ).filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
-      )
-    );
-
-    if (!ownerIds.length) {
-      return;
-    }
-
-    query.$and = query.$and || [];
-    query.$and.push({
-      $or: [
-        this.buildIdSelector('pickedBy', ownerIds),
-        {
-          $and: [
-            {
-              $or: [
-                { pickedBy: null },
-                { pickedBy: { $exists: false } },
-                { pickedBy: '' }
-              ]
-            },
-            this.buildIdSelector('addedBy', ownerIds)
-          ]
-        }
-      ]
-    });
-  }
-
-  private static latestFollowUpHistoryEntry(
-    lead: { statusHistory?: Array<Record<string, any>> },
-    dueType: 'callback' | 'onboarding'
-  ): Record<string, any> | undefined {
-    const history = Array.isArray(lead.statusHistory) ? lead.statusHistory : [];
-    void dueType;
-    return [...history].sort(
-      (a, b) =>
-        new Date(b?.changedAt || 0).getTime() - new Date(a?.changedAt || 0).getTime()
-    )[0];
-  }
-
-  private static filterFollowUpsByOwner<T extends FollowUpQueueItem>(
-    items: T[],
-    filters: Pick<FollowUpQueueFilters, 'followUpOwnerBy' | 'followUpOwnerByAny'>
-  ): T[] {
-    const ownerIds = Array.from(
-      new Set(
-        (filters.followUpOwnerByAny && filters.followUpOwnerByAny.length > 0
-          ? filters.followUpOwnerByAny
-          : filters.followUpOwnerBy
-            ? [filters.followUpOwnerBy]
-            : []
-        ).filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
-      )
-    );
-
-    if (!ownerIds.length) {
-      return items;
-    }
-
-    const ownerSet = new Set(ownerIds);
-    return items.filter((item) => {
-      const owner = this.latestFollowUpHistoryEntry(item as T & { statusHistory?: Array<Record<string, any>> }, item.dueType);
-      return owner?.changedBy ? ownerSet.has(owner.changedBy) : false;
-    });
-  }
-
-  private static buildFollowUpStatsDocumentMatch(
-    filters: Pick<FollowUpQueueFilters, 'addedBy' | 'addedByAny' | 'ownerBy' | 'ownerByAny' | 'pickedBy'>,
-  ): Record<string, unknown> {
-    const scope: Record<string, unknown> = {};
-    if (filters.addedByAny && filters.addedByAny.length > 0) {
-      scope.addedBy = { $in: filters.addedByAny };
-    } else if (filters.addedBy) {
-      scope.addedBy = filters.addedBy;
-    }
-
-    if (filters.pickedBy) {
-      scope.pickedBy = filters.pickedBy;
-    } else {
-      this.applyOwnerScope(scope, filters.ownerBy, filters.ownerByAny);
-    }
-
-    const existingScopeAnd = Array.isArray(scope.$and) ? scope.$and : [];
-    delete scope.$and;
-
-    return {
-      ...scope,
-      $and: [
-        ...existingScopeAnd,
-        {
-          $or: [
-            { nextCallbackAt: { $exists: true, $ne: null } },
-            { expectedOnboardingAt: { $exists: true, $ne: null } },
-          ],
-        },
-      ],
-    };
-  }
-
-  private static buildFollowUpStatsOwnerStage(
-    filters: Pick<FollowUpQueueFilters, 'followUpOwnerBy' | 'followUpOwnerByAny'>,
-  ): Record<string, unknown>[] {
-    const ownerIds = Array.from(
-      new Set(
-        (filters.followUpOwnerByAny && filters.followUpOwnerByAny.length > 0
-          ? filters.followUpOwnerByAny
-          : filters.followUpOwnerBy
-            ? [filters.followUpOwnerBy]
-            : []
-        ).filter((id): id is string => typeof id === 'string' && id.trim().length > 0),
-      ),
-    );
-
-    if (!ownerIds.length) {
-      return [];
-    }
-
-    return [{ $match: { latestChangedBy: { $in: ownerIds } } }];
-  }
-
-  private static buildFollowUpQueueLeadMatch(filters: FollowUpQueueFilters): Record<string, unknown> {
-    const query: Record<string, unknown> = {};
-
-    if (filters.city) {
-      this.pushLocationFilterClause(query, this.buildCityFilterMatch(filters.city));
-    }
-    if (filters.primarySkill) {
-      query.$and = query.$and || [];
-      (query.$and as Record<string, unknown>[]).push(this.buildCategoryMatch(filters.primarySkill));
-    }
-    if (filters.addedByAny && filters.addedByAny.length > 0) {
-      query.addedBy = { $in: filters.addedByAny };
-    } else if (filters.addedBy) {
-      query.addedBy = filters.addedBy;
-    }
-
-    if (filters.pickedBy) {
-      query.pickedBy = filters.pickedBy;
-    } else {
-      this.applyOwnerScope(query, filters.ownerBy, filters.ownerByAny);
-    }
-
-    if (filters.attempts) {
-      query.attempts = filters.attempts;
-    }
-
-    const dueType = filters.dueType || 'all';
-    if (dueType === 'callback') {
-      query.nextCallbackAt = { $exists: true, $ne: null };
-    } else if (dueType === 'onboarding') {
-      query.expectedOnboardingAt = { $exists: true, $ne: null };
-    } else {
-      query.$and = query.$and || [];
-      (query.$and as Record<string, unknown>[]).push({
-        $or: [
-          { nextCallbackAt: { $exists: true, $ne: null } },
-          { expectedOnboardingAt: { $exists: true, $ne: null } },
-        ],
-      });
-    }
-
-    return query;
-  }
-
-  private static buildFollowUpBucketMatch(
-    filters: FollowUpQueueFilters,
-    startOfToday: Date,
-    endOfToday: Date,
-    now: Date,
-  ): Record<string, unknown> {
-    const bucket = filters.bucket || 'all';
-
-    if (bucket === 'today') {
-      return { dueAt: { $gte: startOfToday, $lte: endOfToday } };
-    }
-    if (bucket === 'overdue') {
-      return {
-        $and: [
-          { dueAt: { $lt: now } },
-          { attempts: { $ne: 'max_reached' } },
-        ],
-      };
-    }
-    if (bucket === 'upcoming') {
-      return { dueAt: { $gt: endOfToday } };
-    }
-
-    const dueAt: Record<string, unknown> = {};
-    if (filters.startDate) {
-      dueAt.$gte = filters.startDate;
-    }
-    if (filters.endDate) {
-      dueAt.$lte = filters.endDate;
-    }
-    if (Object.keys(dueAt).length > 0) {
-      return { dueAt };
-    }
-
-    return {};
-  }
-
-  private static buildFollowUpDueTodayAccumulator(field: string, startOfToday: Date, endOfToday: Date) {
-    return {
-      $sum: {
-        $cond: [
-          {
-            $and: [
-              { $gte: [`$${field}`, startOfToday] },
-              { $lte: [`$${field}`, endOfToday] },
-            ],
-          },
-          1,
-          0,
-        ],
-      },
-    };
-  }
-
-  private static buildFollowUpOverdueAccumulator(field: string, now: Date) {
-    return {
-      $sum: {
-        $cond: [
-          {
-            $and: [
-              { $lt: [`$${field}`, now] },
-              { $ne: ['$attempts', 'max_reached'] },
-            ],
-          },
-          1,
-          0,
-        ],
-      },
-    };
+    query.$and.push(this.buildOwnerScopeClause(ownerIds));
   }
 
   /**
@@ -1588,75 +807,15 @@ export class LeadService {
       const names = await Lead.distinct('gatedCommunityName', {
         gatedCommunityName: { $exists: true, $nin: [null, ''] },
       });
-      return this.normalizeDistinctLocationValues(names);
+      return Array.from(
+        new Set(
+          (names as string[])
+            .map((name) => name.trim())
+            .filter(Boolean)
+        )
+      ).sort((a, b) => a.localeCompare(b));
     } catch (error: any) {
       logger.error('Error getting gated community names', { error: error.message });
-      throw error;
-    }
-  }
-
-  static async getLeadCities(): Promise<string[]> {
-    try {
-      const cities = await Lead.distinct('city', {
-        city: { $exists: true, $nin: [null, ''] },
-      });
-
-      const cityNames: string[] = [];
-      for (const value of cities) {
-        if (typeof value !== 'string') continue;
-        const extracted = this.extractCityFromStoredValue(value);
-        if (extracted) {
-          cityNames.push(extracted);
-        }
-      }
-
-      return this.collectLocationDropdownValues(cityNames);
-    } catch (error: any) {
-      logger.error('Error getting lead cities', { error: error.message });
-      throw error;
-    }
-  }
-
-  static async getLeadLocalAreas(): Promise<string[]> {
-    try {
-      const [addresses, cityValues] = await Promise.all([
-        Lead.distinct('address', {
-          address: { $exists: true, $nin: [null, ''] },
-        }),
-        Lead.distinct('city', {
-          city: { $exists: true, $nin: [null, ''] },
-        }),
-      ]);
-
-      const localAreas: string[] = [];
-      for (const value of [...addresses, ...cityValues]) {
-        if (typeof value !== 'string') continue;
-        localAreas.push(...this.extractLocalAreasFromStoredValue(value));
-      }
-
-      return this.collectLocationDropdownValues(localAreas);
-    } catch (error: any) {
-      logger.error('Error getting lead local areas', { error: error.message });
-      throw error;
-    }
-  }
-
-  static async getLeadLocalities(): Promise<string[]> {
-    try {
-      const localities = await Lead.distinct('locality', {
-        locality: { $exists: true, $nin: [null, ''] },
-      });
-
-      const names: string[] = [];
-      for (const value of localities) {
-        if (typeof value !== 'string') continue;
-        const trimmed = value.trim();
-        if (trimmed) names.push(trimmed);
-      }
-
-      return this.collectLocationDropdownValues(names);
-    } catch (error: any) {
-      logger.error('Error getting lead localities', { error: error.message });
       throw error;
     }
   }
@@ -1679,19 +838,18 @@ export class LeadService {
         query.status = filters.status;
       }
 
-      if (filters.attempts) {
-        query.attempts = filters.attempts;
+      if (filters.city) {
+        query.city = { $regex: new RegExp(filters.city, 'i') };
       }
-
-      this.applyLeadLocationFilters(query, {
-        city: filters.city,
-        locality: filters.locality,
-        localArea: filters.localArea,
-      });
 
       if (filters.primarySkill) {
         query.$and = query.$and || [];
-        query.$and.push(this.buildCategoryMatch(filters.primarySkill));
+        query.$and.push({
+          $or: [
+            { primaryCategory: filters.primarySkill },
+            { primarySkill: filters.primarySkill },
+          ],
+        });
       }
 
       if (filters.source) {
@@ -1704,23 +862,15 @@ export class LeadService {
         query.addedBy = filters.addedBy;
       }
 
-      if (filters.unclaimed) {
-        query.$and = query.$and || [];
-        query.$and.push({
-          $or: [
-            { pickedBy: null },
-            { pickedBy: { $exists: false } },
-            { pickedBy: '' },
-          ],
-        });
-      } else if (filters.claimed) {
-        query.$and = query.$and || [];
-        query.$and.push({
-          pickedBy: { $exists: true, $nin: [null, ''] },
-        });
-      } else if (filters.pickedByAny && filters.pickedByAny.length > 0) {
-        query.pickedBy = { $in: filters.pickedByAny };
-      } else if (filters.pickedBy) {
+      if (filters.pickedBy) {
+        query.pickedBy = filters.pickedBy;
+      }
+
+      if (!filters.pickedBy) {
+        this.applyOwnerScope(query, filters.ownerBy, filters.ownerByAny);
+      }
+
+      if (filters.pickedBy) {
         query.pickedBy = filters.pickedBy;
       }
 
@@ -1728,21 +878,15 @@ export class LeadService {
         query.transferPendingTo = filters.transferPendingTo;
       }
 
-      const hasPickedFilter =
-        !!filters.pickedBy || (filters.pickedByAny && filters.pickedByAny.length > 0);
-      if (!hasPickedFilter && !filters.unclaimed && !filters.claimed) {
-        if (filters.registrationStatus) {
-          this.applyPrioritizedOwnerScope(query, filters.ownerBy, filters.ownerByAny);
-        } else {
-          this.applyOwnerScope(query, filters.ownerBy, filters.ownerByAny, filters.strictOwner);
-        }
-      }
+      this.applyOwnerScope(query, filters.ownerBy, filters.ownerByAny);
 
       if (filters.startDate || filters.endDate) {
-        const dateClause = this.buildSearchDateFilterClause(filters);
-        if (dateClause) {
-          query.$and = query.$and || [];
-          query.$and.push(dateClause);
+        query.createdAt = {};
+        if (filters.startDate) {
+          query.createdAt.$gte = filters.startDate;
+        }
+        if (filters.endDate) {
+          query.createdAt.$lte = filters.endDate;
         }
       }
 
@@ -1857,12 +1001,14 @@ export class LeadService {
       };
 
       if (filters.city) {
-        this.pushLocationFilterClause(query, this.buildCityFilterMatch(filters.city));
+        query.city = { $regex: new RegExp(filters.city, 'i') };
       }
 
       if (filters.primarySkill) {
-        query.$and = query.$and || [];
-        query.$and.push(this.buildCategoryMatch(filters.primarySkill));
+        query.$or = [
+          { primarySkill: { $regex: new RegExp(filters.primarySkill, 'i') } },
+          { primaryCategory: { $regex: new RegExp(filters.primarySkill, 'i') } },
+        ];
       }
 
       if (filters.addedByAny && filters.addedByAny.length > 0) {
@@ -1931,7 +1077,6 @@ export class LeadService {
         Lead.countDocuments({
           ...baseQuery,
           nextCallbackAt: { $lt: now },
-          attempts: { $ne: 'max_reached' },
         }),
         Lead.countDocuments({
           ...baseQuery,
@@ -1967,96 +1112,87 @@ export class LeadService {
       const now = new Date();
       const { startOfToday, endOfToday } = this.getISTDayBounds(now);
 
-      const leadMatch = this.buildFollowUpQueueLeadMatch(filters);
-      const bucketMatch = this.buildFollowUpBucketMatch(filters, startOfToday, endOfToday, now);
-      const dueType = filters.dueType || 'all';
-      const includeCallback = dueType === 'all' || dueType === 'callback';
-      const includeOnboarding = dueType === 'all' || dueType === 'onboarding';
-
-      const expandFacet: Record<string, object[]> = {};
-      if (includeCallback) {
-        expandFacet.callbacks = [
-          { $match: { nextCallbackAt: { $exists: true, $ne: null } } },
-          { $addFields: { dueType: 'callback', dueAt: '$nextCallbackAt' } },
+      const query: any = {};
+      if (filters.city) {
+        query.city = { $regex: new RegExp(filters.city, 'i') };
+      }
+      if (filters.primarySkill) {
+        query.$or = [
+          { primarySkill: { $regex: new RegExp(filters.primarySkill, 'i') } },
+          { primaryCategory: { $regex: new RegExp(filters.primarySkill, 'i') } },
         ];
       }
-      if (includeOnboarding) {
-        expandFacet.onboardings = [
-          { $match: { expectedOnboardingAt: { $exists: true, $ne: null } } },
-          { $addFields: { dueType: 'onboarding', dueAt: '$expectedOnboardingAt' } },
-        ];
+      if (filters.addedByAny && filters.addedByAny.length > 0) {
+        query.addedBy = { $in: filters.addedByAny };
+      } else if (filters.addedBy) {
+        query.addedBy = filters.addedBy;
       }
 
-      const pipeline: Record<string, unknown>[] = [
-        { $match: leadMatch },
-        {
-          $addFields: {
-            latestChangedBy: {
-              $let: {
-                vars: {
-                  latestEntry: {
-                    $arrayElemAt: [
-                      {
-                        $sortArray: {
-                          input: { $ifNull: ['$statusHistory', []] },
-                          sortBy: { changedAt: -1 },
-                        },
-                      },
-                      0,
-                    ],
-                  },
-                },
-                in: '$$latestEntry.changedBy',
-              },
-            },
-          },
-        },
-        ...this.buildFollowUpStatsOwnerStage({
-          followUpOwnerBy: filters.followUpOwnerBy,
-          followUpOwnerByAny: filters.followUpOwnerByAny,
-        }),
-        { $facet: expandFacet },
-        {
-          $project: {
-            items: {
-              $concatArrays: [
-                { $ifNull: ['$callbacks', []] },
-                { $ifNull: ['$onboardings', []] },
-              ],
-            },
-          },
-        },
-        { $unwind: '$items' },
-        { $replaceRoot: { newRoot: '$items' } },
-      ];
-
-      if (Object.keys(bucketMatch).length > 0) {
-        pipeline.push({ $match: bucketMatch });
+      if (filters.pickedBy) {
+        query.pickedBy = filters.pickedBy;
+      } else {
+        this.applyOwnerScope(query, filters.ownerBy, filters.ownerByAny);
       }
 
-      pipeline.push({
-        $facet: {
-          metadata: [{ $count: 'total' }],
-          data: [
-            { $sort: { dueAt: 1 } },
-            { $skip: skip },
-            { $limit: limit },
+      if (filters.dueType === 'callback') {
+        query.nextCallbackAt = { $exists: true, $ne: null };
+      } else if (filters.dueType === 'onboarding') {
+        query.expectedOnboardingAt = { $exists: true, $ne: null };
+      } else {
+        query.$and = query.$and || [];
+        query.$and.push({
+          $or: [
+            { nextCallbackAt: { $exists: true, $ne: null } },
+            { expectedOnboardingAt: { $exists: true, $ne: null } },
           ],
-        },
+        });
+      }
+
+      const leads = await Lead.find(query).lean();
+
+      let items: FollowUpQueueItem[] = [];
+      for (const lead of leads) {
+        if ((filters.dueType === 'all' || !filters.dueType || filters.dueType === 'callback') && lead.nextCallbackAt) {
+          items.push({
+            ...(this.normalizeLeadData(lead) as ILead),
+            dueType: 'callback',
+            dueAt: new Date(lead.nextCallbackAt),
+          });
+        }
+        if ((filters.dueType === 'all' || !filters.dueType || filters.dueType === 'onboarding') && lead.expectedOnboardingAt) {
+          items.push({
+            ...(this.normalizeLeadData(lead) as ILead),
+            dueType: 'onboarding',
+            dueAt: new Date(lead.expectedOnboardingAt),
+          });
+        }
+      }
+
+      const bucket = filters.bucket || 'all';
+      items = items.filter((item) => {
+        if (bucket === 'today') return item.dueAt >= startOfToday && item.dueAt <= endOfToday;
+        if (bucket === 'overdue') return item.dueAt < now;
+        if (bucket === 'upcoming') return item.dueAt > endOfToday;
+        if (bucket === 'range') {
+          if (filters.startDate && item.dueAt < filters.startDate) return false;
+          if (filters.endDate && item.dueAt > filters.endDate) return false;
+          return true;
+        }
+        if (filters.startDate && item.dueAt < filters.startDate) return false;
+        if (filters.endDate && item.dueAt > filters.endDate) return false;
+        return true;
       });
 
-      const [aggregated] = await Lead.aggregate(pipeline as any[]);
-      const total = aggregated?.metadata?.[0]?.total || 0;
-      const leads = (aggregated?.data || []).map((lead: Record<string, unknown>) =>
-        this.normalizeLeadData(lead) as FollowUpQueueItem,
-      );
+      items.sort((a, b) => a.dueAt.getTime() - b.dueAt.getTime());
+      const total = items.length;
+      const paged = items.slice(skip, skip + limit);
 
       return {
-        leads,
+        leads: paged,
         total,
         page,
         limit,
-        totalPages: total > 0 ? Math.ceil(total / limit) : 0,
+        totalPages: Math.ceil(total / limit),
       };
     } catch (error: any) {
       logger.error('Error fetching follow-up queue', {
@@ -2068,118 +1204,68 @@ export class LeadService {
   }
 
   static async getFollowUpQueueStats(
-    filters: Pick<FollowUpQueueFilters, 'addedBy' | 'addedByAny' | 'ownerBy' | 'ownerByAny' | 'pickedBy' | 'followUpOwnerBy' | 'followUpOwnerByAny'>,
-    dateRange?: { from?: Date; to?: Date }
+    filters: Pick<FollowUpQueueFilters, 'addedBy' | 'addedByAny' | 'ownerBy' | 'ownerByAny' | 'pickedBy'>
   ): Promise<FollowUpQueueStats> {
     try {
-      const cacheKey = buildFollowUpStatsCacheKey(filters, dateRange);
-      const cached = getCachedFollowUpStats(cacheKey);
-      if (cached) {
-        return cached;
-      }
-
       const now = new Date();
       const { startOfToday, endOfToday } = this.getISTDayBounds(now);
-      const baseMatch = this.buildFollowUpStatsDocumentMatch(filters);
 
-      const facet: Record<string, object[]> = {
-        callbacks: [
-          { $match: { nextCallbackAt: { $exists: true, $ne: null } } },
-          {
-            $group: {
-              _id: null,
-              total: { $sum: 1 },
-              dueToday: this.buildFollowUpDueTodayAccumulator('nextCallbackAt', startOfToday, endOfToday),
-              overdue: this.buildFollowUpOverdueAccumulator('nextCallbackAt', now),
-            },
-          },
-        ],
-        onboarding: [
-          { $match: { expectedOnboardingAt: { $exists: true, $ne: null } } },
-          {
-            $group: {
-              _id: null,
-              total: { $sum: 1 },
-              dueToday: this.buildFollowUpDueTodayAccumulator('expectedOnboardingAt', startOfToday, endOfToday),
-              overdue: this.buildFollowUpOverdueAccumulator('expectedOnboardingAt', now),
-            },
-          },
-        ],
-      };
-
-      if (dateRange?.from && dateRange?.to) {
-        facet.rangeCallbacks = [
-          {
-            $match: {
-              nextCallbackAt: { $gte: dateRange.from, $lte: dateRange.to },
-            },
-          },
-          { $count: 'count' },
-        ];
-        facet.rangeOnboarding = [
-          {
-            $match: {
-              expectedOnboardingAt: { $gte: dateRange.from, $lte: dateRange.to },
-            },
-          },
-          { $count: 'count' },
-        ];
+      const scope: any = {};
+      if (filters.addedByAny && filters.addedByAny.length > 0) {
+        scope.addedBy = { $in: filters.addedByAny };
+      } else if (filters.addedBy) {
+        scope.addedBy = filters.addedBy;
       }
 
-      const pipeline: Record<string, unknown>[] = [
-        { $match: baseMatch },
-        {
-          $addFields: {
-            latestChangedBy: {
-              $let: {
-                vars: {
-                  latestEntry: {
-                    $arrayElemAt: [
-                      {
-                        $sortArray: {
-                          input: { $ifNull: ['$statusHistory', []] },
-                          sortBy: { changedAt: -1 },
-                        },
-                      },
-                      0,
-                    ],
-                  },
-                },
-                in: '$$latestEntry.changedBy',
-              },
-            },
-          },
-        },
-        ...this.buildFollowUpStatsOwnerStage(filters),
-        { $facet: facet },
-      ];
+      if (filters.pickedBy) {
+        scope.pickedBy = filters.pickedBy;
+      } else {
+        this.applyOwnerScope(scope, filters.ownerBy, filters.ownerByAny);
+      }
 
-      const [aggregated] = await Lead.aggregate(pipeline as any[]);
-
-      const callbackGroup = aggregated?.callbacks?.[0] || {};
-      const onboardingGroup = aggregated?.onboarding?.[0] || {};
-      const callbackTotal = callbackGroup.total || 0;
-      const onboardingTotal = onboardingGroup.total || 0;
-
-      const rangeCount =
-        dateRange?.from && dateRange?.to
-          ? (aggregated?.rangeCallbacks?.[0]?.count || 0) +
-            (aggregated?.rangeOnboarding?.[0]?.count || 0)
-          : undefined;
-
-      const stats: FollowUpQueueStats = {
+      const [
+        callbackDueToday,
+        callbackOverdue,
+        onboardingDueToday,
+        onboardingOverdue,
         callbackTotal,
         onboardingTotal,
-        callbackDueToday: callbackGroup.dueToday || 0,
-        callbackOverdue: callbackGroup.overdue || 0,
-        onboardingDueToday: onboardingGroup.dueToday || 0,
-        onboardingOverdue: onboardingGroup.overdue || 0,
-        totalFollowUps: callbackTotal + onboardingTotal,
-        rangeCount,
-      };
+      ] = await Promise.all([
+        Lead.countDocuments({
+          ...scope,
+          nextCallbackAt: { $gte: startOfToday, $lte: endOfToday },
+        }),
+        Lead.countDocuments({
+          ...scope,
+          nextCallbackAt: { $lt: now },
+        }),
+        Lead.countDocuments({
+          ...scope,
+          expectedOnboardingAt: { $gte: startOfToday, $lte: endOfToday },
+        }),
+        Lead.countDocuments({
+          ...scope,
+          expectedOnboardingAt: { $lt: now },
+        }),
+        Lead.countDocuments({
+          ...scope,
+          nextCallbackAt: { $exists: true, $ne: null },
+        }),
+        Lead.countDocuments({
+          ...scope,
+          expectedOnboardingAt: { $exists: true, $ne: null },
+        }),
+      ]);
 
-      setCachedFollowUpStats(cacheKey, stats);
-      return stats;
+      return {
+        callbackTotal,
+        onboardingTotal,
+        callbackDueToday,
+        callbackOverdue,
+        onboardingDueToday,
+        onboardingOverdue,
+        totalFollowUps: callbackTotal + onboardingTotal,
+      };
     } catch (error: any) {
       logger.error('Error fetching follow-up queue stats', {
         error: error.message,
@@ -2197,13 +1283,9 @@ export class LeadService {
     callbackScheduled: number;
     callbackOverdue: number;
     onboarded: number;
-    verified: number;
     statusCounts: Array<{ status: string; count: number }>;
     qualifierBreakdown: Array<{ qualifierId: string; qualifierName: string; touchedLeads: number }>;
     categoryBreakdown: Array<{ category: string; count: number }>;
-    onboardedCategoryBreakdown?: Array<{ category: string; count: number }>;
-    verifiedCategoryBreakdown?: Array<{ category: string; count: number }>;
-    interestedCategoryBreakdown?: Array<{ category: string; count: number }>;
   }> {
     try {
       const leadMatch: any = {};
@@ -2228,18 +1310,19 @@ export class LeadService {
       if (filters.gatedCommunityName) {
         leadMatch.gatedCommunityName = this.buildExactCaseInsensitiveMatch(filters.gatedCommunityName);
       }
-      this.applyLeadLocationFilters(leadMatch, filters);
-
-      // Scope all stat cards to leads created in the selected date range,
-      // keeping parity with the leadsAdded count which also uses createdAt.
-      if (!filters.allTime && filters.from && filters.to) {
-        leadMatch.createdAt = { $gte: filters.from, $lte: filters.to };
-      }
 
       const basePipeline: any[] = [
         { $match: leadMatch },
         { $unwind: '$statusHistory' },
       ];
+
+      if (!filters.allTime && filters.from && filters.to) {
+        basePipeline.push({
+          $match: {
+            'statusHistory.changedAt': { $gte: filters.from, $lte: filters.to }
+          }
+        });
+      }
 
       basePipeline.push({ $sort: { 'statusHistory.changedAt': 1 } });
 
@@ -2261,11 +1344,6 @@ export class LeadService {
         Object.keys(leadMatch).length > 0
           ? { $and: [leadMatch, registeredOnlyPredicate] }
           : registeredOnlyPredicate;
-      const verifiedPredicate = this.buildVerifiedPredicate();
-      const verifiedScopeMatch =
-        Object.keys(leadMatch).length > 0
-          ? { $and: [leadMatch, verifiedPredicate] }
-          : verifiedPredicate;
       const onboardedPromise =
         filters.allTime || !filters.from || !filters.to
           ? Lead.countDocuments(onboardedScopeMatch)
@@ -2286,112 +1364,7 @@ export class LeadService {
               { $count: 'count' },
             ]);
 
-      const onboardedCategoryBreakdownPromise =
-        filters.allTime || !filters.from || !filters.to
-          ? Lead.aggregate([
-              { $match: onboardedScopeMatch },
-              {
-                $group: {
-                  _id: { $ifNull: ['$primaryCategory', { $ifNull: ['$primarySkill', 'other'] }] },
-                  count: { $sum: 1 },
-                },
-              },
-              { $sort: { count: -1 } },
-            ])
-          : Lead.aggregate([
-              { $match: leadMatch },
-              { $match: registeredOnlyPredicate },
-              { $unwind: '$statusHistory' },
-              {
-                $match: {
-                  'statusHistory.changedAt': { $gte: filters.from, $lte: filters.to },
-                },
-              },
-              {
-                $group: {
-                  _id: '$leadId',
-                  primaryCategory: { $first: '$primaryCategory' },
-                  primarySkill: { $first: '$primarySkill' },
-                },
-              },
-              {
-                $group: {
-                  _id: { $ifNull: ['$primaryCategory', { $ifNull: ['$primarySkill', 'other'] }] },
-                  count: { $sum: 1 },
-                },
-              },
-              { $sort: { count: -1 } },
-            ]);
-
-      const verifiedPromise =
-        filters.allTime || !filters.from || !filters.to
-          ? Lead.countDocuments(verifiedScopeMatch)
-          : Lead.aggregate([
-              { $match: leadMatch },
-              { $match: verifiedPredicate },
-              { $unwind: '$statusHistory' },
-              {
-                $match: {
-                  'statusHistory.changedAt': { $gte: filters.from, $lte: filters.to },
-                },
-              },
-              {
-                $group: {
-                  _id: '$leadId',
-                },
-              },
-              { $count: 'count' },
-            ]);
-
-      const verifiedCategoryBreakdownPromise =
-        filters.allTime || !filters.from || !filters.to
-          ? Lead.aggregate([
-              { $match: verifiedScopeMatch },
-              {
-                $group: {
-                  _id: { $ifNull: ['$primaryCategory', { $ifNull: ['$primarySkill', 'other'] }] },
-                  count: { $sum: 1 },
-                },
-              },
-              { $sort: { count: -1 } },
-            ])
-          : Lead.aggregate([
-              { $match: leadMatch },
-              { $match: verifiedPredicate },
-              { $unwind: '$statusHistory' },
-              {
-                $match: {
-                  'statusHistory.changedAt': { $gte: filters.from, $lte: filters.to },
-                },
-              },
-              {
-                $group: {
-                  _id: '$leadId',
-                  primaryCategory: { $first: '$primaryCategory' },
-                  primarySkill: { $first: '$primarySkill' },
-                },
-              },
-              {
-                $group: {
-                  _id: { $ifNull: ['$primaryCategory', { $ifNull: ['$primarySkill', 'other'] }] },
-                  count: { $sum: 1 },
-                },
-              },
-              { $sort: { count: -1 } },
-            ]);
-
-      const [
-        statusCountsRaw,
-        touchedRaw,
-        qualifierRaw,
-        callbackScheduledRaw,
-        callbackOverdueRaw,
-        onboardedRaw,
-        onboardedCategoryBreakdownRaw,
-        verifiedRaw,
-        verifiedCategoryBreakdownRaw,
-        interestedCategoryBreakdownRaw,
-      ] = await Promise.all([
+      const [statusCountsRaw, touchedRaw, qualifierRaw, callbackScheduledRaw, callbackOverdueRaw, onboardedRaw] = await Promise.all([
         Lead.aggregate([
           ...latestStatusPipeline,
           {
@@ -2444,36 +1417,6 @@ export class LeadService {
           { $count: 'count' },
         ]),
         onboardedPromise,
-        onboardedCategoryBreakdownPromise,
-        verifiedPromise,
-        verifiedCategoryBreakdownPromise,
-        // Interested category breakdown — self-contained pipeline that keeps primaryCategory
-        Lead.aggregate([
-          { $match: leadMatch },
-          { $unwind: '$statusHistory' },
-          { $sort: { 'statusHistory.changedAt': 1 } },
-          {
-            $group: {
-              _id: '$leadId',
-              latestStatus: { $last: '$statusHistory' },
-              primaryCategory: { $last: '$primaryCategory' },
-              primarySkill: { $last: '$primarySkill' },
-            },
-          },
-          { $match: { 'latestStatus.status': 'contacted_interested' } },
-          {
-            $group: {
-              _id: {
-                $ifNull: [
-                  '$primaryCategory',
-                  { $ifNull: ['$primarySkill', 'other'] },
-                ],
-              },
-              count: { $sum: 1 },
-            },
-          },
-          { $sort: { count: -1 } },
-        ]),
       ]);
 
       const statusCounts = statusCountsRaw.map((row: any) => ({
@@ -2487,21 +1430,6 @@ export class LeadService {
         typeof onboardedRaw === 'number'
           ? onboardedRaw
           : onboardedRaw[0]?.count || 0;
-
-      const onboardedCategoryBreakdown = (onboardedCategoryBreakdownRaw || []).map((row: any) => ({
-        category: row._id,
-        count: row.count,
-      }));
-
-      const verified =
-        typeof verifiedRaw === 'number'
-          ? verifiedRaw
-          : verifiedRaw[0]?.count || 0;
-
-      const verifiedCategoryBreakdown = (verifiedCategoryBreakdownRaw || []).map((row: any) => ({
-        category: row._id,
-        count: row.count,
-      }));
 
       const leadsAddedMatch: any = {};
       if (userId) {
@@ -2520,7 +1448,6 @@ export class LeadService {
       if (filters.gatedCommunityName) {
         leadsAddedMatch.gatedCommunityName = this.buildExactCaseInsensitiveMatch(filters.gatedCommunityName);
       }
-      this.applyLeadLocationFilters(leadsAddedMatch, filters);
 
       const categoryBreakdownRaw = await Lead.aggregate([
         { $match: leadsAddedMatch },
@@ -2548,7 +1475,6 @@ export class LeadService {
         callbackScheduled: callbackScheduledRaw[0]?.count || 0,
         callbackOverdue,
         onboarded,
-        verified,
         statusCounts,
         qualifierBreakdown: qualifierRaw.map((row: any) => ({
           qualifierId: row.qualifierId,
@@ -2556,12 +1482,6 @@ export class LeadService {
           touchedLeads: row.touchedLeads,
         })),
         categoryBreakdown,
-        onboardedCategoryBreakdown,
-        verifiedCategoryBreakdown,
-        interestedCategoryBreakdown: (interestedCategoryBreakdownRaw || []).map((row: any) => ({
-          category: row._id,
-          count: row.count,
-        })),
       };
     } catch (error: any) {
       logger.error('Error fetching status analytics', {
@@ -2581,11 +1501,6 @@ export class LeadService {
     try {
       if (filters.exportLayout === 'qualifier' && filters.qualifierId) {
         return this.exportQualifierStatusReport(filters);
-      }
-
-      // "Leads Added" / claims-by-creation export (matches leadsAdded analytics card)
-      if (filters.reportCategory === 'touched_leads' && !filters.pickedBy) {
-        return this.exportLeadsAddedStandardReport(filters);
       }
 
       const leadMatch: any = {};
@@ -2610,17 +1525,6 @@ export class LeadService {
       if (filters.gatedCommunityName) {
         leadMatch.gatedCommunityName = this.buildExactCaseInsensitiveMatch(filters.gatedCommunityName);
       }
-      this.applyLeadLocationFilters(leadMatch, filters);
-
-      // "Onboarded" export: matches the analytics card — filter by createdAt + registeredOnlyPredicate
-      if (filters.reportCategory === 'onboarded') {
-        return this.exportOnboardedReport(filters);
-      }
-
-      // "Verified" export: matches the analytics card — filter by createdAt + verifiedPredicate
-      if (filters.reportCategory === 'verified') {
-        return this.exportVerifiedReport(filters);
-      }
 
       const now = new Date();
 
@@ -2639,11 +1543,8 @@ export class LeadService {
             phone: { $first: '$phone' },
             landline: { $first: '$landline' },
             city: { $first: '$city' },
-            locality: { $first: '$locality' },
-            address: { $first: '$address' },
             state: { $first: '$state' },
             primaryCategory: { $first: '$primaryCategory' },
-            primarySkill: { $first: '$primarySkill' },
             secondaryCategory: { $first: '$secondaryCategory' },
             source: { $first: '$source' },
             sourceDetails: { $first: '$sourceDetails' },
@@ -2689,11 +1590,7 @@ export class LeadService {
           'Lead ID': this.textForSpreadsheet(row.leadId),
           'Lead Name': this.textForSpreadsheet(row.name),
           'Phone/Landline': this.textForSpreadsheet(row.phone || row.landline || ''),
-          City: this.textForSpreadsheet(this.cityForExport(row.city, row.address)),
-          Locality: this.textForSpreadsheet(row.locality || ''),
-          'Local Area': this.textForSpreadsheet(this.localAreaForExport(row.city, row.address)),
-          'Gated Community': this.textForSpreadsheet(row.gatedCommunityName || ''),
-          Category: this.categoryLabelForExport(row.primaryCategory || row.primarySkill),
+          City: this.textForSpreadsheet(row.city),
           'Current Status': this.labelForReport(row.latestHistory?.status || row.currentStatus),
           'Status Reason': this.textForSpreadsheet(
             row.latestHistory?.statusReasonText || this.labelForReport(row.latestHistory?.statusReasonCode)
@@ -2710,7 +1607,7 @@ export class LeadService {
           base['Secondary Category'] = this.textForSpreadsheet(row.secondaryCategory);
           base.Source = this.textForSpreadsheet(row.source);
           base['Source Details'] = this.textForSpreadsheet(row.sourceDetails);
-          base['Is Gated Community'] = row.isGatedCommunity ? 'Yes' : 'No';
+          base['Gated Community'] = row.isGatedCommunity ? 'Yes' : 'No';
           base['Gated Community Name'] = this.textForSpreadsheet(row.gatedCommunityName);
           base['Created At'] = this.formatIST(row.createdAt);
           base['Updated At'] = this.formatIST(row.updatedAt);
@@ -2756,348 +1653,6 @@ export class LeadService {
     }
   }
 
-  private static async exportLeadsAddedStandardReport(
-    filters: StatusReportExportFilters
-  ): Promise<{ filename: string; mimeType: string; buffer: Buffer; rowCount: number }> {
-    const leadMatch: any = {};
-
-    if (filters.qualifierId) {
-      leadMatch.addedBy = filters.qualifierId;
-    }
-
-    if (!filters.allTime && filters.from && filters.to) {
-      leadMatch.createdAt = { $gte: filters.from, $lte: filters.to };
-    }
-
-    if (filters.category) {
-      leadMatch.$and = leadMatch.$and || [];
-      leadMatch.$and.push(this.buildCategoryMatch(filters.category));
-    }
-
-    if (filters.gatedCommunityName) {
-      leadMatch.gatedCommunityName = this.buildExactCaseInsensitiveMatch(filters.gatedCommunityName);
-    }
-
-    this.applyLeadLocationFilters(leadMatch, filters);
-
-    const leads = await Lead.find(leadMatch).sort({ createdAt: -1 }).lean();
-
-    const reportRows = leads.map((lead) => {
-      const latestHistory = [...(lead.statusHistory || [])].sort(
-        (a, b) => new Date(b.changedAt).getTime() - new Date(a.changedAt).getTime()
-      )[0];
-
-      const base: Record<string, string> = {
-        Date: this.formatIST(lead.createdAt),
-        'Qualifier Name': this.textForSpreadsheet(lead.addedByName || lead.pickedByName || 'Unknown'),
-        'Lead ID': this.textForSpreadsheet(lead.leadId),
-        'Lead Name': this.textForSpreadsheet(lead.name),
-        'Phone/Landline': this.textForSpreadsheet(lead.phone || lead.landline || ''),
-        City: this.textForSpreadsheet(this.cityForExport(lead.city, lead.address)),
-        Locality: this.textForSpreadsheet(lead.locality || ''),
-        'Local Area': this.textForSpreadsheet(this.localAreaForExport(lead.city, lead.address)),
-        'Gated Community': this.textForSpreadsheet(lead.gatedCommunityName || ''),
-        Category: this.categoryLabelForExport(lead.primaryCategory || lead.primarySkill),
-        'Current Status': this.labelForReport(latestHistory?.status || lead.status),
-        'Status Reason': this.textForSpreadsheet(
-          latestHistory?.statusReasonText || this.labelForReport(latestHistory?.statusReasonCode)
-        ),
-        'Callback Date': this.formatIST(latestHistory?.callbackAt),
-        'Expected Onboarding Date': this.formatIST(latestHistory?.expectedOnboardingAt),
-        'Last Updated At': this.formatIST(lead.updatedAt),
-        'Last Updated By': this.textForSpreadsheet(
-          lead.lastUpdatedByName || lead.lastUpdatedBy || latestHistory?.changedByName || latestHistory?.changedBy || ''
-        ),
-      };
-
-      if (filters.template === 'detailed') {
-        base.State = this.textForSpreadsheet(lead.state);
-        base['Primary Category'] = this.textForSpreadsheet(lead.primaryCategory || lead.primarySkill);
-        base['Secondary Category'] = this.textForSpreadsheet(lead.secondaryCategory || lead.secondarySkill);
-        base.Source = this.textForSpreadsheet(lead.source);
-        base['Source Details'] = this.textForSpreadsheet(lead.sourceDetails);
-        base['Is Gated Community'] = lead.isGatedCommunity ? 'Yes' : 'No';
-        base['Gated Community Name'] = this.textForSpreadsheet(lead.gatedCommunityName);
-        base['Created At'] = this.formatIST(lead.createdAt);
-        base['Updated At'] = this.formatIST(lead.updatedAt);
-        if (filters.includeNotes) {
-          base.Notes = this.textForSpreadsheet(latestHistory?.notes);
-        }
-        base['Is Duplicate'] = lead.isDuplicate ? 'Yes' : 'No';
-        base.Blacklisted = lead.blacklisted ? 'Yes' : 'No';
-      }
-
-      return base;
-    });
-
-    const worksheet = XLSX.utils.json_to_sheet(reportRows);
-    this.applyWorksheetLayout(worksheet, reportRows);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Leads Added');
-
-    const dateStamp = new Date().toISOString().slice(0, 10);
-    const categorySlug = filters.category ? `-${filters.category}` : '';
-    const filename = `leads-added-report-${filters.template}${categorySlug}-${dateStamp}.${filters.format}`;
-    const mimeType =
-      filters.format === 'xlsx'
-        ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        : 'text/csv';
-
-    const buffer =
-      filters.format === 'xlsx'
-        ? XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer
-        : Buffer.from(XLSX.utils.sheet_to_csv(worksheet), 'utf-8');
-
-    return {
-      filename,
-      mimeType,
-      buffer,
-      rowCount: reportRows.length,
-    };
-  }
-
-  private static async exportOnboardedReport(
-    filters: StatusReportExportFilters
-  ): Promise<{ filename: string; mimeType: string; buffer: Buffer; rowCount: number }> {
-    const registeredOnlyPredicate = this.buildRegisteredOnlyPredicate();
-
-    // Start with the user/scope/location match (same as analytics leadMatch)
-    const conditions: any[] = [];
-
-    const userId = filters.pickedBy || filters.qualifierId;
-    if (userId) {
-      if (filters.claimsScope === 'current') {
-        conditions.push({ pickedBy: userId });
-      } else {
-        conditions.push({
-          $or: [
-            { pickedBy: userId },
-            { addedBy: userId },
-            { 'statusHistory.changedBy': userId },
-          ],
-        });
-      }
-    }
-
-    if (filters.category) {
-      conditions.push(this.buildCategoryMatch(filters.category));
-    }
-
-    if (filters.gatedCommunityName) {
-      conditions.push({ gatedCommunityName: this.buildExactCaseInsensitiveMatch(filters.gatedCommunityName) });
-    }
-
-    // Apply location filters via a temporary match object
-    const locationMatch: any = {};
-    this.applyLeadLocationFilters(locationMatch, filters);
-    if (Object.keys(locationMatch).length > 0) {
-      conditions.push(locationMatch);
-    }
-
-    // Date range: filter by createdAt, matching the analytics card exactly
-    if (!filters.allTime && filters.from && filters.to) {
-      conditions.push({ createdAt: { $gte: filters.from, $lte: filters.to } });
-    }
-
-    // Always require the registered-only predicate
-    conditions.push(registeredOnlyPredicate);
-
-    const matchQuery = conditions.length === 1 ? conditions[0] : { $and: conditions };
-
-    const leads = await Lead.find(matchQuery).sort({ createdAt: -1 }).lean();
-
-    const reportRows = leads.map((lead) => {
-      const latestHistory = [...(lead.statusHistory || [])].sort(
-        (a, b) => new Date(b.changedAt).getTime() - new Date(a.changedAt).getTime()
-      )[0];
-
-      const base: Record<string, string> = {
-        Date: this.formatIST(lead.createdAt),
-        'Qualifier Name': this.textForSpreadsheet(lead.addedByName || lead.pickedByName || 'Unknown'),
-        'Lead ID': this.textForSpreadsheet(lead.leadId),
-        'Lead Name': this.textForSpreadsheet(lead.name),
-        'Phone/Landline': this.textForSpreadsheet(lead.phone || lead.landline || ''),
-        City: this.textForSpreadsheet(this.cityForExport(lead.city, lead.address)),
-        Locality: this.textForSpreadsheet(lead.locality || ''),
-        'Local Area': this.textForSpreadsheet(this.localAreaForExport(lead.city, lead.address)),
-        'Gated Community': this.textForSpreadsheet(lead.gatedCommunityName || ''),
-        Category: this.categoryLabelForExport(lead.primaryCategory || lead.primarySkill),
-        'Current Status': this.labelForReport(latestHistory?.status || lead.status),
-        'Status Reason': this.textForSpreadsheet(
-          latestHistory?.statusReasonText || this.labelForReport(latestHistory?.statusReasonCode)
-        ),
-        'Callback Date': this.formatIST(latestHistory?.callbackAt),
-        'Expected Onboarding Date': this.formatIST(latestHistory?.expectedOnboardingAt),
-        'Last Updated At': this.formatIST(lead.updatedAt),
-        'Last Updated By': this.textForSpreadsheet(
-          lead.lastUpdatedByName || lead.lastUpdatedBy || latestHistory?.changedByName || latestHistory?.changedBy || ''
-        ),
-      };
-
-      if (filters.template === 'detailed') {
-        base.State = this.textForSpreadsheet(lead.state);
-        base['Primary Category'] = this.textForSpreadsheet(lead.primaryCategory || lead.primarySkill);
-        base['Secondary Category'] = this.textForSpreadsheet(lead.secondaryCategory || lead.secondarySkill);
-        base.Source = this.textForSpreadsheet(lead.source);
-        base['Source Details'] = this.textForSpreadsheet(lead.sourceDetails);
-        base['Is Gated Community'] = lead.isGatedCommunity ? 'Yes' : 'No';
-        base['Gated Community Name'] = this.textForSpreadsheet(lead.gatedCommunityName);
-        base['Created At'] = this.formatIST(lead.createdAt);
-        base['Updated At'] = this.formatIST(lead.updatedAt);
-        if (filters.includeNotes) {
-          base.Notes = this.textForSpreadsheet(latestHistory?.notes);
-        }
-        base['Is Duplicate'] = lead.isDuplicate ? 'Yes' : 'No';
-        base.Blacklisted = lead.blacklisted ? 'Yes' : 'No';
-      }
-
-      return base;
-    });
-
-    const worksheet = XLSX.utils.json_to_sheet(reportRows);
-    this.applyWorksheetLayout(worksheet, reportRows);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Onboarded');
-
-    const dateStamp = new Date().toISOString().slice(0, 10);
-    const filename = `onboarded-report-${filters.template}-${dateStamp}.${filters.format}`;
-    const mimeType =
-      filters.format === 'xlsx'
-        ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        : 'text/csv';
-
-    const buffer =
-      filters.format === 'xlsx'
-        ? XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer
-        : Buffer.from(XLSX.utils.sheet_to_csv(worksheet), 'utf-8');
-
-    return {
-      filename,
-      mimeType,
-      buffer,
-      rowCount: reportRows.length,
-    };
-  }
-
-  private static async exportVerifiedReport(
-    filters: StatusReportExportFilters
-  ): Promise<{ filename: string; mimeType: string; buffer: Buffer; rowCount: number }> {
-    const verifiedPredicate = this.buildVerifiedPredicate();
-
-    const conditions: any[] = [];
-
-    const userId = filters.pickedBy || filters.qualifierId;
-    if (userId) {
-      if (filters.claimsScope === 'current') {
-        conditions.push({ pickedBy: userId });
-      } else {
-        conditions.push({
-          $or: [
-            { pickedBy: userId },
-            { addedBy: userId },
-            { 'statusHistory.changedBy': userId },
-          ],
-        });
-      }
-    }
-
-    if (filters.category) {
-      conditions.push(this.buildCategoryMatch(filters.category));
-    }
-
-    if (filters.gatedCommunityName) {
-      conditions.push({ gatedCommunityName: this.buildExactCaseInsensitiveMatch(filters.gatedCommunityName) });
-    }
-
-    const locationMatch: any = {};
-    this.applyLeadLocationFilters(locationMatch, filters);
-    if (Object.keys(locationMatch).length > 0) {
-      conditions.push(locationMatch);
-    }
-
-    if (!filters.allTime && filters.from && filters.to) {
-      conditions.push({ createdAt: { $gte: filters.from, $lte: filters.to } });
-    }
-
-    conditions.push(verifiedPredicate);
-
-    const matchQuery = conditions.length === 1 ? conditions[0] : { $and: conditions };
-
-    const leads = await Lead.find(matchQuery).sort({ createdAt: -1 }).lean();
-
-    const reportRows = leads.map((lead) => {
-      const latestHistory = [...(lead.statusHistory || [])].sort(
-        (a, b) => new Date(b.changedAt).getTime() - new Date(a.changedAt).getTime()
-      )[0];
-
-      const base: Record<string, string> = {
-        Date: this.formatIST(lead.createdAt),
-        'Qualifier Name': this.textForSpreadsheet(lead.addedByName || lead.pickedByName || 'Unknown'),
-        'Lead ID': this.textForSpreadsheet(lead.leadId),
-        'Lead Name': this.textForSpreadsheet(lead.name),
-        'Phone/Landline': this.textForSpreadsheet(lead.phone || lead.landline || ''),
-        City: this.textForSpreadsheet(this.cityForExport(lead.city, lead.address)),
-        Locality: this.textForSpreadsheet(lead.locality || ''),
-        'Local Area': this.textForSpreadsheet(this.localAreaForExport(lead.city, lead.address)),
-        'Gated Community': this.textForSpreadsheet(lead.gatedCommunityName || ''),
-        Category: this.categoryLabelForExport(lead.primaryCategory || lead.primarySkill),
-        'Current Status': this.labelForReport(latestHistory?.status || lead.status),
-        'Status Reason': this.textForSpreadsheet(
-          latestHistory?.statusReasonText || this.labelForReport(latestHistory?.statusReasonCode)
-        ),
-        'Callback Date': this.formatIST(latestHistory?.callbackAt),
-        'Expected Onboarding Date': this.formatIST(latestHistory?.expectedOnboardingAt),
-        'Last Updated At': this.formatIST(lead.updatedAt),
-        'Last Updated By': this.textForSpreadsheet(
-          lead.lastUpdatedByName || lead.lastUpdatedBy || latestHistory?.changedByName || latestHistory?.changedBy || ''
-        ),
-      };
-
-      if (filters.template === 'detailed') {
-        base.State = this.textForSpreadsheet(lead.state);
-        base['Primary Category'] = this.textForSpreadsheet(lead.primaryCategory || lead.primarySkill);
-        base['Secondary Category'] = this.textForSpreadsheet(lead.secondaryCategory || lead.secondarySkill);
-        base.Source = this.textForSpreadsheet(lead.source);
-        base['Source Details'] = this.textForSpreadsheet(lead.sourceDetails);
-        base['Is Gated Community'] = lead.isGatedCommunity ? 'Yes' : 'No';
-        base['Gated Community Name'] = this.textForSpreadsheet(lead.gatedCommunityName);
-        base['Created At'] = this.formatIST(lead.createdAt);
-        base['Updated At'] = this.formatIST(lead.updatedAt);
-        if (filters.includeNotes) {
-          base.Notes = this.textForSpreadsheet(latestHistory?.notes);
-        }
-        base['Is Duplicate'] = lead.isDuplicate ? 'Yes' : 'No';
-        base.Blacklisted = lead.blacklisted ? 'Yes' : 'No';
-      }
-
-      return base;
-    });
-
-    const worksheet = XLSX.utils.json_to_sheet(reportRows);
-    this.applyWorksheetLayout(worksheet, reportRows);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Verified');
-
-    const dateStamp = new Date().toISOString().slice(0, 10);
-    const filename = `verified-report-${filters.template}-${dateStamp}.${filters.format}`;
-    const mimeType =
-      filters.format === 'xlsx'
-        ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        : 'text/csv';
-
-    const buffer =
-      filters.format === 'xlsx'
-        ? XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer
-        : Buffer.from(XLSX.utils.sheet_to_csv(worksheet), 'utf-8');
-
-    return {
-      filename,
-      mimeType,
-      buffer,
-      rowCount: reportRows.length,
-    };
-  }
-
   private static async exportQualifierStatusReport(
     filters: StatusReportExportFilters
   ): Promise<{ filename: string; mimeType: string; buffer: Buffer; rowCount: number }> {
@@ -3133,15 +1688,6 @@ export class LeadService {
     if (filters.gatedCommunityName) {
       conditions.push({ gatedCommunityName: this.buildExactCaseInsensitiveMatch(filters.gatedCommunityName) });
     }
-    if (filters.city) {
-      conditions.push(this.buildCityFilterMatch(filters.city));
-    }
-    if (filters.locality) {
-      conditions.push(this.buildLocalityFilterMatch(filters.locality));
-    }
-    if (filters.localArea) {
-      conditions.push(this.buildLocalAreaFilterMatch(filters.localArea));
-    }
 
     const leadMatch = conditions.length > 0 ? { $and: conditions } : {};
 
@@ -3155,10 +1701,7 @@ export class LeadService {
         Phone: this.textForSpreadsheet(lead.phone || lead.landline || ''),
         Category: this.categoryLabelForExport(lead.primaryCategory || lead.primarySkill),
         'Sub Category': this.textForSpreadsheet(lead.secondaryCategory || lead.secondarySkill),
-        City: this.textForSpreadsheet(this.cityForExport(lead.city, lead.address)),
-        Locality: this.textForSpreadsheet(lead.locality || ''),
-        'Local Area': this.textForSpreadsheet(this.localAreaForExport(lead.city, lead.address)),
-        'Gated Community': this.textForSpreadsheet(lead.gatedCommunityName || ''),
+        City: this.textForSpreadsheet(lead.city),
         'Added Date': this.formatIST(lead.createdAt),
         'Picked By': this.textForSpreadsheet(lead.pickedByName || ''),
         'Contact Status': this.contactStatusForExport(lead),
@@ -3167,9 +1710,10 @@ export class LeadService {
 
       if (lead.email) row.Email = this.textForSpreadsheet(lead.email);
       if (lead.state) row.State = this.textForSpreadsheet(lead.state);
+      if (lead.address) row['Local Area'] = this.textForSpreadsheet(lead.address);
       if (lead.pincode) row.Pincode = this.textForSpreadsheet(lead.pincode);
       if (lead.isGatedCommunity) {
-        row['Is Gated Community'] = 'Yes';
+        row['Gated Community'] = 'Yes';
         row['Gated Community Name'] = this.textForSpreadsheet(lead.gatedCommunityName);
       }
 
@@ -3262,11 +1806,6 @@ export class LeadService {
         if (city) setData.city = city;
         else unsetData.city = 1;
       }
-      if (has('locality')) {
-        const locality = typeof data.locality === 'string' ? data.locality.trim() : '';
-        if (locality) setData.locality = locality;
-        else unsetData.locality = 1;
-      }
       if (has('state')) {
         const state = typeof data.state === 'string' ? data.state.trim() : '';
         if (state) setData.state = state;
@@ -3294,10 +1833,8 @@ export class LeadService {
         if (gcName) setData.gatedCommunityName = gcName;
         else unsetData.gatedCommunityName = 1;
       }
-      if (has('primarySkill') || has('primaryCategory')) {
-        const primarySkill = (
-          typeof data.primaryCategory === 'string' ? data.primaryCategory : typeof data.primarySkill === 'string' ? data.primarySkill : ''
-        ).trim();
+      if (has('primarySkill')) {
+        const primarySkill = typeof data.primarySkill === 'string' ? data.primarySkill.trim() : '';
         if (primarySkill) {
           setData.primarySkill = primarySkill;
           setData.primaryCategory = primarySkill;
@@ -3306,14 +1843,8 @@ export class LeadService {
           unsetData.primaryCategory = 1;
         }
       }
-      if (has('secondarySkill') || has('secondaryCategory')) {
-        const secondarySkill = (
-          typeof data.secondaryCategory === 'string'
-            ? data.secondaryCategory
-            : typeof data.secondarySkill === 'string'
-              ? data.secondarySkill
-              : ''
-        ).trim();
+      if (has('secondarySkill')) {
+        const secondarySkill = typeof data.secondarySkill === 'string' ? data.secondarySkill.trim() : '';
         if (secondarySkill) {
           setData.secondarySkill = secondarySkill;
           setData.secondaryCategory = secondarySkill;
@@ -3333,100 +1864,9 @@ export class LeadService {
       }
       if (has('skills') && data.skills) setData.skills = data.skills;
 
-      // Track who last edited this lead's fields
-      if (data._updatedBy) {
-        setData.lastUpdatedBy = data._updatedBy;
-      }
-      if (data._updatedByName) {
-        setData.lastUpdatedByName = data._updatedByName;
-      }
-
-      const profileFieldKeys = new Set([
-        'name',
-        'phone',
-        'landline',
-        'email',
-        'city',
-        'locality',
-        'state',
-        'address',
-        'pincode',
-        'isGatedCommunity',
-        'gatedCommunityName',
-        'primarySkill',
-        'primaryCategory',
-        'secondarySkill',
-        'secondaryCategory',
-        'source',
-        'sourceDetails',
-        'skills',
-      ]);
-      const hasProfileFieldChange =
-        Object.keys(setData).some((key) => profileFieldKeys.has(key)) || Object.keys(unsetData).length > 0;
-
-      const buildFieldChanges = () => {
-        const fieldsToTrack = [
-          'name',
-          'phone',
-          'landline',
-          'email',
-          'city',
-          'locality',
-          'state',
-          'address',
-          'pincode',
-          'isGatedCommunity',
-          'gatedCommunityName',
-          'primarySkill',
-          'secondarySkill',
-          'source',
-          'sourceDetails',
-          'skills',
-        ];
-
-        return fieldsToTrack.reduce((changes: Array<{ field: string; previous: any; current: any }>, field) => {
-          const hasSet = Object.prototype.hasOwnProperty.call(setData, field);
-          const hasUnset = Object.prototype.hasOwnProperty.call(unsetData, field);
-
-          if (!hasSet && !hasUnset) return changes;
-
-          const previous = (existingLead as any)[field];
-          const current = hasSet ? (setData as any)[field] : undefined;
-          const changed = hasSet
-            ? JSON.stringify(previous) !== JSON.stringify(current)
-            : previous !== undefined;
-
-          if (changed) {
-            changes.push({ field, previous, current });
-          }
-
-          return changes;
-        }, []);
-      };
-
-      if (hasProfileFieldChange && data._updatedBy) {
-        const editedAt = new Date();
-        setData.lastFieldEditedAt = editedAt;
-      }
-
-      const fieldChanges = hasProfileFieldChange ? buildFieldChanges() : undefined;
-
       const updateQuery: any = {};
       if (Object.keys(setData).length > 0) updateQuery.$set = setData;
       if (Object.keys(unsetData).length > 0) updateQuery.$unset = unsetData;
-
-      if (hasProfileFieldChange && data._updatedBy) {
-        updateQuery.$push = {
-          statusHistory: {
-            status: existingLead.status,
-            changedBy: data._updatedBy,
-            changedByName: data._updatedByName,
-            changedAt: new Date(),
-            notes: 'Lead details updated',
-            fieldChanges: fieldChanges?.length ? fieldChanges : undefined,
-          },
-        };
-      }
 
       const lead = await Lead.findOneAndUpdate(
         { leadId },
@@ -3434,17 +1874,7 @@ export class LeadService {
         { new: true }
       ).lean();
 
-      if (lead && hasProfileFieldChange && data._updatedBy) {
-        await this.logActivity(
-          leadId,
-          'lead_update',
-          'Lead profile details updated',
-          data._updatedBy,
-          data._updatedByName
-        );
-      }
-
-      return lead ? (this.normalizeLeadData(lead) as ILead) : null;
+      return lead as ILead | null;
     } catch (error: any) {
       logger.error('Error updating lead', {
         error: error.message,
@@ -3515,12 +1945,6 @@ export class LeadService {
         lead.lastNotInterestedBy = data.changedBy;
       } else if (finalStatus === 'contacted_not_lifted') {
         lead.lastNotLiftedBy = data.changedBy;
-      }
-
-      if (finalStatus === 'contacted_not_lifted') {
-        lead.attempts = data.attempts || undefined;
-      } else {
-        lead.attempts = undefined;
       }
 
       lead.statusHistory.push({
@@ -4186,7 +2610,7 @@ export class LeadService {
   }
 
   static async getPerformanceOverview(): Promise<any> {
-    const users = await AdminUser.find({ role: { $in: ['qualifier', 'onboarder'] }, status: 'active' }).lean();
+    const users = await AdminUser.find({ role: { $in: ['qualifier', 'onboarder'] } }).lean();
     const now = new Date();
 
     const userLocations: Record<string, string> = {
@@ -4199,155 +2623,99 @@ export class LeadService {
 
     const registeredOnlyQuery = this.buildRegisteredOnlyPredicate();
 
-    const userIds = users.flatMap(u => this.getAdminIdentityIds(u));
+    const performanceList = await Promise.all(
+      users.map(async (user) => {
+        const userId = user.userId;
+        const identityIds = this.getAdminIdentityIds(user);
+        const name = user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Unknown';
+        const location = userLocations[name] || user.team || user.department || 'Headquarters';
 
-    // 1. Bulk aggregate addedBy (claims) - scoped to active user IDs for index scan
-    const addedByAgg = await Lead.aggregate([
-      { $match: { addedBy: { $in: userIds } } },
-      { $group: { _id: '$addedBy', count: { $sum: 1 } } }
-    ]);
-    const addedByMap = new Map<string, number>();
-    for (const item of addedByAgg) {
-      if (item._id) addedByMap.set(String(item._id), item.count);
-    }
+        // Claims Count (Only leads added by them)
+        const claims = await Lead.countDocuments(this.buildIdSelector('addedBy', identityIds));
 
-    // 2. Bulk aggregate pickedBy (currentClaims) - scoped to active user IDs for index scan
-    const pickedByAgg = await Lead.aggregate([
-      { $match: { pickedBy: { $in: userIds } } },
-      { $group: { _id: '$pickedBy', count: { $sum: 1 } } }
-    ]);
-    const pickedByMap = new Map<string, number>();
-    for (const item of pickedByAgg) {
-      if (item._id) pickedByMap.set(String(item._id), item.count);
-    }
+        if (user.role === 'qualifier') {
+          const qualifierScope: any = {};
+          this.applyOwnerScope(qualifierScope, undefined, identityIds);
 
-    // 3. Bulk fetch follow-up leads and aggregate stats in memory to avoid N+1 queries
-    const followUpLeads = await Lead.find({
-      $or: [
-        { nextCallbackAt: { $exists: true, $ne: null } },
-        { expectedOnboardingAt: { $exists: true, $ne: null } },
-      ],
-    }).lean();
+          const [callbackOverdue, onboardingOverdue] = await Promise.all([
+            Lead.countDocuments({
+              ...qualifierScope,
+              nextCallbackAt: { $lt: now },
+            }),
+            Lead.countDocuments({
+              ...qualifierScope,
+              expectedOnboardingAt: { $lt: now },
+            }),
+          ]);
 
-    const followUpItems = followUpLeads.flatMap((lead) => {
-      const itemsList: Array<{ dueType: 'callback' | 'onboarding'; dueAt: Date; changedBy?: string; attempts?: string }> = [];
-      const history = Array.isArray(lead.statusHistory) ? lead.statusHistory : [];
-      const latestHistoryEntry = [...history].sort(
-        (a, b) => new Date(b?.changedAt || 0).getTime() - new Date(a?.changedAt || 0).getTime()
-      )[0];
-      const changedBy = latestHistoryEntry?.changedBy;
+          const overdue = callbackOverdue + onboardingOverdue;
 
-      if (lead.nextCallbackAt) {
-        itemsList.push({
-          dueType: 'callback',
-          dueAt: new Date(lead.nextCallbackAt),
-          changedBy,
-          attempts: lead.attempts,
-        });
-      }
-      if (lead.expectedOnboardingAt) {
-        itemsList.push({
-          dueType: 'onboarding',
-          dueAt: new Date(lead.expectedOnboardingAt),
-          changedBy,
-          attempts: lead.attempts,
-        });
-      }
-      return itemsList;
-    });
+          return {
+            userId,
+            name,
+            role: 'qualifier',
+            location,
+            claims,
+            totalLeads: claims,
+            overdue,
+          };
+        } else {
+          // Onboarder: Current Claims
+          const currentClaims = await Lead.countDocuments(this.buildIdSelector('pickedBy', identityIds));
 
-    const followUpStatsMap = new Map<string, { total: number; overdue: number }>();
-    for (const item of followUpItems) {
-      if (!item.changedBy) continue;
-      const key = item.changedBy;
-      const current = followUpStatsMap.get(key) || { total: 0, overdue: 0 };
-      current.total += 1;
-      const isOverdue = item.dueAt < now && item.attempts !== 'max_reached';
-      if (isOverdue) {
-        current.overdue += 1;
-      }
-      followUpStatsMap.set(key, current);
-    }
+          const onboarderMatch = {
+            ...this.buildOwnerScopeClause(identityIds),
+          };
 
-    // 4. Bulk fetch registered leads (scoped to active users) and calculate in memory to avoid N+1 queries
-    const registeredLeads = await Lead.find({
-      $and: [
-        registeredOnlyQuery,
-        {
-          $or: [
-            { pickedBy: { $in: userIds } },
-            { addedBy: { $in: userIds } },
-            { 'statusHistory.changedBy': { $in: userIds } },
-          ],
-        },
-      ],
-    }, { pickedBy: 1, addedBy: 1, statusHistory: 1 }).lean();
+          const followUpScope = this.buildIdSelector('pickedBy', identityIds);
 
-    const performanceList = users.map((user) => {
-      const userId = user.userId;
-      const identityIds = this.getAdminIdentityIds(user);
-      const name = user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Unknown';
-      const location = userLocations[name] || user.team || user.department || 'Headquarters';
+          const [callbackTotal, onboardingTotal, callbackOverdue, onboardingOverdue] = await Promise.all([
+            Lead.countDocuments({
+              ...followUpScope,
+              nextCallbackAt: { $exists: true, $ne: null },
+            }),
+            Lead.countDocuments({
+              ...followUpScope,
+              expectedOnboardingAt: { $exists: true, $ne: null },
+            }),
+            Lead.countDocuments({
+              ...followUpScope,
+              nextCallbackAt: { $lt: now },
+            }),
+            Lead.countDocuments({
+              ...followUpScope,
+              expectedOnboardingAt: { $lt: now },
+            }),
+          ]);
 
-      // Claims Count (Only leads added by them)
-      let claims = 0;
-      for (const id of identityIds) {
-        claims += addedByMap.get(id) || 0;
-      }
+          const followUps = callbackTotal + onboardingTotal;
 
-      if (user.role === 'qualifier') {
-        return {
-          userId,
-          name,
-          role: 'qualifier',
-          location,
-          claims,
-          totalLeads: claims,
-          overdue: 0,
-        };
-      } else {
-        // Onboarder: Current Claims
-        let currentClaims = 0;
-        for (const id of identityIds) {
-          currentClaims += pickedByMap.get(id) || 0;
+          // Onboarder: Registered (but not verified, touched leads)
+          const registered = await Lead.countDocuments({
+            $and: [
+              onboarderMatch,
+              registeredOnlyQuery,
+            ]
+          });
+
+          // Onboarder: Overdue follow-ups (align with follow-up queue stats)
+          const overdue = callbackOverdue + onboardingOverdue;
+
+          return {
+            userId,
+            name,
+            role: 'onboarder',
+            location,
+            claims,
+            totalLeads: claims,
+            currentClaims,
+            followUps,
+            registered,
+            overdue,
+          };
         }
-
-        // Onboarder: Follow-up stats
-        let followUps = 0;
-        let overdue = 0;
-        for (const id of identityIds) {
-          const stats = followUpStatsMap.get(id);
-          if (stats) {
-            followUps += stats.total;
-            overdue += stats.overdue;
-          }
-        }
-
-        // Onboarder: Registered (owned leads, not just touched)
-        const idSet = new Set(identityIds);
-        let registered = 0;
-        for (const lead of registeredLeads) {
-          const ownerId = lead.pickedBy || lead.addedBy;
-          const isMatched = ownerId && idSet.has(String(ownerId));
-          if (isMatched) {
-            registered++;
-          }
-        }
-
-        return {
-          userId,
-          name,
-          role: 'onboarder',
-          location,
-          claims,
-          totalLeads: claims,
-          currentClaims,
-          followUps,
-          registered,
-          overdue,
-        };
-      }
-    });
+      })
+    );
 
     // Calculate Top KPI Cards
     const totalTeam = users.length;
@@ -4372,114 +2740,6 @@ export class LeadService {
     };
   }
 
-  /** Role-scoped lead counts for the dashboard — mirrors frontend searchLeads filters. */
-  static async getDashboardSummary(params: {
-    role: UserRole;
-    userId?: string;
-  }): Promise<DashboardSummary> {
-    const { role, userId } = params;
-    const isQualifier = role === 'qualifier';
-    const isOnboarder = role === 'onboarder';
-    const canViewRegistration =
-      isOnboarder || role === 'lead_access_manager' || (isQualifier && !!userId);
-
-    const totalFilters: SearchFilters = {};
-    if (isQualifier && userId) totalFilters.addedBy = userId;
-    if (isOnboarder && userId) totalFilters.pickedBy = userId;
-
-    const interestedFilters: SearchFilters = { status: 'contacted_interested' };
-    if (isQualifier && userId) interestedFilters.addedBy = userId;
-    if (isOnboarder && userId) interestedFilters.pickedBy = userId;
-
-    const notInterestedFilters: SearchFilters = { status: 'contacted_not_interested' };
-    if (isQualifier && userId) notInterestedFilters.addedBy = userId;
-    if (isOnboarder && userId) notInterestedFilters.pickedBy = userId;
-
-    const approvedFilters: SearchFilters = { status: 'approved' };
-    if (isOnboarder && userId) approvedFilters.pickedBy = userId;
-
-    const registrationScopeOwner: SearchFilters = {};
-    if (isOnboarder && userId) {
-      registrationScopeOwner.ownerBy = userId;
-    } else if (isQualifier && userId) {
-      registrationScopeOwner.addedBy = userId;
-    }
-
-    const registrationScopeRegisteredCard: SearchFilters = {};
-    if (isOnboarder && userId) {
-      registrationScopeRegisteredCard.pickedBy = userId;
-    } else if (isQualifier && userId) {
-      registrationScopeRegisteredCard.addedBy = userId;
-    }
-
-    const countTasks: Array<Promise<void>> = [];
-    const summary: DashboardSummary = {
-      total: 0,
-      approved: 0,
-      interested: 0,
-      notInterested: 0,
-    };
-
-    countTasks.push(
-      this.countSearchLeads(totalFilters).then((n) => {
-        summary.total = n;
-      }),
-      this.countSearchLeads(approvedFilters).then((n) => {
-        summary.approved = n;
-      }),
-      this.countSearchLeads(interestedFilters).then((n) => {
-        summary.interested = n;
-      }),
-      this.countSearchLeads(notInterestedFilters).then((n) => {
-        summary.notInterested = n;
-      }),
-    );
-
-    if (isOnboarder && userId) {
-      countTasks.push(
-        this.countSearchLeads({ addedBy: userId }).then((n) => {
-          summary.myLeadsAdded = n;
-        }),
-      );
-    }
-
-    if (canViewRegistration) {
-      countTasks.push(
-        this.countSearchLeads({
-          ...registrationScopeOwner,
-          registrationStatus: 'not_registered',
-        }).then((n) => {
-          summary.notRegistered = n;
-        }),
-        this.countSearchLeads({
-          ...registrationScopeRegisteredCard,
-          registrationStatus: 'registered',
-        }).then((n) => {
-          summary.registered = n;
-        }),
-        this.countSearchLeads({
-          ...registrationScopeOwner,
-          registrationStatus: 'registered_verified',
-        }).then((n) => {
-          summary.registeredVerified = n;
-        }),
-      );
-    }
-
-    await Promise.all(countTasks);
-    return summary;
-  }
-
-  /** Count-only variant of searchLeads — aligns performance metrics with list pages. */
-  private static async countSearchLeads(filters: SearchFilters): Promise<number> {
-    const { total } = await this.searchLeads({
-      ...filters,
-      page: 1,
-      limit: 1,
-    });
-    return total;
-  }
-
   static async getPerformanceDetails(
     userId: string,
     filters: { from?: Date; to?: Date; allTime?: boolean }
@@ -4502,6 +2762,18 @@ export class LeadService {
     };
     const location = userLocations[name] || user.team || user.department || 'Headquarters';
 
+    const now = new Date();
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date();
+    todayEnd.setHours(23, 59, 59, 999);
+
+    const baseMatch: any = this.buildOwnerScopeClause(identityIds);
+
+    if (!filters.allTime && filters.from && filters.to) {
+      baseMatch.createdAt = { $gte: filters.from, $lte: filters.to };
+    }
+
     const registeredQuery = {
       $or: [
         { 'conversionData.platformUid': { $exists: true, $nin: [null, ''] } },
@@ -4518,46 +2790,21 @@ export class LeadService {
     };
 
     const claims = await Lead.countDocuments(this.buildIdSelector('addedBy', identityIds));
-    const currentClaims = await Lead.countDocuments({
-      ...this.buildIdSelector('pickedBy', identityIds),
-      ...(!filters.allTime && filters.from && filters.to ? { pickedAt: { $gte: filters.from, $lte: filters.to } } : {})
-    });
+    const currentClaims = await Lead.countDocuments(this.buildIdSelector('pickedBy', identityIds));
 
     // Get ranking on team by claims (currentClaims for onboarder, claims for qualifier)
-    const allUsers = await AdminUser.find({ role: user.role, status: 'active' }).lean();
-
-    const fieldName = user.role === 'onboarder' ? 'pickedBy' : 'addedBy';
-    const dateField = user.role === 'onboarder' ? 'pickedAt' : 'createdAt';
-
-    const allUserIds = allUsers.flatMap(u => this.getAdminIdentityIds(u));
-
-    const matchStage: any = {
-      [fieldName]: { $in: allUserIds }
-    };
-    if (!filters.allTime && filters.from && filters.to) {
-      matchStage[dateField] = { $gte: filters.from, $lte: filters.to };
-    }
-
-    const aggregations = await Lead.aggregate([
-      { $match: matchStage },
-      { $group: { _id: `$${fieldName}`, count: { $sum: 1 } } }
-    ]);
-
-    const claimsMap = new Map<string, number>();
-    for (const item of aggregations) {
-      if (item._id) {
-        claimsMap.set(String(item._id), item.count);
-      }
-    }
-
-    const allUsersClaims = allUsers.map((u) => {
-      const scopedIds = this.getAdminIdentityIds(u);
-      let totalClaims = 0;
-      for (const id of scopedIds) {
-        totalClaims += claimsMap.get(id) || 0;
-      }
-      return { userId: u.userId, claims: totalClaims };
-    });
+    const allUsers = await AdminUser.find({ role: user.role }).lean();
+    const allUsersClaims = await Promise.all(
+      allUsers.map(async (u) => {
+        const scopedIds = this.getAdminIdentityIds(u);
+        const uClaims = await Lead.countDocuments(
+          user.role === 'onboarder'
+            ? this.buildIdSelector('pickedBy', scopedIds)
+            : this.buildIdSelector('addedBy', scopedIds)
+        );
+        return { userId: u.userId, claims: uClaims };
+      })
+    );
     allUsersClaims.sort((a, b) => b.claims - a.claims);
     const rankIndex = allUsersClaims.findIndex((u) => u.userId === userId);
     
@@ -4573,32 +2820,87 @@ export class LeadService {
     const rankLabel = rankIndex !== -1 ? `#${rankIndex + 1}${getRankSuffix(rankIndex + 1)} on team` : 'N/A';
 
     if (user.role === 'qualifier') {
-      const qualifierOwnerMatch = this.buildIdSelector('addedBy', identityIds);
+      const qualifierOwnerMatch = this.buildOwnerScopeClause(identityIds);
 
-      const editedDateFilter =
-        !filters.allTime && filters.from && filters.to
-          ? {
-              $or: [
-                { lastFieldEditedAt: { $gte: filters.from, $lte: filters.to } },
-                {
-                  lastFieldEditedAt: { $exists: false },
-                  updatedAt: { $gte: filters.from, $lte: filters.to },
-                },
-              ],
-            }
-          : {};
+      const dateQuery: any = {};
+      if (!filters.allTime && filters.from && filters.to) {
+        dateQuery.createdAt = { $gte: filters.from, $lte: filters.to };
+      }
 
-      const editedLeads = await Lead.countDocuments({
-        lastUpdatedBy: { $in: identityIds },
-        ...editedDateFilter,
+      const dueDateRange = !filters.allTime && filters.from && filters.to
+        ? { $gte: filters.from, $lte: filters.to }
+        : undefined;
+
+      const [callbackTotal, onboardingTotal, callbackOverdue, onboardingOverdue, callbackDueToday, onboardingDueToday] = await Promise.all([
+        Lead.countDocuments({
+          ...qualifierOwnerMatch,
+          nextCallbackAt: {
+            $exists: true,
+            $ne: null,
+            ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
+          },
+        }),
+        Lead.countDocuments({
+          ...qualifierOwnerMatch,
+          expectedOnboardingAt: {
+            $exists: true,
+            $ne: null,
+            ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
+          },
+        }),
+        Lead.countDocuments({
+          ...qualifierOwnerMatch,
+          nextCallbackAt: {
+            $lt: now,
+            ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
+          },
+        }),
+        Lead.countDocuments({
+          ...qualifierOwnerMatch,
+          expectedOnboardingAt: {
+            $lt: now,
+            ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
+          },
+        }),
+        Lead.countDocuments({
+          ...qualifierOwnerMatch,
+          nextCallbackAt: {
+            $gte: todayStart,
+            $lte: todayEnd,
+            ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
+          },
+        }),
+        Lead.countDocuments({
+          ...qualifierOwnerMatch,
+          expectedOnboardingAt: {
+            $gte: todayStart,
+            $lte: todayEnd,
+            ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
+          },
+        }),
+      ]);
+
+      const totalFollowUps = callbackTotal + onboardingTotal;
+      const overdue = callbackOverdue + onboardingOverdue;
+      const dueToday = callbackDueToday + onboardingDueToday;
+
+      const interested = await Lead.countDocuments({
+        ...qualifierOwnerMatch,
+        ...dateQuery,
+        status: 'contacted_interested'
       });
 
-      const totalLeadsInRange = filters.allTime
-        ? claims
-        : await Lead.countDocuments({
-            ...qualifierOwnerMatch,
-            createdAt: { $gte: filters.from!, $lte: filters.to! },
-          });
+      const notInterested = await Lead.countDocuments({
+        ...qualifierOwnerMatch,
+        ...dateQuery,
+        status: 'contacted_not_interested'
+      });
+
+      const notLifted = await Lead.countDocuments({
+        ...qualifierOwnerMatch,
+        ...dateQuery,
+        status: 'contacted_not_lifted'
+      });
 
       return {
         user: {
@@ -4608,91 +2910,130 @@ export class LeadService {
           location,
         },
         claims,
-        totalLeads: filters.allTime ? claims : totalLeadsInRange,
-        totalLeadsInRange,
-        editedLeads,
+        totalLeads: claims,
         rankLabel,
         followUps: {
-          total: 0,
-          overdue: 0,
-          dueToday: 0,
+          total: totalFollowUps,
+          overdue,
+          dueToday,
         },
-        // Qualifier outcomes intentionally omitted — not shown on the UI
-        outcomes: {}
+        outcomes: {
+          interested,
+          notInterested,
+          notLifted,
+        }
       };
     } else {
-      const followUpStats = await this.getFollowUpQueueStats(
-        { followUpOwnerByAny: identityIds },
-        !filters.allTime ? { from: filters.from, to: filters.to } : undefined
-      );
-      const totalFollowUps = !filters.allTime && followUpStats.rangeCount !== undefined
-        ? followUpStats.rangeCount
-        : followUpStats.totalFollowUps;
-      const overdue = followUpStats.callbackOverdue + followUpStats.onboardingOverdue;
-      const dueToday = followUpStats.callbackDueToday + followUpStats.onboardingDueToday;
+      const dateQuery: any = {};
+      if (!filters.allTime && filters.from && filters.to) {
+        dateQuery.createdAt = { $gte: filters.from, $lte: filters.to };
+      }
 
-      const ownerDateRange =
-        !filters.allTime && filters.from && filters.to
-          ? { startDate: filters.from, endDate: filters.to }
-          : {};
+      const dueDateRange = !filters.allTime && filters.from && filters.to
+        ? { $gte: filters.from, $lte: filters.to }
+        : undefined;
 
-      const ownerScopeFilters: SearchFilters = {
-        ownerByAny: identityIds,
-        strictOwner: false,
-        ...ownerDateRange,
-      };
+      const followUpScope = this.buildIdSelector('pickedBy', identityIds);
 
-      const interested = await this.countSearchLeads({
-        ...ownerScopeFilters,
-        status: 'contacted_interested',
+      const [callbackTotal, onboardingTotal, callbackOverdue, onboardingOverdue, callbackDueToday, onboardingDueToday] = await Promise.all([
+        Lead.countDocuments({
+          ...followUpScope,
+          nextCallbackAt: {
+            $exists: true,
+            $ne: null,
+            ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
+          },
+        }),
+        Lead.countDocuments({
+          ...followUpScope,
+          expectedOnboardingAt: {
+            $exists: true,
+            $ne: null,
+            ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
+          },
+        }),
+        Lead.countDocuments({
+          ...followUpScope,
+          nextCallbackAt: {
+            $lt: now,
+            ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
+          },
+        }),
+        Lead.countDocuments({
+          ...followUpScope,
+          expectedOnboardingAt: {
+            $lt: now,
+            ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
+          },
+        }),
+        Lead.countDocuments({
+          ...followUpScope,
+          nextCallbackAt: {
+            $gte: todayStart,
+            $lte: todayEnd,
+            ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
+          },
+        }),
+        Lead.countDocuments({
+          ...followUpScope,
+          expectedOnboardingAt: {
+            $gte: todayStart,
+            $lte: todayEnd,
+            ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
+          },
+        }),
+      ]);
+
+      const totalFollowUps = callbackTotal + onboardingTotal;
+      const overdue = callbackOverdue + onboardingOverdue;
+      const dueToday = callbackDueToday + onboardingDueToday;
+
+      const interested = await Lead.countDocuments({
+        ...baseMatch,
+        ...dateQuery,
+        status: 'contacted_interested'
       });
 
-      const notInterested = await this.countSearchLeads({
-        ...ownerScopeFilters,
-        status: 'contacted_not_interested',
+      const notInterested = await Lead.countDocuments({
+        ...baseMatch,
+        ...dateQuery,
+        status: 'contacted_not_interested'
       });
 
-      const registered = await this.countSearchLeads({
-        ...ownerScopeFilters,
-        registrationStatus: 'registered',
+      const registered = await Lead.countDocuments({
+        $and: [
+          baseMatch,
+          registeredQuery
+        ],
+        ...dateQuery,
+        $nor: [
+          { 'conversionData.isAadhaarVerified': true },
+          { 'verificationStatus.aadhaar.status': 'verified' }
+        ]
       });
 
-      const verified = await this.countSearchLeads({
-        ...ownerScopeFilters,
-        registrationStatus: 'registered_verified',
+      const notRegistered = await Lead.countDocuments({
+        ...baseMatch,
+        ...this.buildIdSelector('statusHistory.changedBy', identityIds),
+        ...dateQuery,
+        status: { $ne: 'inactive' },
+        $nor: [
+          { 'conversionData.platformUid': { $exists: true, $nin: [null, ''] } },
+          { 'activationData.firebaseUid': { $exists: true, $nin: [null, ''] } },
+          { accountStatus: { $in: ['invited', 'activated', 'suspended'] } }
+        ]
       });
 
-      const notRegistered = await this.countSearchLeads({
-        ...ownerScopeFilters,
-        registrationStatus: 'not_registered',
-        ownerDateMode: 'owner',
+      const verified = await Lead.countDocuments({
+        $and: [
+          baseMatch,
+          registeredQuery,
+          isVerifiedQuery
+        ],
+        ...dateQuery
       });
 
       const totalRegistered = registered + verified;
-      const totalLeadsInRange = filters.allTime
-        ? claims
-        : await this.countSearchLeads({
-            ...ownerScopeFilters,
-            ownerDateMode: 'owner',
-          });
-
-      const editedDateFilter =
-        !filters.allTime && filters.from && filters.to
-          ? {
-              $or: [
-                { lastFieldEditedAt: { $gte: filters.from, $lte: filters.to } },
-                {
-                  lastFieldEditedAt: { $exists: false },
-                  updatedAt: { $gte: filters.from, $lte: filters.to },
-                },
-              ],
-            }
-          : {};
-
-      const editedLeads = await Lead.countDocuments({
-        lastUpdatedBy: { $in: identityIds },
-        ...editedDateFilter,
-      });
 
       return {
         user: {
@@ -4702,9 +3043,7 @@ export class LeadService {
           location,
         },
         claims,
-        totalLeads: filters.allTime ? claims : totalLeadsInRange,
-        totalLeadsInRange,
-        editedLeads,
+        totalLeads: claims,
         currentClaims,
         rankLabel,
         followUps: {

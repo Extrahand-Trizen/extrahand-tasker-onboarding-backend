@@ -61,12 +61,6 @@ router.get(
   LeadController.getGatedCommunityNames
 );
 
-router.get(
-  '/location-filter-options',
-  requirePermission('canViewLeads'),
-  LeadController.getLeadLocationFilterOptions
-);
-
 // Get qualifiers list (for pick/transfer)
 router.get(
   '/qualifiers',
@@ -120,11 +114,6 @@ router.get(
   '/dashboard-metrics',
   requirePermission('canViewLeads'),
   LeadController.getDashboardMetrics
-);
-router.get(
-  '/dashboard-summary',
-  requirePermission('canViewLeads'),
-  LeadController.getDashboardSummary
 );
 
 // Check for duplicates

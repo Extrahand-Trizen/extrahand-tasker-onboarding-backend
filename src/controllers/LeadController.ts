@@ -7,7 +7,6 @@ import { CertificateReviewService } from '../services/CertificateReviewService';
 import Lead from '../models/Lead';
 import AdminUser from '../models/AdminUser';
 import { UserRole } from '../lib/permissions';
-import { canQualifierEditLead, isLeadCreator, updateTouchesSkills } from '../utils/leadCreatorAccess';
 import logger from '../config/logger';
 import { LEAD_STATUS_REASON_CODES } from '../constants/leadContactTracking';
 import axios from 'axios';
@@ -55,17 +54,16 @@ function canManageLead(req: AdminRequest, leadAddedBy: string): boolean {
 
 function canMutatePickedLead(req: AdminRequest, lead: { addedBy: string; pickedBy?: string | null }): boolean {
   const role = req.admin?.role as UserRole;
-  const identityIds = getScopedAddedByIds(req);
+  const userId = getUserId(req);
 
-  if (!identityIds.length) return false;
+  if (!userId) return false;
 
-  // ✅ Qualifiers can edit any lead — skip the pickedBy ownership check for them
-  if (role === 'qualifier') {
-    return canQualifierEditLead(lead, identityIds);
+  if (lead.pickedBy && lead.pickedBy !== userId) {
+    return false;
   }
 
-  if (lead.pickedBy && !identityIds.includes(lead.pickedBy)) {
-    return false;
+  if (role === 'qualifier') {
+    return lead.pickedBy ? lead.pickedBy === userId : lead.addedBy === userId;
   }
 
   return true;
@@ -93,7 +91,6 @@ function shouldRefreshConversionSnapshot(lead: {
   conversionData?: {
     platformUid?: string;
     isAadhaarVerified?: boolean;
-    registeredAt?: Date;
     lastCheckedAt?: Date;
   };
 }): boolean {
@@ -102,8 +99,8 @@ function shouldRefreshConversionSnapshot(lead: {
     return false;
   }
 
-  if (lead.conversionData?.isAadhaarVerified === true) {
-    return false;
+  if (lead.conversionData?.platformUid && lead.conversionData?.isAadhaarVerified !== true) {
+    return true;
   }
 
   const lastCheckedAt = lead.conversionData?.lastCheckedAt
@@ -114,8 +111,7 @@ function shouldRefreshConversionSnapshot(lead: {
     Number.isNaN(lastCheckedAt) ||
     Date.now() - lastCheckedAt >= CONVERSION_STATUS_CACHE_MS;
 
-  // Respect lastCheckedAt for all cases (including registered, awaiting Aadhaar).
-  return isSnapshotStale;
+  return isSnapshotStale && !lead.conversionData?.platformUid;
 }
 
 export class LeadController {
@@ -184,37 +180,6 @@ export class LeadController {
         success: false,
         error: 'Failed to fetch dashboard metrics',
         message: error.message
-      });
-    }
-  }
-
-  static async getDashboardSummary(req: AdminRequest, res: Response): Promise<void> {
-    try {
-      if (!req.admin) {
-        res.status(401).json({
-          success: false,
-          error: 'Authentication required',
-        });
-        return;
-      }
-
-      const role = req.admin.role as UserRole;
-      const userId = getUserId(req);
-      const summary = await LeadService.getDashboardSummary({ role, userId });
-
-      res.json({
-        success: true,
-        data: summary,
-      });
-    } catch (error: any) {
-      logger.error('Error in getDashboardSummary controller', {
-        error: error.message,
-        stack: error.stack,
-      });
-      res.status(500).json({
-        success: false,
-        error: 'Failed to fetch dashboard summary',
-        message: error.message,
       });
     }
   }
@@ -298,7 +263,6 @@ export class LeadController {
         landline,
         email,
         city,
-        locality,
         state,
         address,
         pincode,
@@ -347,7 +311,6 @@ export class LeadController {
         landline: landlineValue || undefined,
         email,
         city,
-        locality,
         state,
         address,
         pincode,
@@ -441,22 +404,17 @@ export class LeadController {
         const status = await getConversionStatusByPhone(phone);
 
         if (status.converted && (status.platformUid || status.isAadhaarVerified !== undefined)) {
-          const update: Record<string, any> = {
-            $set: {
-              'conversionData.platformUid': status.platformUid,
-              'conversionData.isAadhaarVerified': status.isAadhaarVerified,
-              'conversionData.lastCheckedAt': new Date(),
-            },
-            $min: {
-              'conversionData.registeredAt': status.createdAt || new Date(),
-            }
-          };
-          if (status.isAadhaarVerified) {
-            update.$min['conversionData.registeredVerifiedAt'] = new Date();
-          }
           const refreshedLead = await Lead.findOneAndUpdate(
             { leadId },
-            update,
+            {
+              $set: {
+                conversionData: {
+                  platformUid: status.platformUid,
+                  isAadhaarVerified: status.isAadhaarVerified,
+                  lastCheckedAt: new Date()
+                }
+              }
+            },
             { new: true }
           );
 
@@ -468,7 +426,7 @@ export class LeadController {
 
       res.json({
         success: true,
-        data: LeadService.normalizeLeadForResponse(leadToReturn)
+        data: leadToReturn
       });
     } catch (error: any) {
       logger.error('Error in getLead controller', {
@@ -531,22 +489,17 @@ export class LeadController {
 
       // Optionally cache on lead for list views
       if (status.converted && (status.platformUid || status.isAadhaarVerified !== undefined)) {
-        const update: Record<string, any> = {
-          $set: {
-            'conversionData.platformUid': status.platformUid,
-            'conversionData.isAadhaarVerified': status.isAadhaarVerified,
-            'conversionData.lastCheckedAt': new Date(),
-          },
-          $min: {
-            'conversionData.registeredAt': status.createdAt || new Date(),
-          }
-        };
-        if (status.isAadhaarVerified) {
-          update.$min['conversionData.registeredVerifiedAt'] = new Date();
-        }
         await Lead.findOneAndUpdate(
           { leadId },
-          update
+          {
+            $set: {
+              conversionData: {
+                platformUid: status.platformUid,
+                isAadhaarVerified: status.isAadhaarVerified,
+                lastCheckedAt: new Date()
+              }
+            }
+          }
         );
       }
 
@@ -625,40 +578,19 @@ export class LeadController {
         platformUid = conversion.platformUid;
 
         if (platformUid || conversion.isAadhaarVerified !== undefined) {
-          const registeredDate = lead.conversionData?.lastCheckedAt || new Date();
-          const update: Record<string, any> = {
-            $set: {
-              'conversionData.platformUid': platformUid,
-              'conversionData.isAadhaarVerified': conversion.isAadhaarVerified,
-              'conversionData.lastCheckedAt': new Date(),
-            },
-            $min: {
-              'conversionData.registeredAt': registeredDate,
-            }
-          };
-          if (conversion.isAadhaarVerified) {
-            update.$min['conversionData.registeredVerifiedAt'] = registeredDate;
-          }
           await Lead.findOneAndUpdate(
             { leadId },
-            update
+            {
+              $set: {
+                conversionData: {
+                  platformUid,
+                  isAadhaarVerified: conversion.isAadhaarVerified,
+                  lastCheckedAt: new Date()
+                }
+              }
+            }
           );
         }
-      } else {
-        // Backfill registeredAt/registeredVerifiedAt for existing platformUid
-        const registeredDate = lead.conversionData?.lastCheckedAt || new Date();
-        const backfillUpdate: Record<string, any> = {
-          $min: {
-            'conversionData.registeredAt': registeredDate,
-          }
-        };
-        if (lead.conversionData?.isAadhaarVerified) {
-          backfillUpdate.$min['conversionData.registeredVerifiedAt'] = registeredDate;
-        }
-        await Lead.findOneAndUpdate(
-          { leadId },
-          backfillUpdate
-        );
       }
 
       if (!platformUid) {
@@ -711,32 +643,6 @@ export class LeadController {
     } catch (error: any) {
       logger.error('Error in getGatedCommunityNames controller', { error: error.message });
       res.status(500).json({ success: false, error: 'Failed to get gated community names', message: error.message });
-    }
-  }
-
-  /**
-   * Distinct cities and local areas from existing leads (for filter dropdowns).
-   * GET /api/v1/onboarding/leads/location-filter-options
-   */
-  static async getLeadLocationFilterOptions(req: AdminRequest, res: Response): Promise<void> {
-    try {
-      if (!req.admin) {
-        res.status(401).json({ success: false, error: 'Authentication required' });
-        return;
-      }
-      const [cities, localities, localAreas] = await Promise.all([
-        LeadService.getLeadCities(),
-        LeadService.getLeadLocalities(),
-        LeadService.getLeadLocalAreas(),
-      ]);
-      res.json({ success: true, data: { cities, localities, localAreas } });
-    } catch (error: any) {
-      logger.error('Error in getLeadLocationFilterOptions controller', { error: error.message });
-      res.status(500).json({
-        success: false,
-        error: 'Failed to get location filter options',
-        message: error.message,
-      });
     }
   }
 
@@ -943,28 +849,14 @@ export class LeadController {
         page,
         limit,
         registrationStatus,
-        statusChangedBy,
-        unclaimed,
-        claimed,
-        locality,
-        localArea,
-        attempts,
-        strictOwner,
-        ownerDateMode,
+        statusChangedBy
       } = req.query;
 
       const role = req.admin.role as UserRole;
 
-      const parsedDates = LeadService.parseFilterRange(
-        startDate as string | undefined,
-        endDate as string | undefined
-      );
-
       const filters: SearchFilters = {
         status: status as any,
         city: city as string,
-        locality: locality as string,
-        localArea: localArea as string,
         primarySkill: primarySkill as string,
         source: source as any,
         addedBy: addedBy as string,
@@ -972,56 +864,13 @@ export class LeadController {
         transferPendingTo: transferPendingTo as string,
         ownerBy: ownerBy as string,
         search: search as string,
-        startDate: parsedDates.from,
-        endDate: parsedDates.to,
+        startDate: startDate ? new Date(startDate as string) : undefined,
+        endDate: endDate ? new Date(endDate as string) : undefined,
         page: page ? parseInt(page as string) : undefined,
         limit: limit ? parseInt(limit as string) : undefined,
         registrationStatus: registrationStatus as SearchFilters['registrationStatus'],
-        statusChangedBy: statusChangedBy as string,
-        unclaimed: unclaimed === 'true' || unclaimed === '1',
-        claimed: claimed === 'true' || claimed === '1',
-        attempts: attempts as string,
-        strictOwner: strictOwner === 'true',
-        ownerDateMode: ownerDateMode === 'owner' ? 'owner' : undefined,
+        statusChangedBy: statusChangedBy as string
       };
-
-      // Expand single id to userId + uid for owner/picked filters.
-      // Resolve the TARGET user's IDs (not the authenticated user's) so that
-      // manager view of onboarder pages doesn't incorrectly include the manager's own leads.
-      if (filters.ownerBy) {
-        const targetUser = await AdminUser.findOne({
-          $or: [
-            { userId: filters.ownerBy },
-            { uid: filters.ownerBy }
-          ]
-        }).select('userId uid').lean();
-        if (targetUser) {
-          const targetIds = [targetUser.userId, targetUser.uid].filter(
-            (id): id is string => typeof id === 'string' && id.trim().length > 0
-          );
-          if (targetIds.length > 0) {
-            filters.ownerByAny = Array.from(new Set(targetIds));
-            delete filters.ownerBy;
-          }
-        }
-      }
-      if (filters.pickedBy) {
-        const targetUser = await AdminUser.findOne({
-          $or: [
-            { userId: filters.pickedBy },
-            { uid: filters.pickedBy }
-          ]
-        }).select('userId uid').lean();
-        if (targetUser) {
-          const targetIds = [targetUser.userId, targetUser.uid].filter(
-            (id): id is string => typeof id === 'string' && id.trim().length > 0
-          );
-          if (targetIds.length > 0) {
-            filters.pickedByAny = Array.from(new Set(targetIds));
-            delete filters.pickedBy;
-          }
-        }
-      }
 
       // Keep search generic; caller (UI/page) decides whether to scope by addedBy.
       // This is required so "All Leads" can remain truly global for allowed roles.
@@ -1069,16 +918,12 @@ export class LeadController {
       const { city, primarySkill, startDate, endDate, page, limit } = req.query;
       const role = req.admin.role as UserRole;
       const scopedIds = getScopedAddedByIds(req);
-      const parsedDates = LeadService.parseFilterRange(
-        startDate as string | undefined,
-        endDate as string | undefined
-      );
 
       const filters: CallbackQueueFilters = {
         city: city as string,
         primarySkill: primarySkill as string,
-        startDate: parsedDates.from,
-        endDate: parsedDates.to,
+        startDate: startDate ? new Date(startDate as string) : undefined,
+        endDate: endDate ? new Date(endDate as string) : undefined,
         page: page ? parseInt(page as string) : undefined,
         limit: limit ? parseInt(limit as string) : undefined,
       };
@@ -1180,7 +1025,6 @@ export class LeadController {
         limit,
         pickedBy,
         ownerBy,
-        attempts,
       } = req.query;
       const role = req.admin.role as UserRole;
       const scopedIds = getScopedAddedByIds(req);
@@ -1201,17 +1045,14 @@ export class LeadController {
         endDate: parsedEndDate,
         dueType: (dueType as FollowUpQueueFilters['dueType']) || 'all',
         bucket: (bucket as FollowUpQueueFilters['bucket']) || 'all',
-        attempts: attempts as string,
         page: page ? parseInt(page as string) : undefined,
         limit: limit ? parseInt(limit as string) : undefined,
       };
 
       if (role === 'onboarder') {
-        filters.followUpOwnerBy = (getUserId(req) || '') as string;
+        filters.pickedBy = (getUserId(req) || '') as string;
       } else if (pickedBy) {
-        filters.followUpOwnerBy = pickedBy as string;
-      } else if (role === 'qualifier') {
-        filters.followUpOwnerBy = '__no_qualifier_followups__';
+        filters.pickedBy = pickedBy as string;
       }
 
       if (role === 'qualifier' && scopedIds.length > 0) {
@@ -1263,11 +1104,10 @@ export class LeadController {
       const role = req.admin.role as UserRole;
       const scopedIds = getScopedAddedByIds(req);
 
-      const filters: Pick<FollowUpQueueFilters, 'addedBy' | 'addedByAny' | 'ownerBy' | 'ownerByAny' | 'pickedBy' | 'followUpOwnerBy' | 'followUpOwnerByAny'> = {};
-      if (role === 'onboarder' && scopedIds.length > 0) {
-        filters.followUpOwnerByAny = scopedIds;
+      const filters: Pick<FollowUpQueueFilters, 'addedBy' | 'addedByAny' | 'ownerBy' | 'ownerByAny' | 'pickedBy'> = {};
+      if (role === 'onboarder') {
+        filters.pickedBy = getUserId(req) || undefined;
       } else if (role === 'qualifier' && scopedIds.length > 0) {
-        filters.followUpOwnerBy = '__no_qualifier_followups__';
         filters.ownerByAny = scopedIds;
       } else if (req.query.ownerBy) {
         filters.ownerBy = req.query.ownerBy as string;
@@ -1311,22 +1151,10 @@ export class LeadController {
       const { from, to, qualifierId, pickedBy, category, claimsScope, allTime } = req.query;
 
       const isAllTime = String(allTime) === 'true';
-      const defaultFrom = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-      const defaultTo = new Date().toISOString().slice(0, 10);
-      const parsedRange = isAllTime
-        ? { from: undefined, to: undefined }
-        : LeadService.parseFilterRange(
-            (from as string) || defaultFrom,
-            (to as string) || defaultTo
-          );
+      const fromDate = from ? new Date(from as string) : (isAllTime ? new Date(0) : new Date(Date.now() - 6 * 24 * 60 * 60 * 1000));
+      const toDate = to ? new Date(to as string) : new Date();
 
-      if (
-        !isAllTime &&
-        (!parsedRange.from ||
-          !parsedRange.to ||
-          Number.isNaN(parsedRange.from.getTime()) ||
-          Number.isNaN(parsedRange.to.getTime()))
-      ) {
+      if (!isAllTime && (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime()))) {
         res.status(400).json({
           success: false,
           error: 'Invalid date range',
@@ -1336,15 +1164,12 @@ export class LeadController {
       }
 
       const filters: any = {
-        from: parsedRange.from,
-        to: parsedRange.to,
+        from: isAllTime ? undefined : fromDate,
+        to: isAllTime ? undefined : toDate,
         category: category ? String(category) : undefined,
         claimsScope: claimsScope ? (String(claimsScope) as 'current' | 'total') : undefined,
         allTime: isAllTime,
         gatedCommunityName: req.query.gatedCommunityName ? String(req.query.gatedCommunityName) : undefined,
-        city: req.query.city ? String(req.query.city) : undefined,
-        locality: req.query.locality ? String(req.query.locality) : undefined,
-        localArea: req.query.localArea ? String(req.query.localArea) : undefined,
       };
 
       if (role === 'qualifier' && userId) {
@@ -1387,13 +1212,7 @@ export class LeadController {
         return;
       }
 
-      const requesterUserId = getUserId(req);
-      const isLeadAccessManager = req.admin.role === 'lead_access_manager';
-      const { userId, from, to, allTime } = req.query;
-
-      const isRequestingOwnPerformance = userId && requesterUserId && (String(userId) === String(requesterUserId));
-
-      if (!isLeadAccessManager && !isRequestingOwnPerformance) {
+      if (req.admin.role !== 'lead_access_manager') {
         res.status(403).json({
           success: false,
           error: 'Forbidden',
@@ -1402,24 +1221,14 @@ export class LeadController {
         return;
       }
 
+      const { userId, from, to, allTime } = req.query;
+
       if (userId) {
         const isAllTime = String(allTime) === 'true';
-        const defaultFrom = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-        const defaultTo = new Date().toISOString().slice(0, 10);
-        const parsedRange = isAllTime
-          ? { from: undefined, to: undefined }
-          : LeadService.parseFilterRange(
-              (from as string) || defaultFrom,
-              (to as string) || defaultTo
-            );
+        const fromDate = from ? new Date(from as string) : (isAllTime ? new Date(0) : new Date(Date.now() - 6 * 24 * 60 * 60 * 1000));
+        const toDate = to ? new Date(to as string) : new Date();
 
-        if (
-          !isAllTime &&
-          (!parsedRange.from ||
-            !parsedRange.to ||
-            Number.isNaN(parsedRange.from.getTime()) ||
-            Number.isNaN(parsedRange.to.getTime()))
-        ) {
+        if (!isAllTime && (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime()))) {
           res.status(400).json({
             success: false,
             error: 'Invalid date range',
@@ -1429,8 +1238,8 @@ export class LeadController {
         }
 
         const filters = {
-          from: parsedRange.from,
-          to: parsedRange.to,
+          from: isAllTime ? undefined : fromDate,
+          to: isAllTime ? undefined : toDate,
           allTime: isAllTime,
         };
 
@@ -1506,32 +1315,20 @@ export class LeadController {
         return;
       }
 
-      if (!['touched_leads', 'interested', 'callback_scheduled', 'callback_overdue', 'onboarded', 'verified'].includes(String(reportCategory))) {
+      if (!['touched_leads', 'interested', 'callback_scheduled', 'callback_overdue'].includes(String(reportCategory))) {
         res.status(400).json({
           success: false,
           error: 'Invalid report category',
-          message: 'reportCategory must be touched_leads, interested, callback_scheduled, callback_overdue, onboarded, or verified'
+          message: 'reportCategory must be touched_leads, interested, callback_scheduled, or callback_overdue'
         });
         return;
       }
 
       const isAllTime = String(allTime) === 'true';
-      const defaultFrom = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-      const defaultTo = new Date().toISOString().slice(0, 10);
-      const parsedRange = isAllTime
-        ? { from: undefined, to: undefined }
-        : LeadService.parseFilterRange(
-            (from as string) || defaultFrom,
-            (to as string) || defaultTo
-          );
+      const fromDate = from ? new Date(from as string) : (isAllTime ? new Date(0) : new Date(Date.now() - 24 * 60 * 60 * 1000));
+      const toDate = to ? new Date(to as string) : new Date();
 
-      if (
-        !isAllTime &&
-        (!parsedRange.from ||
-          !parsedRange.to ||
-          Number.isNaN(parsedRange.from.getTime()) ||
-          Number.isNaN(parsedRange.to.getTime()))
-      ) {
+      if (!isAllTime && (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime()))) {
         res.status(400).json({
           success: false,
           error: 'Invalid date range',
@@ -1541,20 +1338,17 @@ export class LeadController {
       }
 
       const filters: any = {
-        from: parsedRange.from,
-        to: parsedRange.to,
+        from: isAllTime ? undefined : fromDate,
+        to: isAllTime ? undefined : toDate,
         format: format as 'csv' | 'xlsx',
         template: template as 'eod' | 'detailed',
-        reportCategory: reportCategory as 'touched_leads' | 'interested' | 'callback_scheduled' | 'callback_overdue' | 'onboarded' | 'verified',
+        reportCategory: reportCategory as 'touched_leads' | 'interested' | 'callback_scheduled' | 'callback_overdue',
         includeNotes: String(includeNotes) === 'true',
         category: category ? String(category) : undefined,
         exportLayout: exportLayout === 'qualifier' ? 'qualifier' : 'standard',
         claimsScope: claimsScope ? (String(claimsScope) as 'current' | 'total') : undefined,
         allTime: isAllTime,
         gatedCommunityName: req.query.gatedCommunityName ? String(req.query.gatedCommunityName) : undefined,
-        city: req.query.city ? String(req.query.city) : undefined,
-        locality: req.query.locality ? String(req.query.locality) : undefined,
-        localArea: req.query.localArea ? String(req.query.localArea) : undefined,
       };
 
       if (role === 'qualifier' && userId) {
@@ -1580,8 +1374,8 @@ export class LeadController {
           reportType: 'lead-status-report',
           role,
           filters: {
-            from: isAllTime ? 'all-time' : filters.from?.toISOString(),
-            to: isAllTime ? 'all-time' : filters.to?.toISOString(),
+            from: isAllTime ? 'all-time' : fromDate.toISOString(),
+            to: isAllTime ? 'all-time' : toDate.toISOString(),
             qualifierId: filters.qualifierId,
             format: filters.format,
             template: filters.template,
@@ -1617,11 +1411,7 @@ export class LeadController {
   static async updateLead(req: AdminRequest, res: Response): Promise<void> {
     try {
       const { leadId } = req.params;
-      const updateData: UpdateLeadData = {
-        ...req.body,
-        _updatedBy: getUserId(req) || req.admin?.uid || '',
-        _updatedByName: req.admin?.name || '',
-      };
+      const updateData: UpdateLeadData = req.body;
 
       const existingLead = await LeadService.getLeadById(leadId);
       if (!existingLead) {
@@ -1637,15 +1427,6 @@ export class LeadController {
           success: false,
           error: 'Permission denied',
           message: 'Only the picked qualifier can update this lead.'
-        });
-        return;
-      }
-
-      if (updateTouchesSkills(updateData as Record<string, unknown>) && !isLeadCreator(req, existingLead.addedBy)) {
-        res.status(403).json({
-          success: false,
-          error: 'Permission denied',
-          message: 'Only the user who created this lead can edit skills.',
         });
         return;
       }
@@ -1693,7 +1474,7 @@ export class LeadController {
       }
 
       const { leadId } = req.params;
-      const { status, notes, statusReasonCode, statusReasonText, callbackAt, expectedOnboardingAt, attempts } = req.body;
+      const { status, notes, statusReasonCode, statusReasonText, callbackAt, expectedOnboardingAt } = req.body;
 
       if (!status) {
         res.status(400).json({
@@ -1730,7 +1511,6 @@ export class LeadController {
         statusReasonText,
         callbackAt,
         expectedOnboardingAt,
-        attempts,
         changedBy: req.admin.uid || req.admin?.userId || "" ,
         changedByName: req.admin.name
       };

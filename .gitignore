@@ -2,5 +2,4 @@ node_modules
 *.md
 *.log
 .env
-scripts/backups/
 # package-lock.json should be committed for reproducible builds

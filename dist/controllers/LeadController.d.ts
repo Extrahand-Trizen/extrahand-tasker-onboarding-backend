@@ -31,11 +31,6 @@ export declare class LeadController {
      */
     static getGatedCommunityNames(req: AdminRequest, res: Response): Promise<void>;
     /**
-     * Distinct cities and local areas from existing leads (for filter dropdowns).
-     * GET /api/v1/onboarding/leads/location-filter-options
-     */
-    static getLeadLocationFilterOptions(req: AdminRequest, res: Response): Promise<void>;
-    /**
      * Get unique users who have added leads (for filter dropdown)
      * GET /api/v1/onboarding/leads/creators
      */

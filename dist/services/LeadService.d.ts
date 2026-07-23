@@ -6,7 +6,6 @@ export interface CreateLeadData {
     landline?: string;
     email?: string;
     city?: string;
-    locality?: string;
     state?: string;
     address?: string;
     pincode?: string;
@@ -40,7 +39,6 @@ export interface UpdateLeadData {
     landline?: string | null;
     email?: string | null;
     city?: string | null;
-    locality?: string | null;
     state?: string | null;
     address?: string | null;
     pincode?: string | null;
@@ -53,9 +51,6 @@ export interface UpdateLeadData {
     source?: LeadSource | null;
     sourceDetails?: string | null;
     skills?: ILeadSkill[];
-    /** Actor who performed the update — set by controller, not from request body */
-    _updatedBy?: string;
-    _updatedByName?: string;
 }
 export interface UpdateStatusData {
     status: LeadStatus;
@@ -64,7 +59,6 @@ export interface UpdateStatusData {
     statusReasonText?: string;
     callbackAt?: Date | string;
     expectedOnboardingAt?: Date | string;
-    attempts?: string;
     changedBy: string;
     changedByName?: string;
 }
@@ -77,7 +71,6 @@ export interface SearchFilters {
     addedBy?: string;
     addedByAny?: string[];
     pickedBy?: string;
-    pickedByAny?: string[];
     transferPendingTo?: string;
     ownerBy?: string;
     ownerByAny?: string[];
@@ -86,40 +79,13 @@ export interface SearchFilters {
     endDate?: Date;
     page?: number;
     limit?: number;
-    /** Locality filter — stored on lead.locality */
-    locality?: string;
-    /** Exact local area filter — stored on lead.address */
-    localArea?: string;
     /** Filter by conversion/registration on main website */
     registrationStatus?: RegistrationStatusFilter;
     /** Filter by user who moved lead into current contact status */
     statusChangedBy?: string;
-    /** When true, only leads with no picker (unclaimed) */
-    unclaimed?: boolean;
-    /** When true, only leads that have been claimed (pickedBy set) */
-    claimed?: boolean;
-    attempts?: string;
-    /**
-     * When true, owner scope uses only pickedBy OR addedBy (no statusHistory.changedBy).
-     * This matches exactly how the Performance page counts outcomes.
-     */
-    strictOwner?: boolean;
-    /**
-     * When set to 'owner', the date filter (startDate/endDate) is applied to
-     * (pickedAt OR createdAt) instead of just createdAt.
-     * This matches the Performance page date logic for onboarder outcomes.
-     */
-    ownerDateMode?: 'owner';
-    /**
-     * Broad location search — case-insensitive substring match across city, locality,
-     * address, state, and pincode fields. Applied only when user presses Enter in the UI.
-     */
-    locationSearch?: string;
 }
 export interface CallbackQueueFilters {
     city?: string;
-    /** Broad location search across city/locality/address/state/pincode (Enter-triggered). */
-    locationSearch?: string;
     primarySkill?: string;
     addedBy?: string;
     addedByAny?: string[];
@@ -139,21 +105,16 @@ export type FollowUpDueType = 'all' | 'callback' | 'onboarding';
 export type FollowUpBucket = 'all' | 'today' | 'overdue' | 'upcoming' | 'range';
 export interface FollowUpQueueFilters {
     city?: string;
-    /** Broad location search across city/locality/address/state/pincode (Enter-triggered). */
-    locationSearch?: string;
     primarySkill?: string;
     addedBy?: string;
     addedByAny?: string[];
     ownerBy?: string;
     ownerByAny?: string[];
     pickedBy?: string;
-    followUpOwnerBy?: string;
-    followUpOwnerByAny?: string[];
     startDate?: Date;
     endDate?: Date;
     dueType?: FollowUpDueType;
     bucket?: FollowUpBucket;
-    attempts?: string;
     page?: number;
     limit?: number;
 }
@@ -173,7 +134,6 @@ export interface FollowUpQueueStats {
     onboardingDueToday: number;
     onboardingOverdue: number;
     totalFollowUps: number;
-    rangeCount?: number;
 }
 export interface StatusAnalyticsFilters {
     from?: Date;
@@ -184,11 +144,8 @@ export interface StatusAnalyticsFilters {
     claimsScope?: 'current' | 'total';
     allTime?: boolean;
     gatedCommunityName?: string;
-    city?: string;
-    locality?: string;
-    localArea?: string;
 }
-export type StatusReportCategory = 'touched_leads' | 'interested' | 'callback_scheduled' | 'callback_overdue' | 'onboarded' | 'verified';
+export type StatusReportCategory = 'touched_leads' | 'interested' | 'callback_scheduled' | 'callback_overdue';
 export interface StatusReportExportFilters extends StatusAnalyticsFilters {
     format: 'csv' | 'xlsx';
     template: 'eod' | 'detailed';
@@ -203,8 +160,6 @@ export declare class LeadService {
     private static readonly STATUS_REPORT_LABELS;
     private static formatIST;
     private static labelForReport;
-    /** Extra stored values matched when filtering by canonical category id */
-    private static readonly CATEGORY_FILTER_ALIASES;
     private static readonly PRIMARY_CATEGORY_LABELS;
     private static categoryLabelForExport;
     private static contactStatusForExport;
@@ -212,68 +167,14 @@ export declare class LeadService {
     private static buildCategoryMatch;
     private static escapeRegex;
     private static buildExactCaseInsensitiveMatch;
-    private static normalizeDistinctLocationValues;
-    /** Dropdown options must be place names — not pin codes, plot numbers, or numeric-only text. */
-    private static isValidLocationDropdownValue;
-    /** Case-insensitive dedupe; dropdown labels shown in uppercase. */
-    private static collectLocationDropdownValues;
-    /** Full Google-style address stored in city field by mistake. */
-    private static isFullAddressLike;
-    /** Parse city name from plain city or comma-separated address text. */
-    private static extractCityFromStoredValue;
-    private static isSkippableAddressPart;
-    /** Parse local area from plain text or comma-separated address (not full address in dropdown). */
-    private static extractLocalAreasFromStoredValue;
-    private static pushLocationFilterClause;
-    private static buildCityFilterMatch;
-    private static buildLocalAreaFilterMatch;
-    private static buildLocalityFilterMatch;
-    private static buildLocationSearchMatch;
-    private static applyLeadLocationFilters;
     private static buildRegisteredPredicate;
     private static buildVerifiedPredicate;
     private static buildRegisteredOnlyPredicate;
     private static getAdminIdentityIds;
     private static buildIdSelector;
     private static buildOwnerScopeClause;
-    /**
-     * Strict owner scope — only pickedBy OR addedBy.
-     * Used when matching the Performance page counting logic exactly.
-     */
-    private static buildStrictOwnerScopeClause;
     private static textForSpreadsheet;
-    /** City column — prefer plain city name; parse legacy full addresses stored in city. */
-    private static cityForExport;
-    /**
-     * Local Area column — matches lead detail UI (`lead.address`).
-     * Falls back to city only when address is empty and city is a short label.
-     * Legacy full Google-style addresses stored in city are not used as fallback
-     * (dashboard shows "—" for Local Area in that case).
-     */
-    private static localAreaForExport;
     private static applyWorksheetLayout;
-    /**
-     * Parse from/to query params into IST day bounds (inclusive).
-     * Accepts YYYY-MM-DD or full ISO timestamps.
-     */
-    static parseFilterRange(from?: string | Date, to?: string | Date): {
-        from?: Date;
-        to?: Date;
-    };
-    private static buildBoundedDateRange;
-    private static isContactOutcomeStatus;
-    /** Date filter for registered-candidate list pages. */
-    private static buildRegistrationDateFilterClause;
-    /** Date filter for interested / not interested / not lifted queues. */
-    private static buildStatusTransitionDateFilterClause;
-    private static buildOwnerActivityDateFilterClause;
-    private static buildSearchDateFilterClause;
-    private static isDateInFilterRange;
-    private static getLatestStatusTransitionAt;
-    private static getRegistrationActivityAt;
-    private static leadIsRegistered;
-    private static leadIsVerified;
-    static normalizeLeadForResponse(lead: any): any;
     private static getISTDayBounds;
     /**
      * Generate unique lead ID
@@ -291,9 +192,6 @@ export declare class LeadService {
      */
     private static normalizeLeadData;
     private static applyOwnerScope;
-    private static applyPrioritizedOwnerScope;
-    private static latestFollowUpHistoryEntry;
-    private static filterFollowUpsByOwner;
     /**
      * Get lead by ID
      */
@@ -313,9 +211,6 @@ export declare class LeadService {
      * Get all distinct gated community names (for dropdown/autocomplete)
      */
     static getGatedCommunityNames(): Promise<string[]>;
-    static getLeadCities(): Promise<string[]>;
-    static getLeadLocalAreas(): Promise<string[]>;
-    static getLeadLocalities(): Promise<string[]>;
     static searchLeads(filters: SearchFilters): Promise<{
         leads: ILead[];
         total: number;
@@ -338,10 +233,7 @@ export declare class LeadService {
         limit: number;
         totalPages: number;
     }>;
-    static getFollowUpQueueStats(filters: Pick<FollowUpQueueFilters, 'addedBy' | 'addedByAny' | 'ownerBy' | 'ownerByAny' | 'pickedBy' | 'followUpOwnerBy' | 'followUpOwnerByAny'>, dateRange?: {
-        from?: Date;
-        to?: Date;
-    }): Promise<FollowUpQueueStats>;
+    static getFollowUpQueueStats(filters: Pick<FollowUpQueueFilters, 'addedBy' | 'addedByAny' | 'ownerBy' | 'ownerByAny' | 'pickedBy'>): Promise<FollowUpQueueStats>;
     static getStatusAnalytics(filters: StatusAnalyticsFilters): Promise<{
         leadsAdded: number;
         touchedLeads: number;
@@ -350,7 +242,6 @@ export declare class LeadService {
         callbackScheduled: number;
         callbackOverdue: number;
         onboarded: number;
-        verified: number;
         statusCounts: Array<{
             status: string;
             count: number;
@@ -364,18 +255,6 @@ export declare class LeadService {
             category: string;
             count: number;
         }>;
-        onboardedCategoryBreakdown?: Array<{
-            category: string;
-            count: number;
-        }>;
-        verifiedCategoryBreakdown?: Array<{
-            category: string;
-            count: number;
-        }>;
-        interestedCategoryBreakdown?: Array<{
-            category: string;
-            count: number;
-        }>;
     }>;
     static exportStatusReport(filters: StatusReportExportFilters): Promise<{
         filename: string;
@@ -383,9 +262,6 @@ export declare class LeadService {
         buffer: Buffer;
         rowCount: number;
     }>;
-    private static exportLeadsAddedStandardReport;
-    private static exportOnboardedReport;
-    private static exportVerifiedReport;
     private static exportQualifierStatusReport;
     /**
      * Update lead
@@ -456,8 +332,6 @@ export declare class LeadService {
      */
     static logActivity(leadId: string, type: string, action: string, performedBy: string, performedByName?: string, metadata?: Record<string, any>): Promise<void>;
     static getPerformanceOverview(): Promise<any>;
-    /** Count-only variant of searchLeads — aligns performance metrics with list pages. */
-    private static countSearchLeads;
     static getPerformanceDetails(userId: string, filters: {
         from?: Date;
         to?: Date;

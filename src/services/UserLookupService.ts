@@ -7,7 +7,6 @@ export interface ConversionStatus {
   platformUid?: string;
   isAadhaarVerified?: boolean;
   name?: string;
-  createdAt?: Date;
 }
 
 /**
@@ -74,7 +73,6 @@ export async function getConversionStatusByPhone(
       platformUid: data.uid,
       isAadhaarVerified: !!data.isAadhaarVerified,
       name: data.name,
-      createdAt: data.createdAt ? new Date(data.createdAt) : undefined,
     };
   } catch (err: any) {
     logger.warn('Conversion lookup failed', {
