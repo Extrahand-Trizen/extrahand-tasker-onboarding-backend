@@ -72,6 +72,7 @@ export interface SearchFilters {
     addedBy?: string;
     addedByAny?: string[];
     pickedBy?: string;
+    pickedByAny?: string[];
     transferPendingTo?: string;
     ownerBy?: string;
     ownerByAny?: string[];

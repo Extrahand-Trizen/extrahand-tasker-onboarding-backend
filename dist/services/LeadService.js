@@ -577,7 +577,10 @@ class LeadService {
             else if (filters.addedBy) {
                 query.addedBy = filters.addedBy;
             }
-            if (filters.pickedBy === 'none') {
+            if (filters.pickedByAny && filters.pickedByAny.length > 0) {
+                query.pickedBy = { $in: filters.pickedByAny };
+            }
+            else if (filters.pickedBy === 'none') {
                 query.$or = [
                     { pickedBy: { $exists: false } },
                     { pickedBy: null },
@@ -587,10 +590,10 @@ class LeadService {
             else if (filters.pickedBy) {
                 query.pickedBy = filters.pickedBy;
             }
-            if (!filters.pickedBy) {
+            if (!filters.pickedBy && !filters.pickedByAny?.length) {
                 this.applyOwnerScope(query, filters.ownerBy, filters.ownerByAny);
             }
-            if (filters.pickedBy && filters.pickedBy !== 'none') {
+            if (filters.pickedBy && filters.pickedBy !== 'none' && !filters.pickedByAny?.length) {
                 query.pickedBy = filters.pickedBy;
             }
             if (filters.transferPendingTo) {

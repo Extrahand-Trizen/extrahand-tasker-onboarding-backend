@@ -734,7 +734,7 @@ class LeadController {
                 });
                 return;
             }
-            const { status, city, primarySkill, source, addedBy, pickedBy, transferPendingTo, ownerBy, search, startDate, endDate, page, limit, registrationStatus, statusChangedBy, attempts } = req.query;
+            const { status, city, primarySkill, source, addedBy, pickedBy, pickedByAny, transferPendingTo, ownerBy, search, startDate, endDate, page, limit, registrationStatus, statusChangedBy, attempts } = req.query;
             const role = req.admin.role;
             const filters = {
                 status: status,
@@ -743,6 +743,7 @@ class LeadController {
                 source: source,
                 addedBy: addedBy,
                 pickedBy: pickedBy,
+                pickedByAny: (Array.isArray(pickedByAny) ? pickedByAny : pickedByAny ? [pickedByAny] : undefined),
                 transferPendingTo: transferPendingTo,
                 ownerBy: ownerBy,
                 search: search,
