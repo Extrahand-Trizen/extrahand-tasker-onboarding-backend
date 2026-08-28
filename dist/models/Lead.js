@@ -323,6 +323,9 @@ const LeadSchema = new mongoose_1.Schema({
         type: String,
         index: true
     },
+    attempts: {
+        type: String
+    },
     communicationLog: [{
             type: {
                 type: String,

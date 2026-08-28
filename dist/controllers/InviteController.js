@@ -15,9 +15,9 @@ const EmailServiceClient_1 = require("../services/EmailServiceClient");
  * - Production: https://partner.extrahand.in
  * - Development: http://localhost:3000
  */
-function getInviteLink(token, requestOrigin) {
-    // Use origin from request if available, fallback to FRONTEND_URL
-    const baseUrl = (requestOrigin || env_1.env.FRONTEND_URL).replace(/\/$/, '');
+function getInviteLink(token) {
+    // Ensure FRONTEND_URL doesn't have trailing slash
+    const baseUrl = env_1.env.FRONTEND_URL.replace(/\/$/, '');
     return `${baseUrl}/invite/${token}`;
 }
 class InviteController {
@@ -78,8 +78,7 @@ class InviteController {
                 createdBy,
                 expiresAt: new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000),
             });
-            const origin = req.get('origin') || req.get('referer')?.replace(/\/$/, '');
-            const inviteLink = getInviteLink(invite.token, origin);
+            const inviteLink = getInviteLink(invite.token);
             // Send invite email (fire and forget - don't block on email)
             EmailServiceClient_1.EmailServiceClient.sendAdminInviteEmail(invite.email, invite.role, inviteLink, invite.expiresAt, invite.team, invite.department)
                 .then((emailResult) => {
@@ -314,8 +313,7 @@ class InviteController {
             invite.expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
             invite.status = 'pending';
             await invite.save();
-            const origin = req.get('origin') || req.get('referer')?.replace(/\/$/, '');
-            const inviteLink = getInviteLink(invite.token, origin);
+            const inviteLink = getInviteLink(invite.token);
             logger_1.default.info('Invite resent', {
                 inviteId,
                 email: invite.email,

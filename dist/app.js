@@ -22,34 +22,14 @@ const passwordAuth_1 = __importDefault(require("./routes/passwordAuth"));
 const userManagement_1 = __importDefault(require("./routes/userManagement"));
 const certificateReview_1 = __importDefault(require("./routes/certificateReview"));
 const errorHandler_1 = require("./middleware/errorHandler");
-const env_1 = require("./config/env");
 const logger_1 = __importDefault(require("./config/logger"));
 const app = (0, express_1.default)();
 // Security middleware
 app.use((0, helmet_1.default)());
-const corsOrigins = env_1.env.CORS_ORIGIN
-    ? env_1.env.CORS_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean)
-    : [];
-// CORS — use callback(null, false) for disallowed origins so preflight still gets a clean response
+// CORS
 app.use((0, cors_1.default)({
-    origin: (origin, callback) => {
-        if (!origin) {
-            callback(null, true);
-            return;
-        }
-        if (corsOrigins.length === 0) {
-            logger_1.default.warn('CORS_ORIGIN is not set; blocking cross-origin browser requests', { origin });
-            callback(null, false);
-            return;
-        }
-        if (corsOrigins.includes('*') || corsOrigins.includes(origin)) {
-            callback(null, true);
-            return;
-        }
-        logger_1.default.warn('CORS blocked for origin', { origin, allowedOrigins: corsOrigins });
-        callback(null, false);
-    },
-    credentials: true,
+    origin: true,
+    credentials: true
 }));
 // Body parsing
 app.use(express_1.default.json());

@@ -43,8 +43,6 @@ const envSchema = zod_1.z.object({
     // Production: https://partner.extrahand.in
     // Development: http://localhost:3000
     FRONTEND_URL: zod_1.z.string().url().default('http://localhost:3000'),
-    // Comma-separated list of allowed origins for CORS
-    CORS_ORIGIN: zod_1.z.string().optional(),
     LOG_LEVEL: zod_1.z.enum(['error', 'warn', 'info', 'debug']).default('info'),
     // Storage Configuration
     STORAGE_PROVIDER: zod_1.z.enum(['minio', 's3']).default('minio'),

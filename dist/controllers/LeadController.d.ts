@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { AdminRequest } from '../middleware/adminAuth';
 export declare class LeadController {
     static getDashboardMetrics(req: AdminRequest, res: Response): Promise<void>;
+    static getDashboardSummary(req: AdminRequest, res: Response): Promise<void>;
     static getStatusReasonCodes(req: AdminRequest, res: Response): Promise<void>;
     private static extractVerifiedSkillCertificates;
     /**

@@ -71,6 +71,7 @@ export interface UpdateStatusData {
   statusReasonText?: string;
   callbackAt?: Date | string;
   expectedOnboardingAt?: Date | string;
+  attempts?: string;
   changedBy: string;
   changedByName?: string;
 }
@@ -97,6 +98,8 @@ export interface SearchFilters {
   registrationStatus?: RegistrationStatusFilter;
   /** Filter by user who moved lead into current contact status */
   statusChangedBy?: string;
+  /** Filter by contact attempt count */
+  attempts?: string;
 }
 
 export interface CallbackQueueFilters {
@@ -156,6 +159,17 @@ export interface FollowUpQueueStats {
   totalFollowUps: number;
 }
 
+export interface DashboardSummary {
+  total: number;
+  myLeadsAdded: number;
+  approved: number;
+  interested: number;
+  notInterested: number;
+  notRegistered: number;
+  registered: number;
+  registeredVerified: number;
+}
+
 export interface StatusAnalyticsFilters {
   from?: Date;
   to?: Date;
@@ -165,13 +179,18 @@ export interface StatusAnalyticsFilters {
   claimsScope?: 'current' | 'total';
   allTime?: boolean;
   gatedCommunityName?: string;
+  city?: string;
+  locality?: string;
+  localArea?: string;
 }
 
 export type StatusReportCategory =
   | 'touched_leads'
   | 'interested'
   | 'callback_scheduled'
-  | 'callback_overdue';
+  | 'callback_overdue'
+  | 'onboarded'
+  | 'verified';
 
 export interface StatusReportExportFilters extends StatusAnalyticsFilters {
   format: 'csv' | 'xlsx';
@@ -246,6 +265,53 @@ export class LeadService {
   private static categoryLabelForExport(value?: string | null): string {
     if (!value) return '';
     return this.PRIMARY_CATEGORY_LABELS[value] || value;
+  }
+
+  static async getDashboardSummary(role: UserRole, userId?: string): Promise<DashboardSummary> {
+    const scope: Record<string, unknown> = { status: { $ne: 'inactive' } };
+
+    if (role === 'qualifier' && userId) {
+      scope.addedBy = userId;
+    } else if (role === 'onboarder' && userId) {
+      scope.pickedBy = userId;
+    }
+
+    const registeredQuery = {
+      $or: [
+        { 'conversionData.platformUid': { $exists: true, $nin: [null, ''] } },
+        { 'activationData.firebaseUid': { $exists: true, $nin: [null, ''] } },
+        { accountStatus: { $in: ['invited', 'activated', 'suspended'] } },
+      ],
+    };
+    const verifiedQuery = {
+      $or: [
+        { 'conversionData.isAadhaarVerified': true },
+        { 'verificationStatus.aadhaar.status': 'verified' },
+      ],
+    };
+
+    const [total, myLeadsAdded, approved, interested, notInterested, notRegistered, registered, registeredVerified] =
+      await Promise.all([
+        Lead.countDocuments(scope),
+        Lead.countDocuments({ ...scope, addedBy: userId || '__none__' }),
+        Lead.countDocuments({ ...scope, status: 'approved' }),
+        Lead.countDocuments({ ...scope, status: 'contacted_interested' }),
+        Lead.countDocuments({ ...scope, status: 'contacted_not_interested' }),
+        Lead.countDocuments({ ...scope, $nor: registeredQuery.$or }),
+        Lead.countDocuments({ ...scope, $and: [registeredQuery, { $nor: verifiedQuery.$or }] }),
+        Lead.countDocuments({ ...scope, $and: [registeredQuery, verifiedQuery] }),
+      ]);
+
+    return {
+      total,
+      myLeadsAdded,
+      approved,
+      interested,
+      notInterested,
+      notRegistered,
+      registered,
+      registeredVerified,
+    };
   }
 
   private static contactStatusForExport(lead: {
@@ -862,7 +928,13 @@ export class LeadService {
         query.addedBy = filters.addedBy;
       }
 
-      if (filters.pickedBy) {
+      if (filters.pickedBy === 'none') {
+        query.$or = [
+          { pickedBy: { $exists: false } },
+          { pickedBy: null },
+          { pickedBy: '' },
+        ];
+      } else if (filters.pickedBy) {
         query.pickedBy = filters.pickedBy;
       }
 
@@ -870,7 +942,7 @@ export class LeadService {
         this.applyOwnerScope(query, filters.ownerBy, filters.ownerByAny);
       }
 
-      if (filters.pickedBy) {
+      if (filters.pickedBy && filters.pickedBy !== 'none') {
         query.pickedBy = filters.pickedBy;
       }
 
@@ -912,6 +984,19 @@ export class LeadService {
           query.lastNotInterestedBy = filters.statusChangedBy;
         } else if (filters.status === 'contacted_not_lifted') {
           query.lastNotLiftedBy = filters.statusChangedBy;
+        }
+      }
+
+      if (filters.attempts) {
+        if (filters.attempts === 'more_than_4') {
+          query.$expr = {
+            $gt: [
+              { $convert: { input: '$attempts', to: 'int', onError: 0, onNull: 0 } },
+              4,
+            ],
+          };
+        } else {
+          query.attempts = filters.attempts;
         }
       }
 
@@ -1283,9 +1368,13 @@ export class LeadService {
     callbackScheduled: number;
     callbackOverdue: number;
     onboarded: number;
+    verified: number;
     statusCounts: Array<{ status: string; count: number }>;
     qualifierBreakdown: Array<{ qualifierId: string; qualifierName: string; touchedLeads: number }>;
     categoryBreakdown: Array<{ category: string; count: number }>;
+    onboardedCategoryBreakdown: Array<{ category: string; count: number }>;
+    verifiedCategoryBreakdown: Array<{ category: string; count: number }>;
+    interestedCategoryBreakdown: Array<{ category: string; count: number }>;
   }> {
     try {
       const leadMatch: any = {};
@@ -1310,6 +1399,9 @@ export class LeadService {
       if (filters.gatedCommunityName) {
         leadMatch.gatedCommunityName = this.buildExactCaseInsensitiveMatch(filters.gatedCommunityName);
       }
+      if (filters.city) leadMatch.city = this.buildExactCaseInsensitiveMatch(filters.city);
+      if (filters.locality) leadMatch.locality = this.buildExactCaseInsensitiveMatch(filters.locality);
+      if (filters.localArea) leadMatch.address = this.buildExactCaseInsensitiveMatch(filters.localArea);
 
       const basePipeline: any[] = [
         { $match: leadMatch },
@@ -1339,17 +1431,18 @@ export class LeadService {
       ];
 
       const now = new Date();
-      const registeredOnlyPredicate = this.buildRegisteredOnlyPredicate();
+      const registeredPredicate = this.buildRegisteredPredicate();
+      const verifiedPredicate = this.buildVerifiedPredicate();
       const onboardedScopeMatch =
         Object.keys(leadMatch).length > 0
-          ? { $and: [leadMatch, registeredOnlyPredicate] }
-          : registeredOnlyPredicate;
+          ? { $and: [leadMatch, registeredPredicate] }
+          : registeredPredicate;
       const onboardedPromise =
         filters.allTime || !filters.from || !filters.to
           ? Lead.countDocuments(onboardedScopeMatch)
           : Lead.aggregate([
               { $match: leadMatch },
-              { $match: registeredOnlyPredicate },
+              { $match: registeredPredicate },
               { $unwind: '$statusHistory' },
               {
                 $match: {
@@ -1364,7 +1457,35 @@ export class LeadService {
               { $count: 'count' },
             ]);
 
-      const [statusCountsRaw, touchedRaw, qualifierRaw, callbackScheduledRaw, callbackOverdueRaw, onboardedRaw] = await Promise.all([
+      const verifiedScopeMatch =
+        Object.keys(leadMatch).length > 0
+          ? { $and: [leadMatch, verifiedPredicate] }
+          : verifiedPredicate;
+      const verifiedPromise =
+        filters.allTime || !filters.from || !filters.to
+          ? Lead.countDocuments(verifiedScopeMatch)
+          : Lead.aggregate([
+              { $match: leadMatch },
+              { $match: verifiedPredicate },
+              { $unwind: '$statusHistory' },
+              { $match: { 'statusHistory.changedAt': { $gte: filters.from, $lte: filters.to } } },
+              { $group: { _id: '$leadId' } },
+              { $count: 'count' },
+            ]);
+
+      const categoryBreakdownPromise = (predicate?: Record<string, unknown>) =>
+        Lead.aggregate([
+          { $match: predicate ? { $and: [leadMatch, predicate] } : leadMatch },
+          {
+            $group: {
+              _id: { $ifNull: ['$primaryCategory', { $ifNull: ['$primarySkill', 'other'] }] },
+              count: { $sum: 1 },
+            },
+          },
+          { $sort: { count: -1 } },
+        ]);
+
+      const [statusCountsRaw, touchedRaw, qualifierRaw, callbackScheduledRaw, callbackOverdueRaw, onboardedRaw, verifiedRaw, onboardedCategoryRaw, verifiedCategoryRaw, interestedCategoryRaw] = await Promise.all([
         Lead.aggregate([
           ...latestStatusPipeline,
           {
@@ -1417,6 +1538,10 @@ export class LeadService {
           { $count: 'count' },
         ]),
         onboardedPromise,
+        verifiedPromise,
+        categoryBreakdownPromise(registeredPredicate),
+        categoryBreakdownPromise(verifiedPredicate),
+        categoryBreakdownPromise({ status: 'contacted_interested' }),
       ]);
 
       const statusCounts = statusCountsRaw.map((row: any) => ({
@@ -1430,6 +1555,10 @@ export class LeadService {
         typeof onboardedRaw === 'number'
           ? onboardedRaw
           : onboardedRaw[0]?.count || 0;
+      const verified =
+        typeof verifiedRaw === 'number'
+          ? verifiedRaw
+          : verifiedRaw[0]?.count || 0;
 
       const leadsAddedMatch: any = {};
       if (userId) {
@@ -1465,6 +1594,11 @@ export class LeadService {
         count: row.count,
       }));
 
+      const mapCategoryBreakdown = (rows: any[]) => rows.map((row) => ({
+        category: row._id,
+        count: row.count,
+      }));
+
       const leadsAdded = await Lead.countDocuments(leadsAddedMatch);
 
       return {
@@ -1475,6 +1609,7 @@ export class LeadService {
         callbackScheduled: callbackScheduledRaw[0]?.count || 0,
         callbackOverdue,
         onboarded,
+        verified,
         statusCounts,
         qualifierBreakdown: qualifierRaw.map((row: any) => ({
           qualifierId: row.qualifierId,
@@ -1482,6 +1617,9 @@ export class LeadService {
           touchedLeads: row.touchedLeads,
         })),
         categoryBreakdown,
+        onboardedCategoryBreakdown: mapCategoryBreakdown(onboardedCategoryRaw),
+        verifiedCategoryBreakdown: mapCategoryBreakdown(verifiedCategoryRaw),
+        interestedCategoryBreakdown: mapCategoryBreakdown(interestedCategoryRaw),
       };
     } catch (error: any) {
       logger.error('Error fetching status analytics', {
@@ -1558,6 +1696,11 @@ export class LeadService {
             qualifierId: { $first: { $ifNull: ['$pickedBy', '$addedBy'] } },
             isDuplicate: { $first: '$isDuplicate' },
             blacklisted: { $first: '$blacklisted' },
+            platformUid: { $first: '$conversionData.platformUid' },
+            activationUid: { $first: '$activationData.firebaseUid' },
+            accountStatus: { $first: '$accountStatus' },
+            isAadhaarVerified: { $first: '$conversionData.isAadhaarVerified' },
+            aadhaarStatus: { $first: '$verificationStatus.aadhaar.status' },
             latestHistory: { $first: '$statusHistory' },
           },
         },
@@ -1577,6 +1720,31 @@ export class LeadService {
               $match: {
                 'latestHistory.status': 'contacted_interested',
                 'latestHistory.callbackAt': { $exists: true, $ne: null, $lt: now },
+              },
+            }]
+          : []),
+        ...(filters.reportCategory === 'onboarded'
+          ? [{
+              $match: {
+                $or: [
+                  { platformUid: { $exists: true, $nin: [null, ''] } },
+                  { activationUid: { $exists: true, $nin: [null, ''] } },
+                  { accountStatus: { $in: ['invited', 'activated', 'suspended'] } },
+                ],
+                $nor: [
+                  { isAadhaarVerified: true },
+                  { aadhaarStatus: 'verified' },
+                ],
+              },
+            }]
+          : []),
+        ...(filters.reportCategory === 'verified'
+          ? [{
+              $match: {
+                $or: [
+                  { isAadhaarVerified: true },
+                  { aadhaarStatus: 'verified' },
+                ],
               },
             }]
           : []),
@@ -1945,6 +2113,14 @@ export class LeadService {
         lead.lastNotInterestedBy = data.changedBy;
       } else if (finalStatus === 'contacted_not_lifted') {
         lead.lastNotLiftedBy = data.changedBy;
+        const previousAttempts = Number(lead.attempts);
+        lead.attempts = String(
+          Number.isFinite(previousAttempts) && previousAttempts >= 0
+            ? previousAttempts + 1
+            : lead.attempts === 'max_reached'
+              ? 5
+              : 1
+        );
       }
 
       lead.statusHistory.push({

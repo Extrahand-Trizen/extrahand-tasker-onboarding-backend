@@ -39,6 +39,48 @@ class LeadService {
             return '';
         return this.PRIMARY_CATEGORY_LABELS[value] || value;
     }
+    static async getDashboardSummary(role, userId) {
+        const scope = { status: { $ne: 'inactive' } };
+        if (role === 'qualifier' && userId) {
+            scope.addedBy = userId;
+        }
+        else if (role === 'onboarder' && userId) {
+            scope.pickedBy = userId;
+        }
+        const registeredQuery = {
+            $or: [
+                { 'conversionData.platformUid': { $exists: true, $nin: [null, ''] } },
+                { 'activationData.firebaseUid': { $exists: true, $nin: [null, ''] } },
+                { accountStatus: { $in: ['invited', 'activated', 'suspended'] } },
+            ],
+        };
+        const verifiedQuery = {
+            $or: [
+                { 'conversionData.isAadhaarVerified': true },
+                { 'verificationStatus.aadhaar.status': 'verified' },
+            ],
+        };
+        const [total, myLeadsAdded, approved, interested, notInterested, notRegistered, registered, registeredVerified] = await Promise.all([
+            Lead_1.default.countDocuments(scope),
+            Lead_1.default.countDocuments({ ...scope, addedBy: userId || '__none__' }),
+            Lead_1.default.countDocuments({ ...scope, status: 'approved' }),
+            Lead_1.default.countDocuments({ ...scope, status: 'contacted_interested' }),
+            Lead_1.default.countDocuments({ ...scope, status: 'contacted_not_interested' }),
+            Lead_1.default.countDocuments({ ...scope, $nor: registeredQuery.$or }),
+            Lead_1.default.countDocuments({ ...scope, $and: [registeredQuery, { $nor: verifiedQuery.$or }] }),
+            Lead_1.default.countDocuments({ ...scope, $and: [registeredQuery, verifiedQuery] }),
+        ]);
+        return {
+            total,
+            myLeadsAdded,
+            approved,
+            interested,
+            notInterested,
+            notRegistered,
+            registered,
+            registeredVerified,
+        };
+    }
     static contactStatusForExport(lead) {
         if (lead.status === 'contacted_interested' && lead.nextCallbackAt) {
             return 'Callback Scheduled';
@@ -535,13 +577,20 @@ class LeadService {
             else if (filters.addedBy) {
                 query.addedBy = filters.addedBy;
             }
-            if (filters.pickedBy) {
+            if (filters.pickedBy === 'none') {
+                query.$or = [
+                    { pickedBy: { $exists: false } },
+                    { pickedBy: null },
+                    { pickedBy: '' },
+                ];
+            }
+            else if (filters.pickedBy) {
                 query.pickedBy = filters.pickedBy;
             }
             if (!filters.pickedBy) {
                 this.applyOwnerScope(query, filters.ownerBy, filters.ownerByAny);
             }
-            if (filters.pickedBy) {
+            if (filters.pickedBy && filters.pickedBy !== 'none') {
                 query.pickedBy = filters.pickedBy;
             }
             if (filters.transferPendingTo) {
@@ -580,6 +629,19 @@ class LeadService {
                 }
                 else if (filters.status === 'contacted_not_lifted') {
                     query.lastNotLiftedBy = filters.statusChangedBy;
+                }
+            }
+            if (filters.attempts) {
+                if (filters.attempts === 'more_than_4') {
+                    query.$expr = {
+                        $gt: [
+                            { $convert: { input: '$attempts', to: 'int', onError: 0, onNull: 0 } },
+                            4,
+                        ],
+                    };
+                }
+                else {
+                    query.attempts = filters.attempts;
                 }
             }
             // Registration/conversion status (main website)
@@ -930,6 +992,12 @@ class LeadService {
             if (filters.gatedCommunityName) {
                 leadMatch.gatedCommunityName = this.buildExactCaseInsensitiveMatch(filters.gatedCommunityName);
             }
+            if (filters.city)
+                leadMatch.city = this.buildExactCaseInsensitiveMatch(filters.city);
+            if (filters.locality)
+                leadMatch.locality = this.buildExactCaseInsensitiveMatch(filters.locality);
+            if (filters.localArea)
+                leadMatch.address = this.buildExactCaseInsensitiveMatch(filters.localArea);
             const basePipeline = [
                 { $match: leadMatch },
                 { $unwind: '$statusHistory' },
@@ -954,15 +1022,16 @@ class LeadService {
                 },
             ];
             const now = new Date();
-            const registeredOnlyPredicate = this.buildRegisteredOnlyPredicate();
+            const registeredPredicate = this.buildRegisteredPredicate();
+            const verifiedPredicate = this.buildVerifiedPredicate();
             const onboardedScopeMatch = Object.keys(leadMatch).length > 0
-                ? { $and: [leadMatch, registeredOnlyPredicate] }
-                : registeredOnlyPredicate;
+                ? { $and: [leadMatch, registeredPredicate] }
+                : registeredPredicate;
             const onboardedPromise = filters.allTime || !filters.from || !filters.to
                 ? Lead_1.default.countDocuments(onboardedScopeMatch)
                 : Lead_1.default.aggregate([
                     { $match: leadMatch },
-                    { $match: registeredOnlyPredicate },
+                    { $match: registeredPredicate },
                     { $unwind: '$statusHistory' },
                     {
                         $match: {
@@ -976,7 +1045,30 @@ class LeadService {
                     },
                     { $count: 'count' },
                 ]);
-            const [statusCountsRaw, touchedRaw, qualifierRaw, callbackScheduledRaw, callbackOverdueRaw, onboardedRaw] = await Promise.all([
+            const verifiedScopeMatch = Object.keys(leadMatch).length > 0
+                ? { $and: [leadMatch, verifiedPredicate] }
+                : verifiedPredicate;
+            const verifiedPromise = filters.allTime || !filters.from || !filters.to
+                ? Lead_1.default.countDocuments(verifiedScopeMatch)
+                : Lead_1.default.aggregate([
+                    { $match: leadMatch },
+                    { $match: verifiedPredicate },
+                    { $unwind: '$statusHistory' },
+                    { $match: { 'statusHistory.changedAt': { $gte: filters.from, $lte: filters.to } } },
+                    { $group: { _id: '$leadId' } },
+                    { $count: 'count' },
+                ]);
+            const categoryBreakdownPromise = (predicate) => Lead_1.default.aggregate([
+                { $match: predicate ? { $and: [leadMatch, predicate] } : leadMatch },
+                {
+                    $group: {
+                        _id: { $ifNull: ['$primaryCategory', { $ifNull: ['$primarySkill', 'other'] }] },
+                        count: { $sum: 1 },
+                    },
+                },
+                { $sort: { count: -1 } },
+            ]);
+            const [statusCountsRaw, touchedRaw, qualifierRaw, callbackScheduledRaw, callbackOverdueRaw, onboardedRaw, verifiedRaw, onboardedCategoryRaw, verifiedCategoryRaw, interestedCategoryRaw] = await Promise.all([
                 Lead_1.default.aggregate([
                     ...latestStatusPipeline,
                     {
@@ -1029,6 +1121,10 @@ class LeadService {
                     { $count: 'count' },
                 ]),
                 onboardedPromise,
+                verifiedPromise,
+                categoryBreakdownPromise(registeredPredicate),
+                categoryBreakdownPromise(verifiedPredicate),
+                categoryBreakdownPromise({ status: 'contacted_interested' }),
             ]);
             const statusCounts = statusCountsRaw.map((row) => ({
                 status: row._id,
@@ -1039,6 +1135,9 @@ class LeadService {
             const onboarded = typeof onboardedRaw === 'number'
                 ? onboardedRaw
                 : onboardedRaw[0]?.count || 0;
+            const verified = typeof verifiedRaw === 'number'
+                ? verifiedRaw
+                : verifiedRaw[0]?.count || 0;
             const leadsAddedMatch = {};
             if (userId) {
                 leadsAddedMatch.addedBy = userId;
@@ -1067,6 +1166,10 @@ class LeadService {
                 category: row._id,
                 count: row.count,
             }));
+            const mapCategoryBreakdown = (rows) => rows.map((row) => ({
+                category: row._id,
+                count: row.count,
+            }));
             const leadsAdded = await Lead_1.default.countDocuments(leadsAddedMatch);
             return {
                 leadsAdded,
@@ -1076,6 +1179,7 @@ class LeadService {
                 callbackScheduled: callbackScheduledRaw[0]?.count || 0,
                 callbackOverdue,
                 onboarded,
+                verified,
                 statusCounts,
                 qualifierBreakdown: qualifierRaw.map((row) => ({
                     qualifierId: row.qualifierId,
@@ -1083,6 +1187,9 @@ class LeadService {
                     touchedLeads: row.touchedLeads,
                 })),
                 categoryBreakdown,
+                onboardedCategoryBreakdown: mapCategoryBreakdown(onboardedCategoryRaw),
+                verifiedCategoryBreakdown: mapCategoryBreakdown(verifiedCategoryRaw),
+                interestedCategoryBreakdown: mapCategoryBreakdown(interestedCategoryRaw),
             };
         }
         catch (error) {
@@ -1150,6 +1257,11 @@ class LeadService {
                         qualifierId: { $first: { $ifNull: ['$pickedBy', '$addedBy'] } },
                         isDuplicate: { $first: '$isDuplicate' },
                         blacklisted: { $first: '$blacklisted' },
+                        platformUid: { $first: '$conversionData.platformUid' },
+                        activationUid: { $first: '$activationData.firebaseUid' },
+                        accountStatus: { $first: '$accountStatus' },
+                        isAadhaarVerified: { $first: '$conversionData.isAadhaarVerified' },
+                        aadhaarStatus: { $first: '$verificationStatus.aadhaar.status' },
                         latestHistory: { $first: '$statusHistory' },
                     },
                 },
@@ -1169,6 +1281,31 @@ class LeadService {
                             $match: {
                                 'latestHistory.status': 'contacted_interested',
                                 'latestHistory.callbackAt': { $exists: true, $ne: null, $lt: now },
+                            },
+                        }]
+                    : []),
+                ...(filters.reportCategory === 'onboarded'
+                    ? [{
+                            $match: {
+                                $or: [
+                                    { platformUid: { $exists: true, $nin: [null, ''] } },
+                                    { activationUid: { $exists: true, $nin: [null, ''] } },
+                                    { accountStatus: { $in: ['invited', 'activated', 'suspended'] } },
+                                ],
+                                $nor: [
+                                    { isAadhaarVerified: true },
+                                    { aadhaarStatus: 'verified' },
+                                ],
+                            },
+                        }]
+                    : []),
+                ...(filters.reportCategory === 'verified'
+                    ? [{
+                            $match: {
+                                $or: [
+                                    { isAadhaarVerified: true },
+                                    { aadhaarStatus: 'verified' },
+                                ],
                             },
                         }]
                     : []),
@@ -1511,6 +1648,12 @@ class LeadService {
             }
             else if (finalStatus === 'contacted_not_lifted') {
                 lead.lastNotLiftedBy = data.changedBy;
+                const previousAttempts = Number(lead.attempts);
+                lead.attempts = String(Number.isFinite(previousAttempts) && previousAttempts >= 0
+                    ? previousAttempts + 1
+                    : lead.attempts === 'max_reached'
+                        ? 5
+                        : 1);
             }
             lead.statusHistory.push({
                 status: finalStatus,

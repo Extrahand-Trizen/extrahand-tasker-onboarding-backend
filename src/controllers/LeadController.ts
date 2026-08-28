@@ -184,6 +184,31 @@ export class LeadController {
     }
   }
 
+  static async getDashboardSummary(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      if (!req.admin) {
+        res.status(401).json({ success: false, error: 'Authentication required' });
+        return;
+      }
+
+      const summary = await LeadService.getDashboardSummary(
+        req.admin.role as UserRole,
+        getUserId(req)
+      );
+      res.json({ success: true, data: summary });
+    } catch (error: any) {
+      logger.error('Error in getDashboardSummary controller', {
+        error: error.message,
+        stack: error.stack,
+      });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch dashboard summary',
+        message: error.message,
+      });
+    }
+  }
+
   static async getStatusReasonCodes(req: AdminRequest, res: Response): Promise<void> {
     try {
       res.json({
@@ -849,7 +874,8 @@ export class LeadController {
         page,
         limit,
         registrationStatus,
-        statusChangedBy
+        statusChangedBy,
+        attempts
       } = req.query;
 
       const role = req.admin.role as UserRole;
@@ -869,7 +895,8 @@ export class LeadController {
         page: page ? parseInt(page as string) : undefined,
         limit: limit ? parseInt(limit as string) : undefined,
         registrationStatus: registrationStatus as SearchFilters['registrationStatus'],
-        statusChangedBy: statusChangedBy as string
+        statusChangedBy: statusChangedBy as string,
+        attempts: attempts as string
       };
 
       // Keep search generic; caller (UI/page) decides whether to scope by addedBy.
@@ -1148,7 +1175,7 @@ export class LeadController {
 
       const role = req.admin.role as UserRole;
       const userId = getUserId(req);
-      const { from, to, qualifierId, pickedBy, category, claimsScope, allTime } = req.query;
+      const { from, to, qualifierId, pickedBy, category, claimsScope, allTime, city, locality, localArea } = req.query;
 
       const isAllTime = String(allTime) === 'true';
       const fromDate = from ? new Date(from as string) : (isAllTime ? new Date(0) : new Date(Date.now() - 6 * 24 * 60 * 60 * 1000));
@@ -1170,6 +1197,9 @@ export class LeadController {
         claimsScope: claimsScope ? (String(claimsScope) as 'current' | 'total') : undefined,
         allTime: isAllTime,
         gatedCommunityName: req.query.gatedCommunityName ? String(req.query.gatedCommunityName) : undefined,
+        city: city ? String(city) : undefined,
+        locality: locality ? String(locality) : undefined,
+        localArea: localArea ? String(localArea) : undefined,
       };
 
       if (role === 'qualifier' && userId) {
@@ -1212,11 +1242,17 @@ export class LeadController {
         return;
       }
 
-      if (req.admin.role !== 'lead_access_manager') {
+      const requestedUserId = req.query.userId ? String(req.query.userId) : undefined;
+      const currentUserIds = [req.admin.userId, req.admin.uid].filter(
+        (id): id is string => typeof id === 'string' && id.trim().length > 0
+      );
+      const isOwnPerformanceRequest = !!requestedUserId && currentUserIds.includes(requestedUserId);
+
+      if (req.admin.role !== 'lead_access_manager' && !isOwnPerformanceRequest) {
         res.status(403).json({
           success: false,
           error: 'Forbidden',
-          message: 'Only Lead Access Managers can view team performance metrics'
+          message: 'You can only view your own performance metrics'
         });
         return;
       }
@@ -1315,11 +1351,11 @@ export class LeadController {
         return;
       }
 
-      if (!['touched_leads', 'interested', 'callback_scheduled', 'callback_overdue'].includes(String(reportCategory))) {
+      if (!['touched_leads', 'interested', 'callback_scheduled', 'callback_overdue', 'onboarded', 'verified'].includes(String(reportCategory))) {
         res.status(400).json({
           success: false,
           error: 'Invalid report category',
-          message: 'reportCategory must be touched_leads, interested, callback_scheduled, or callback_overdue'
+          message: 'reportCategory must be touched_leads, interested, callback_scheduled, callback_overdue, onboarded, or verified'
         });
         return;
       }
@@ -1342,7 +1378,7 @@ export class LeadController {
         to: isAllTime ? undefined : toDate,
         format: format as 'csv' | 'xlsx',
         template: template as 'eod' | 'detailed',
-        reportCategory: reportCategory as 'touched_leads' | 'interested' | 'callback_scheduled' | 'callback_overdue',
+        reportCategory: reportCategory as 'touched_leads' | 'interested' | 'callback_scheduled' | 'callback_overdue' | 'onboarded' | 'verified',
         includeNotes: String(includeNotes) === 'true',
         category: category ? String(category) : undefined,
         exportLayout: exportLayout === 'qualifier' ? 'qualifier' : 'standard',
@@ -1474,7 +1510,7 @@ export class LeadController {
       }
 
       const { leadId } = req.params;
-      const { status, notes, statusReasonCode, statusReasonText, callbackAt, expectedOnboardingAt } = req.body;
+      const { status, notes, statusReasonCode, statusReasonText, callbackAt, expectedOnboardingAt, attempts } = req.body;
 
       if (!status) {
         res.status(400).json({
@@ -1511,6 +1547,7 @@ export class LeadController {
         statusReasonText,
         callbackAt,
         expectedOnboardingAt,
+        attempts,
         changedBy: req.admin.uid || req.admin?.userId || "" ,
         changedByName: req.admin.name
       };

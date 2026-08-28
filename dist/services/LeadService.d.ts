@@ -59,6 +59,7 @@ export interface UpdateStatusData {
     statusReasonText?: string;
     callbackAt?: Date | string;
     expectedOnboardingAt?: Date | string;
+    attempts?: string;
     changedBy: string;
     changedByName?: string;
 }
@@ -83,6 +84,8 @@ export interface SearchFilters {
     registrationStatus?: RegistrationStatusFilter;
     /** Filter by user who moved lead into current contact status */
     statusChangedBy?: string;
+    /** Filter by contact attempt count */
+    attempts?: string;
 }
 export interface CallbackQueueFilters {
     city?: string;
@@ -135,6 +138,16 @@ export interface FollowUpQueueStats {
     onboardingOverdue: number;
     totalFollowUps: number;
 }
+export interface DashboardSummary {
+    total: number;
+    myLeadsAdded: number;
+    approved: number;
+    interested: number;
+    notInterested: number;
+    notRegistered: number;
+    registered: number;
+    registeredVerified: number;
+}
 export interface StatusAnalyticsFilters {
     from?: Date;
     to?: Date;
@@ -144,8 +157,11 @@ export interface StatusAnalyticsFilters {
     claimsScope?: 'current' | 'total';
     allTime?: boolean;
     gatedCommunityName?: string;
+    city?: string;
+    locality?: string;
+    localArea?: string;
 }
-export type StatusReportCategory = 'touched_leads' | 'interested' | 'callback_scheduled' | 'callback_overdue';
+export type StatusReportCategory = 'touched_leads' | 'interested' | 'callback_scheduled' | 'callback_overdue' | 'onboarded' | 'verified';
 export interface StatusReportExportFilters extends StatusAnalyticsFilters {
     format: 'csv' | 'xlsx';
     template: 'eod' | 'detailed';
@@ -162,6 +178,7 @@ export declare class LeadService {
     private static labelForReport;
     private static readonly PRIMARY_CATEGORY_LABELS;
     private static categoryLabelForExport;
+    static getDashboardSummary(role: UserRole, userId?: string): Promise<DashboardSummary>;
     private static contactStatusForExport;
     private static registrationStatusForExport;
     private static buildCategoryMatch;
@@ -242,6 +259,7 @@ export declare class LeadService {
         callbackScheduled: number;
         callbackOverdue: number;
         onboarded: number;
+        verified: number;
         statusCounts: Array<{
             status: string;
             count: number;
@@ -252,6 +270,18 @@ export declare class LeadService {
             touchedLeads: number;
         }>;
         categoryBreakdown: Array<{
+            category: string;
+            count: number;
+        }>;
+        onboardedCategoryBreakdown: Array<{
+            category: string;
+            count: number;
+        }>;
+        verifiedCategoryBreakdown: Array<{
+            category: string;
+            count: number;
+        }>;
+        interestedCategoryBreakdown: Array<{
             category: string;
             count: number;
         }>;

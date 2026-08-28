@@ -123,6 +123,7 @@ export interface ILead extends Document {
     lastInterestedBy?: string;
     lastNotInterestedBy?: string;
     lastNotLiftedBy?: string;
+    attempts?: string;
     communicationLog: ICommunicationLog[];
     internalNotes: IInternalNote[];
     duplicateOf?: string;

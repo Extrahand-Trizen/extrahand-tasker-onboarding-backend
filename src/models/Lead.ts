@@ -169,6 +169,7 @@ export interface ILead extends Document {
   lastInterestedBy?: string;
   lastNotInterestedBy?: string;
   lastNotLiftedBy?: string;
+  attempts?: string;
   communicationLog: ICommunicationLog[];
   
   // Internal notes
@@ -485,6 +486,9 @@ const LeadSchema = new Schema<ILead>({
   lastNotLiftedBy: {
     type: String,
     index: true
+  },
+  attempts: {
+    type: String
   },
   communicationLog: [{
     type: {
