@@ -976,15 +976,16 @@ class LeadService {
         try {
             const leadMatch = {};
             const userId = filters.pickedBy || filters.qualifierId;
-            if (userId) {
+            const userIds = filters.pickedByAny?.length ? filters.pickedByAny : userId ? [userId] : [];
+            if (userIds.length) {
                 if (filters.claimsScope === 'current') {
-                    leadMatch.pickedBy = userId;
+                    leadMatch.pickedBy = { $in: userIds };
                 }
                 else {
                     leadMatch.$or = [
-                        { pickedBy: userId },
-                        { addedBy: userId },
-                        { 'statusHistory.changedBy': userId }
+                        { pickedBy: { $in: userIds } },
+                        { addedBy: { $in: userIds } },
+                        { 'statusHistory.changedBy': { $in: userIds } }
                     ];
                 }
             }
@@ -1210,15 +1211,16 @@ class LeadService {
             }
             const leadMatch = {};
             const userId = filters.pickedBy || filters.qualifierId;
-            if (userId) {
+            const userIds = filters.pickedByAny?.length ? filters.pickedByAny : userId ? [userId] : [];
+            if (userIds.length) {
                 if (filters.claimsScope === 'current') {
-                    leadMatch.pickedBy = userId;
+                    leadMatch.pickedBy = { $in: userIds };
                 }
                 else {
                     leadMatch.$or = [
-                        { pickedBy: userId },
-                        { addedBy: userId },
-                        { 'statusHistory.changedBy': userId }
+                        { pickedBy: { $in: userIds } },
+                        { addedBy: { $in: userIds } },
+                        { 'statusHistory.changedBy': { $in: userIds } }
                     ];
                 }
             }

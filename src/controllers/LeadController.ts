@@ -1177,7 +1177,7 @@ export class LeadController {
 
       const role = req.admin.role as UserRole;
       const userId = getUserId(req);
-      const { from, to, qualifierId, pickedBy, category, claimsScope, allTime, city, locality, localArea } = req.query;
+      const { from, to, qualifierId, pickedBy, pickedByAny, category, claimsScope, allTime, city, locality, localArea } = req.query;
 
       const isAllTime = String(allTime) === 'true';
       const fromDate = from ? new Date(from as string) : (isAllTime ? new Date(0) : new Date(Date.now() - 6 * 24 * 60 * 60 * 1000));
@@ -1207,7 +1207,7 @@ export class LeadController {
       if (role === 'qualifier' && userId) {
         filters.qualifierId = userId;
       } else if (role === 'onboarder' && userId) {
-        filters.pickedBy = userId;
+        filters.pickedByAny = [userId, req.admin?.email].filter((value): value is string => !!value);
       } else if (qualifierId && role === 'lead_access_manager') {
         filters.qualifierId = qualifierId as string;
       } else if (pickedBy && role === 'lead_access_manager') {
@@ -1393,7 +1393,7 @@ export class LeadController {
         filters.qualifierId = userId;
         filters.exportLayout = 'qualifier';
       } else if (role === 'onboarder' && userId) {
-        filters.pickedBy = userId;
+        filters.pickedByAny = [userId, req.admin?.email].filter((value): value is string => !!value);
       } else if (qualifierId && role === 'lead_access_manager') {
         filters.qualifierId = qualifierId as string;
       } else if (pickedBy && role === 'lead_access_manager') {

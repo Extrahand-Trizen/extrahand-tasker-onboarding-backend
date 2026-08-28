@@ -154,6 +154,7 @@ export interface StatusAnalyticsFilters {
     to?: Date;
     qualifierId?: string;
     pickedBy?: string;
+    pickedByAny?: string[];
     category?: string;
     claimsScope?: 'current' | 'total';
     allTime?: boolean;
