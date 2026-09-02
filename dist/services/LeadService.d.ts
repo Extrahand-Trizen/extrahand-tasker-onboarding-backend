@@ -195,6 +195,10 @@ export declare class LeadService {
     private static textForSpreadsheet;
     private static applyWorksheetLayout;
     private static getISTDayBounds;
+    static getISTDayBoundsPublic(reference?: Date): {
+        startOfToday: Date;
+        endOfToday: Date;
+    };
     /**
      * Generate unique lead ID
      */

@@ -892,8 +892,8 @@ export class LeadController {
         transferPendingTo: transferPendingTo as string,
         ownerBy: ownerBy as string,
         search: search as string,
-        startDate: startDate ? new Date(startDate as string) : undefined,
-        endDate: endDate ? new Date(endDate as string) : undefined,
+        startDate: startDate ? (parseISTDateOnly(startDate as string) ?? new Date(startDate as string)) : undefined,
+        endDate: endDate ? (parseISTDateOnly(endDate as string, true) ?? new Date(endDate as string)) : undefined,
         page: page ? parseInt(page as string) : undefined,
         limit: limit ? parseInt(limit as string) : undefined,
         registrationStatus: registrationStatus as SearchFilters['registrationStatus'],
@@ -1180,8 +1180,8 @@ export class LeadController {
       const { from, to, qualifierId, pickedBy, pickedByAny, category, claimsScope, allTime, city, locality, localArea } = req.query;
 
       const isAllTime = String(allTime) === 'true';
-      const fromDate = from ? new Date(from as string) : (isAllTime ? new Date(0) : new Date(Date.now() - 6 * 24 * 60 * 60 * 1000));
-      const toDate = to ? new Date(to as string) : new Date();
+      const fromDate = from ? (parseISTDateOnly(from as string) ?? new Date(from as string)) : (isAllTime ? new Date(0) : new Date(Date.now() - 6 * 24 * 60 * 60 * 1000));
+      const toDate = to ? (parseISTDateOnly(to as string, true) ?? new Date(to as string)) : new Date();
 
       if (!isAllTime && (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime()))) {
         res.status(400).json({
@@ -1263,8 +1263,8 @@ export class LeadController {
 
       if (userId) {
         const isAllTime = String(allTime) === 'true';
-        const fromDate = from ? new Date(from as string) : (isAllTime ? new Date(0) : new Date(Date.now() - 6 * 24 * 60 * 60 * 1000));
-        const toDate = to ? new Date(to as string) : new Date();
+        const fromDate = from ? (parseISTDateOnly(from as string) ?? new Date(from as string)) : (isAllTime ? new Date(0) : new Date(Date.now() - 6 * 24 * 60 * 60 * 1000));
+        const toDate = to ? (parseISTDateOnly(to as string, true) ?? new Date(to as string)) : new Date();
 
         if (!isAllTime && (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime()))) {
           res.status(400).json({

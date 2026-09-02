@@ -523,6 +523,10 @@ export class LeadService {
     };
   }
 
+  static getISTDayBoundsPublic(reference = new Date()): { startOfToday: Date; endOfToday: Date } {
+    return this.getISTDayBounds(reference);
+  }
+
   /**
    * Generate unique lead ID
    */
@@ -957,12 +961,29 @@ export class LeadService {
       this.applyOwnerScope(query, filters.ownerBy, filters.ownerByAny);
 
       if (filters.startDate || filters.endDate) {
-        query.createdAt = {};
-        if (filters.startDate) {
-          query.createdAt.$gte = filters.startDate;
-        }
-        if (filters.endDate) {
-          query.createdAt.$lte = filters.endDate;
+        if (filters.status) {
+          // When filtering by a specific status, use statusHistory.changedAt so that
+          // leads moved into that status today (but created earlier) are still shown.
+          const elemMatch: any = { status: filters.status };
+          if (filters.startDate) {
+            elemMatch.changedAt = elemMatch.changedAt || {};
+            elemMatch.changedAt.$gte = filters.startDate;
+          }
+          if (filters.endDate) {
+            elemMatch.changedAt = elemMatch.changedAt || {};
+            elemMatch.changedAt.$lte = filters.endDate;
+          }
+          query.$and = query.$and || [];
+          query.$and.push({ statusHistory: { $elemMatch: elemMatch } });
+        } else {
+          // No specific status filter — fall back to createdAt range
+          query.createdAt = {};
+          if (filters.startDate) {
+            query.createdAt.$gte = filters.startDate;
+          }
+          if (filters.endDate) {
+            query.createdAt.$lte = filters.endDate;
+          }
         }
       }
 
@@ -2950,11 +2971,12 @@ export class LeadService {
     const todayEnd = new Date();
     todayEnd.setHours(23, 59, 59, 999);
 
-    const baseMatch: any = this.buildOwnerScopeClause(identityIds);
+    const { startOfToday: todayStartIST, endOfToday: todayEndIST } = LeadService.getISTDayBoundsPublic();
 
-    if (!filters.allTime && filters.from && filters.to) {
-      baseMatch.createdAt = { $gte: filters.from, $lte: filters.to };
-    }
+    const baseMatch: any = this.buildOwnerScopeClause(identityIds);
+    // NOTE: Do NOT add createdAt to baseMatch here. Status-based outcome queries
+    // (interested, notInterested, etc.) must filter by statusHistory.changedAt, not createdAt.
+    // Each query applies its own date filter via statusDateFilter().
 
     const registeredQuery = {
       $or: [
@@ -3004,10 +3026,21 @@ export class LeadService {
     if (user.role === 'qualifier') {
       const qualifierOwnerMatch = this.buildOwnerScopeClause(identityIds);
 
-      const dateQuery: any = {};
-      if (!filters.allTime && filters.from && filters.to) {
-        dateQuery.createdAt = { $gte: filters.from, $lte: filters.to };
-      }
+      // For status-based outcome counts, filter by when that status was entered
+      // (statusHistory.changedAt), not when the lead was created.
+      const statusDateFilter = (status: string) => {
+        if (!filters.allTime && filters.from && filters.to) {
+          return {
+            statusHistory: {
+              $elemMatch: {
+                status,
+                changedAt: { $gte: filters.from, $lte: filters.to },
+              },
+            },
+          };
+        }
+        return {};
+      };
 
       const dueDateRange = !filters.allTime && filters.from && filters.to
         ? { $gte: filters.from, $lte: filters.to }
@@ -3016,49 +3049,27 @@ export class LeadService {
       const [callbackTotal, onboardingTotal, callbackOverdue, onboardingOverdue, callbackDueToday, onboardingDueToday] = await Promise.all([
         Lead.countDocuments({
           ...qualifierOwnerMatch,
-          nextCallbackAt: {
-            $exists: true,
-            $ne: null,
-            ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
-          },
+          nextCallbackAt: { $exists: true, $ne: null, ...(dueDateRange ?? {}) },
         }),
         Lead.countDocuments({
           ...qualifierOwnerMatch,
-          expectedOnboardingAt: {
-            $exists: true,
-            $ne: null,
-            ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
-          },
+          expectedOnboardingAt: { $exists: true, $ne: null, ...(dueDateRange ?? {}) },
         }),
         Lead.countDocuments({
           ...qualifierOwnerMatch,
-          nextCallbackAt: {
-            $lt: now,
-            ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
-          },
+          nextCallbackAt: { $lt: now, ...(dueDateRange ?? {}) },
         }),
         Lead.countDocuments({
           ...qualifierOwnerMatch,
-          expectedOnboardingAt: {
-            $lt: now,
-            ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
-          },
+          expectedOnboardingAt: { $lt: now, ...(dueDateRange ?? {}) },
         }),
         Lead.countDocuments({
           ...qualifierOwnerMatch,
-          nextCallbackAt: {
-            $gte: todayStart,
-            $lte: todayEnd,
-            ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
-          },
+          nextCallbackAt: { $gte: todayStartIST, $lte: todayEndIST },
         }),
         Lead.countDocuments({
           ...qualifierOwnerMatch,
-          expectedOnboardingAt: {
-            $gte: todayStart,
-            $lte: todayEnd,
-            ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
-          },
+          expectedOnboardingAt: { $gte: todayStartIST, $lte: todayEndIST },
         }),
       ]);
 
@@ -3068,20 +3079,20 @@ export class LeadService {
 
       const interested = await Lead.countDocuments({
         ...qualifierOwnerMatch,
-        ...dateQuery,
-        status: 'contacted_interested'
+        status: 'contacted_interested',
+        ...statusDateFilter('contacted_interested'),
       });
 
       const notInterested = await Lead.countDocuments({
         ...qualifierOwnerMatch,
-        ...dateQuery,
-        status: 'contacted_not_interested'
+        status: 'contacted_not_interested',
+        ...statusDateFilter('contacted_not_interested'),
       });
 
       const notLifted = await Lead.countDocuments({
         ...qualifierOwnerMatch,
-        ...dateQuery,
-        status: 'contacted_not_lifted'
+        status: 'contacted_not_lifted',
+        ...statusDateFilter('contacted_not_lifted'),
       });
 
       return {
@@ -3151,16 +3162,16 @@ export class LeadService {
         Lead.countDocuments({
           ...followUpScope,
           nextCallbackAt: {
-            $gte: todayStart,
-            $lte: todayEnd,
+            $gte: todayStartIST,
+            $lte: todayEndIST,
             ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
           },
         }),
         Lead.countDocuments({
           ...followUpScope,
           expectedOnboardingAt: {
-            $gte: todayStart,
-            $lte: todayEnd,
+            $gte: todayStartIST,
+            $lte: todayEndIST,
             ...(dueDateRange ? { $gte: dueDateRange.$gte, $lte: dueDateRange.$lte } : {}),
           },
         }),
@@ -3170,16 +3181,32 @@ export class LeadService {
       const overdue = callbackOverdue + onboardingOverdue;
       const dueToday = callbackDueToday + onboardingDueToday;
 
+      // For status-based outcome counts, filter by when the status was entered,
+      // not when the lead was created.
+      const statusDateFilter = (status: string) => {
+        if (!filters.allTime && filters.from && filters.to) {
+          return {
+            statusHistory: {
+              $elemMatch: {
+                status,
+                changedAt: { $gte: filters.from, $lte: filters.to },
+              },
+            },
+          };
+        }
+        return {};
+      };
+
       const interested = await Lead.countDocuments({
         ...baseMatch,
-        ...dateQuery,
-        status: 'contacted_interested'
+        status: 'contacted_interested',
+        ...statusDateFilter('contacted_interested'),
       });
 
       const notInterested = await Lead.countDocuments({
         ...baseMatch,
-        ...dateQuery,
-        status: 'contacted_not_interested'
+        status: 'contacted_not_interested',
+        ...statusDateFilter('contacted_not_interested'),
       });
 
       const registered = await Lead.countDocuments({
