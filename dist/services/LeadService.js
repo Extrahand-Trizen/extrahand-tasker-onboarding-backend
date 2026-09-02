@@ -847,6 +847,19 @@ class LeadService {
                     { primaryCategory: { $regex: new RegExp(filters.primarySkill, 'i') } },
                 ];
             }
+            if (filters.attempts) {
+                if (filters.attempts === 'more_than_4') {
+                    query.$expr = {
+                        $gt: [
+                            { $convert: { input: '$attempts', to: 'int', onError: 0, onNull: 0 } },
+                            4,
+                        ],
+                    };
+                }
+                else {
+                    query.attempts = filters.attempts;
+                }
+            }
             if (filters.addedByAny && filters.addedByAny.length > 0) {
                 query.addedBy = { $in: filters.addedByAny };
             }

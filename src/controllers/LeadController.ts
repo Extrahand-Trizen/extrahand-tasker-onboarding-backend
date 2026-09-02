@@ -1050,6 +1050,7 @@ export class LeadController {
         endDate,
         dueType,
         bucket,
+        attempts,
         page,
         limit,
         pickedBy,
@@ -1074,6 +1075,7 @@ export class LeadController {
         endDate: parsedEndDate,
         dueType: (dueType as FollowUpQueueFilters['dueType']) || 'all',
         bucket: (bucket as FollowUpQueueFilters['bucket']) || 'all',
+        attempts: attempts as string,
         page: page ? parseInt(page as string) : undefined,
         limit: limit ? parseInt(limit as string) : undefined,
       };

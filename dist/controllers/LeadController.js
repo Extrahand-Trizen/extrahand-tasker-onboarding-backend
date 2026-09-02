@@ -887,7 +887,7 @@ class LeadController {
                 });
                 return;
             }
-            const { city, primarySkill, startDate, endDate, dueType, bucket, page, limit, pickedBy, ownerBy, } = req.query;
+            const { city, primarySkill, startDate, endDate, dueType, bucket, attempts, page, limit, pickedBy, ownerBy, } = req.query;
             const role = req.admin.role;
             const scopedIds = getScopedAddedByIds(req);
             const rawStartDate = startDate;
@@ -905,6 +905,7 @@ class LeadController {
                 endDate: parsedEndDate,
                 dueType: dueType || 'all',
                 bucket: bucket || 'all',
+                attempts: attempts,
                 page: page ? parseInt(page) : undefined,
                 limit: limit ? parseInt(limit) : undefined,
             };

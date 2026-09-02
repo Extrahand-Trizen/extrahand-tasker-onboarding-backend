@@ -119,6 +119,7 @@ export interface FollowUpQueueFilters {
     endDate?: Date;
     dueType?: FollowUpDueType;
     bucket?: FollowUpBucket;
+    attempts?: string;
     page?: number;
     limit?: number;
 }
