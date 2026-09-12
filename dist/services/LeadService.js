@@ -632,6 +632,10 @@ class LeadService {
                 query.$and = query.$and || [];
                 query.$and.push(this.buildLocalAreaMatch(filters.localArea));
             }
+            if (filters.localArea) {
+                query.$and = query.$and || [];
+                query.$and.push(this.buildLocalAreaMatch(filters.localArea));
+            }
             if (filters.primarySkill) {
                 query.$and = query.$and || [];
                 query.$and.push({
