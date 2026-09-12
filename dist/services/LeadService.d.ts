@@ -77,6 +77,7 @@ export interface SearchFilters {
     ownerBy?: string;
     ownerByAny?: string[];
     search?: string;
+    localArea?: string;
     startDate?: Date;
     endDate?: Date;
     page?: number;
@@ -163,6 +164,7 @@ export interface StatusAnalyticsFilters {
     city?: string;
     locality?: string;
     localArea?: string;
+    includePlatformUserCounts?: boolean;
 }
 export type StatusReportCategory = 'touched_leads' | 'interested' | 'callback_scheduled' | 'callback_overdue' | 'onboarded' | 'verified';
 export interface StatusReportExportFilters extends StatusAnalyticsFilters {
@@ -187,9 +189,11 @@ export declare class LeadService {
     private static buildCategoryMatch;
     private static escapeRegex;
     private static buildExactCaseInsensitiveMatch;
+    private static buildLocalAreaMatch;
     private static buildRegisteredPredicate;
     private static buildVerifiedPredicate;
     private static buildRegisteredOnlyPredicate;
+    private static getPlatformUserCountsForArea;
     private static getAdminIdentityIds;
     private static buildIdSelector;
     private static buildOwnerScopeClause;
@@ -235,6 +239,11 @@ export declare class LeadService {
      * Get all distinct gated community names (for dropdown/autocomplete)
      */
     static getGatedCommunityNames(): Promise<string[]>;
+    static getLeadLocationFilterOptions(): Promise<{
+        cities: string[];
+        localities: string[];
+        localAreas: string[];
+    }>;
     static searchLeads(filters: SearchFilters): Promise<{
         leads: ILead[];
         total: number;

@@ -11,9 +11,12 @@ const DuplicateCheckService_1 = require("./DuplicateCheckService");
 const ApprovalService_1 = require("./ApprovalService");
 const permissions_1 = require("../lib/permissions");
 const logger_1 = __importDefault(require("../config/logger"));
+const axios_1 = __importDefault(require("axios"));
 const uuid_1 = require("uuid");
 const leadStatusValidator_1 = require("../validators/leadStatusValidator");
 const xlsx_1 = __importDefault(require("xlsx"));
+const hyderabadAreas_1 = require("../constants/hyderabadAreas");
+const env_1 = require("../config/env");
 class LeadService {
     static formatIST(date) {
         if (!date)
@@ -125,6 +128,19 @@ class LeadService {
     static buildExactCaseInsensitiveMatch(value) {
         return { $regex: new RegExp(`^${this.escapeRegex(value)}$`, 'i') };
     }
+    static buildLocalAreaMatch(area) {
+        const areaPattern = this.escapeRegex(area).replace(/\\ /g, '\\s*');
+        const areaRegex = new RegExp(areaPattern, 'i');
+        return {
+            $or: [
+                { address: areaRegex },
+                { locality: areaRegex },
+                { city: areaRegex },
+                { state: areaRegex },
+                { gatedCommunityName: areaRegex },
+            ],
+        };
+    }
     static buildRegisteredPredicate() {
         return {
             $or: [
@@ -147,6 +163,44 @@ class LeadService {
             ...this.buildRegisteredPredicate(),
             $nor: [this.buildVerifiedPredicate()],
         };
+    }
+    static async getPlatformUserCountsForArea(area, from, to) {
+        if (!env_1.env.USER_SERVICE_URL || !env_1.env.SERVICE_AUTH_TOKEN)
+            return null;
+        const baseParams = {
+            area,
+            role: 'helper',
+            status: 'active',
+            page: 1,
+            limit: 1,
+            ...(from ? { createdFrom: from.toISOString() } : {}),
+            ...(to ? { createdTo: to.toISOString() } : {}),
+        };
+        const headers = {
+            'X-Service-Auth': env_1.env.SERVICE_AUTH_TOKEN,
+            'X-Service-Name': 'tasker-onboarding-backend',
+        };
+        try {
+            const [registeredResponse, verifiedResponse] = await Promise.all([
+                axios_1.default.get(`${env_1.env.USER_SERVICE_URL}/api/v1/users`, { params: baseParams, headers, timeout: 10000 }),
+                axios_1.default.get(`${env_1.env.USER_SERVICE_URL}/api/v1/users`, {
+                    params: { ...baseParams, isAadhaarVerified: true },
+                    headers,
+                    timeout: 10000,
+                }),
+            ]);
+            return {
+                registered: Number(registeredResponse.data?.pagination?.total || 0),
+                verified: Number(verifiedResponse.data?.pagination?.total || 0),
+            };
+        }
+        catch (error) {
+            logger_1.default.warn('Platform user area count lookup failed; using lead counts', {
+                area,
+                error: error.message,
+            });
+            return null;
+        }
     }
     static getAdminIdentityIds(user) {
         return Array.from(new Set([user.userId, user.uid].filter((id) => typeof id === 'string' && id.trim().length > 0)));
@@ -549,6 +603,18 @@ class LeadService {
             throw error;
         }
     }
+    static async getLeadLocationFilterOptions() {
+        const [cities, localities] = await Promise.all([
+            Lead_1.default.distinct('city', { city: { $exists: true, $nin: [null, ''] } }),
+            Lead_1.default.distinct('locality', { locality: { $exists: true, $nin: [null, ''] } }),
+        ]);
+        const cleanAndSort = (values) => Array.from(new Set(values.map((value) => String(value).trim()).filter(Boolean))).sort((first, second) => first.localeCompare(second));
+        return {
+            cities: cleanAndSort(cities),
+            localities: cleanAndSort(localities),
+            localAreas: hyderabadAreas_1.HYDERABAD_LOCAL_AREAS,
+        };
+    }
     static async searchLeads(filters) {
         try {
             const page = filters.page || 1;
@@ -561,6 +627,10 @@ class LeadService {
             }
             if (filters.city) {
                 query.city = { $regex: new RegExp(filters.city, 'i') };
+            }
+            if (filters.localArea) {
+                query.$and = query.$and || [];
+                query.$and.push(this.buildLocalAreaMatch(filters.localArea));
             }
             if (filters.primarySkill) {
                 query.$and = query.$and || [];
@@ -1034,8 +1104,18 @@ class LeadService {
                 leadMatch.city = this.buildExactCaseInsensitiveMatch(filters.city);
             if (filters.locality)
                 leadMatch.locality = this.buildExactCaseInsensitiveMatch(filters.locality);
-            if (filters.localArea)
-                leadMatch.address = this.buildExactCaseInsensitiveMatch(filters.localArea);
+            if (filters.localArea) {
+                leadMatch.$and = leadMatch.$and || [];
+                leadMatch.$and.push(this.buildLocalAreaMatch(filters.localArea));
+            }
+            if (filters.city)
+                leadMatch.city = this.buildExactCaseInsensitiveMatch(filters.city);
+            if (filters.locality)
+                leadMatch.locality = this.buildExactCaseInsensitiveMatch(filters.locality);
+            if (filters.localArea) {
+                leadMatch.$and = leadMatch.$and || [];
+                leadMatch.$and.push(this.buildLocalAreaMatch(filters.localArea));
+            }
             const basePipeline = [
                 { $match: leadMatch },
                 { $unwind: '$statusHistory' },
@@ -1096,6 +1176,9 @@ class LeadService {
                     { $group: { _id: '$leadId' } },
                     { $count: 'count' },
                 ]);
+            const platformUserCountsPromise = filters.includePlatformUserCounts && filters.localArea
+                ? this.getPlatformUserCountsForArea(filters.localArea, filters.from, filters.to)
+                : Promise.resolve(null);
             const categoryBreakdownPromise = (predicate) => Lead_1.default.aggregate([
                 { $match: predicate ? { $and: [leadMatch, predicate] } : leadMatch },
                 {
@@ -1106,7 +1189,7 @@ class LeadService {
                 },
                 { $sort: { count: -1 } },
             ]);
-            const [statusCountsRaw, touchedRaw, qualifierRaw, callbackScheduledRaw, callbackOverdueRaw, onboardedRaw, verifiedRaw, onboardedCategoryRaw, verifiedCategoryRaw, interestedCategoryRaw] = await Promise.all([
+            const [statusCountsRaw, touchedRaw, qualifierRaw, callbackScheduledRaw, callbackOverdueRaw, onboardedRaw, verifiedRaw, onboardedCategoryRaw, verifiedCategoryRaw, interestedCategoryRaw, platformUserCounts] = await Promise.all([
                 Lead_1.default.aggregate([
                     ...latestStatusPipeline,
                     {
@@ -1163,6 +1246,7 @@ class LeadService {
                 categoryBreakdownPromise(registeredPredicate),
                 categoryBreakdownPromise(verifiedPredicate),
                 categoryBreakdownPromise({ status: 'contacted_interested' }),
+                platformUserCountsPromise,
             ]);
             const statusCounts = statusCountsRaw.map((row) => ({
                 status: row._id,
@@ -1173,10 +1257,12 @@ class LeadService {
             const onboarded = typeof onboardedRaw === 'number'
                 ? onboardedRaw
                 : onboardedRaw[0]?.count || 0;
-            const verified = typeof verifiedRaw === 'number'
+            const leadVerified = typeof verifiedRaw === 'number'
                 ? verifiedRaw
                 : verifiedRaw[0]?.count || 0;
-            const leadsAddedMatch = {};
+            const registered = platformUserCounts?.registered ?? onboarded;
+            const verified = platformUserCounts?.verified ?? leadVerified;
+            const leadsAddedMatch = { ...leadMatch };
             if (userId) {
                 leadsAddedMatch.addedBy = userId;
             }
@@ -1216,7 +1302,7 @@ class LeadService {
                 notInterested: statusCountMap.get('contacted_not_interested') || 0,
                 callbackScheduled: callbackScheduledRaw[0]?.count || 0,
                 callbackOverdue,
-                onboarded,
+                onboarded: registered,
                 verified,
                 statusCounts,
                 qualifierBreakdown: qualifierRaw.map((row) => ({
@@ -1265,11 +1351,22 @@ class LeadService {
             if (filters.gatedCommunityName) {
                 leadMatch.gatedCommunityName = this.buildExactCaseInsensitiveMatch(filters.gatedCommunityName);
             }
+            if (filters.city)
+                leadMatch.city = this.buildExactCaseInsensitiveMatch(filters.city);
+            if (filters.locality)
+                leadMatch.locality = this.buildExactCaseInsensitiveMatch(filters.locality);
+            if (filters.localArea) {
+                leadMatch.$and = leadMatch.$and || [];
+                leadMatch.$and.push(this.buildLocalAreaMatch(filters.localArea));
+            }
             const now = new Date();
             const rows = await Lead_1.default.aggregate([
                 { $match: leadMatch },
+                ...(filters.reportCategory === 'touched_leads' && !filters.allTime && filters.from && filters.to
+                    ? [{ $match: { createdAt: { $gte: filters.from, $lte: filters.to } } }]
+                    : []),
                 { $unwind: '$statusHistory' },
-                ...(filters.allTime || !filters.from || !filters.to
+                ...(filters.reportCategory === 'touched_leads' || filters.allTime || !filters.from || !filters.to
                     ? []
                     : [{ $match: { 'statusHistory.changedAt': { $gte: filters.from, $lte: filters.to } } }]),
                 { $sort: { 'statusHistory.changedAt': -1 } },
@@ -1440,6 +1537,15 @@ class LeadService {
         }
         if (filters.gatedCommunityName) {
             conditions.push({ gatedCommunityName: this.buildExactCaseInsensitiveMatch(filters.gatedCommunityName) });
+        }
+        if (filters.city) {
+            conditions.push({ city: this.buildExactCaseInsensitiveMatch(filters.city) });
+        }
+        if (filters.locality) {
+            conditions.push({ locality: this.buildExactCaseInsensitiveMatch(filters.locality) });
+        }
+        if (filters.localArea) {
+            conditions.push(this.buildLocalAreaMatch(filters.localArea));
         }
         const leadMatch = conditions.length > 0 ? { $and: conditions } : {};
         const leads = await Lead_1.default.find(leadMatch)

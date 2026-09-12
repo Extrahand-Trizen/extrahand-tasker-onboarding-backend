@@ -61,6 +61,13 @@ router.get(
   LeadController.getGatedCommunityNames
 );
 
+// Get cities, localities, and the Hyderabad local-area catalog for filters
+router.get(
+  '/location-filter-options',
+  requirePermission('canViewLeads'),
+  LeadController.getLeadLocationFilterOptions
+);
+
 // Get qualifiers list (for pick/transfer)
 router.get(
   '/qualifiers',

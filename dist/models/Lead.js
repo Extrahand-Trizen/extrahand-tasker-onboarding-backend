@@ -70,6 +70,11 @@ const LeadSchema = new mongoose_1.Schema({
         trim: true,
         index: true
     },
+    locality: {
+        type: String,
+        trim: true,
+        index: true
+    },
     state: {
         type: String,
         trim: true

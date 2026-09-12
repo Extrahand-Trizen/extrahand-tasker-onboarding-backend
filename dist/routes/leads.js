@@ -23,6 +23,8 @@ router.get('/follow-up-queue/stats', (0, roleAuth_1.requirePermission)('canViewL
 router.get('/creators', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getLeadCreators);
 // Get distinct gated community names (for dropdown/autocomplete)
 router.get('/gated-community-names', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getGatedCommunityNames);
+// Get cities, localities, and the Hyderabad local-area catalog for filters
+router.get('/location-filter-options', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getLeadLocationFilterOptions);
 // Get qualifiers list (for pick/transfer)
 router.get('/qualifiers', (0, roleAuth_1.requirePermission)('canViewLeads'), LeadController_1.LeadController.getQualifiers);
 // Get onboarders list (for transfer)

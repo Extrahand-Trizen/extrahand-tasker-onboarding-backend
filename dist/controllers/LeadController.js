@@ -560,6 +560,28 @@ class LeadController {
         }
     }
     /**
+     * Get location values used by lead list and report filters.
+     * GET /api/v1/onboarding/leads/location-filter-options
+     */
+    static async getLeadLocationFilterOptions(req, res) {
+        try {
+            if (!req.admin) {
+                res.status(401).json({ success: false, error: 'Authentication required' });
+                return;
+            }
+            const options = await LeadService_1.LeadService.getLeadLocationFilterOptions();
+            res.json({ success: true, data: options });
+        }
+        catch (error) {
+            logger_1.default.error('Error in getLeadLocationFilterOptions controller', { error: error.message });
+            res.status(500).json({
+                success: false,
+                error: 'Failed to get location filter options',
+                message: error.message,
+            });
+        }
+    }
+    /**
      * Get unique users who have added leads (for filter dropdown)
      * GET /api/v1/onboarding/leads/creators
      */
@@ -734,7 +756,7 @@ class LeadController {
                 });
                 return;
             }
-            const { status, city, primarySkill, source, addedBy, pickedBy, pickedByAny, transferPendingTo, ownerBy, search, startDate, endDate, page, limit, registrationStatus, statusChangedBy, attempts } = req.query;
+            const { status, city, primarySkill, source, addedBy, pickedBy, pickedByAny, transferPendingTo, ownerBy, search, localArea, startDate, endDate, page, limit, registrationStatus, statusChangedBy, attempts } = req.query;
             const role = req.admin.role;
             const filters = {
                 status: status,
@@ -747,6 +769,7 @@ class LeadController {
                 transferPendingTo: transferPendingTo,
                 ownerBy: ownerBy,
                 search: search,
+                localArea: localArea,
                 startDate: startDate ? (parseISTDateOnly(startDate) ?? new Date(startDate)) : undefined,
                 endDate: endDate ? (parseISTDateOnly(endDate, true) ?? new Date(endDate)) : undefined,
                 page: page ? parseInt(page) : undefined,
@@ -1028,6 +1051,7 @@ class LeadController {
                 city: city ? String(city) : undefined,
                 locality: locality ? String(locality) : undefined,
                 localArea: localArea ? String(localArea) : undefined,
+                includePlatformUserCounts: ['super_admin', 'lead_access_manager'].includes(role),
             };
             if (role === 'qualifier' && userId) {
                 filters.qualifierId = userId;
@@ -1138,7 +1162,7 @@ class LeadController {
             }
             const role = req.admin.role;
             const userId = getUserId(req);
-            const { from, to, qualifierId, pickedBy, format = 'csv', template = 'eod', reportCategory = 'touched_leads', includeNotes = 'false', category, exportLayout, claimsScope, allTime, } = req.query;
+            const { from, to, qualifierId, pickedBy, format = 'csv', template = 'eod', reportCategory = 'touched_leads', includeNotes = 'false', category, exportLayout, claimsScope, allTime, city, locality, localArea, } = req.query;
             if (!['csv', 'xlsx'].includes(String(format))) {
                 res.status(400).json({
                     success: false,
@@ -1186,6 +1210,9 @@ class LeadController {
                 claimsScope: claimsScope ? String(claimsScope) : undefined,
                 allTime: isAllTime,
                 gatedCommunityName: req.query.gatedCommunityName ? String(req.query.gatedCommunityName) : undefined,
+                city: city ? String(city) : undefined,
+                locality: locality ? String(locality) : undefined,
+                localArea: localArea ? String(localArea) : undefined,
             };
             if (role === 'qualifier' && userId) {
                 filters.qualifierId = userId;

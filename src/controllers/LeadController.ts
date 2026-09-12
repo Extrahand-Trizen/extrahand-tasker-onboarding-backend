@@ -672,6 +672,29 @@ export class LeadController {
   }
 
   /**
+   * Get location values used by lead list and report filters.
+   * GET /api/v1/onboarding/leads/location-filter-options
+   */
+  static async getLeadLocationFilterOptions(req: AdminRequest, res: Response): Promise<void> {
+    try {
+      if (!req.admin) {
+        res.status(401).json({ success: false, error: 'Authentication required' });
+        return;
+      }
+
+      const options = await LeadService.getLeadLocationFilterOptions();
+      res.json({ success: true, data: options });
+    } catch (error: any) {
+      logger.error('Error in getLeadLocationFilterOptions controller', { error: error.message });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to get location filter options',
+        message: error.message,
+      });
+    }
+  }
+
+  /**
    * Get unique users who have added leads (for filter dropdown)
    * GET /api/v1/onboarding/leads/creators
    */
@@ -870,6 +893,7 @@ export class LeadController {
         transferPendingTo,
         ownerBy,
         search,
+        localArea,
         startDate,
         endDate,
         page,
@@ -892,6 +916,7 @@ export class LeadController {
         transferPendingTo: transferPendingTo as string,
         ownerBy: ownerBy as string,
         search: search as string,
+        localArea: localArea as string,
         startDate: startDate ? (parseISTDateOnly(startDate as string) ?? new Date(startDate as string)) : undefined,
         endDate: endDate ? (parseISTDateOnly(endDate as string, true) ?? new Date(endDate as string)) : undefined,
         page: page ? parseInt(page as string) : undefined,
@@ -1204,6 +1229,7 @@ export class LeadController {
         city: city ? String(city) : undefined,
         locality: locality ? String(locality) : undefined,
         localArea: localArea ? String(localArea) : undefined,
+        includePlatformUserCounts: ['super_admin', 'lead_access_manager'].includes(role),
       };
 
       if (role === 'qualifier' && userId) {
@@ -1335,6 +1361,9 @@ export class LeadController {
         exportLayout,
         claimsScope,
         allTime,
+        city,
+        locality,
+        localArea,
       } = req.query;
 
       if (!['csv', 'xlsx'].includes(String(format))) {
@@ -1389,6 +1418,9 @@ export class LeadController {
         claimsScope: claimsScope ? (String(claimsScope) as 'current' | 'total') : undefined,
         allTime: isAllTime,
         gatedCommunityName: req.query.gatedCommunityName ? String(req.query.gatedCommunityName) : undefined,
+        city: city ? String(city) : undefined,
+        locality: locality ? String(locality) : undefined,
+        localArea: localArea ? String(localArea) : undefined,
       };
 
       if (role === 'qualifier' && userId) {

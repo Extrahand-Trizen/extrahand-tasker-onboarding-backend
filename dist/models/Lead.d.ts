@@ -79,6 +79,7 @@ export interface ILead extends Document {
     email?: string;
     city?: string;
     state?: string;
+    locality?: string;
     address?: string;
     pincode?: string;
     isGatedCommunity?: boolean;
