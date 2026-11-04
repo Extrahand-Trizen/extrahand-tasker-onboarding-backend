@@ -1,109 +1,176 @@
 import { Router, Response } from 'express';
-import axios from 'axios';
+import mongoose from 'mongoose';
 import { AdminRequest, adminAuthMiddleware } from '../middleware/adminAuth';
 import { requireRole } from '../middleware/roleAuth';
-import { env } from '../config/env';
-import logger from '../config/logger';
+import WebsiteLead from '../models/WebsiteLead';
 
 const router = Router();
 
-router.use(adminAuthMiddleware, requireRole('onboarder', 'lead_access_manager'));
+const serviceCategories: Record<string, string> = {
+  'hourly-based-services': 'Hourly Based Services',
+  'cleaning-services': 'Home Cleaning',
+  'home-cleaning': 'Home Cleaning',
+  'heating-cooling-services': 'AC Services',
+  'ac-repair': 'AC Services',
+  'appliances-services': 'Appliance Repair',
+  'appliance-repair': 'Appliance Repair',
+  'admin-services': 'Personal Assistance',
+  'personal-assistance': 'Personal Assistance',
+  'pest-control-services': 'Pest Control',
+  'pest-control': 'Pest Control',
+  'electricians-services': 'Electrician',
+  electrician: 'Electrician',
+  'plumbing-services': 'Plumbing',
+  plumbing: 'Plumbing',
+};
 
-function getServiceConfig(): { baseUrl: string; token: string } | undefined {
-  if (!env.CONTENT_ADMIN_SERVICE_URL || !env.SERVICE_AUTH_TOKEN) {
-    return undefined;
+router.post('/public', async (req, res) => {
+  const fullName = typeof req.body.fullName === 'string' ? req.body.fullName.trim() : '';
+  const rawMobile =
+    typeof req.body.mobileNumber === 'string' ? req.body.mobileNumber.trim() : '';
+  const city = typeof req.body.city === 'string' ? req.body.city.trim() : '';
+  const serviceCategorySlug =
+    typeof req.body.serviceCategorySlug === 'string'
+      ? req.body.serviceCategorySlug.trim().toLowerCase()
+      : '';
+  const mobileDigits = rawMobile.replace(/\D/g, '');
+
+  if (fullName.length < 2 || fullName.length > 80) {
+    res.status(400).json({ success: false, error: 'Enter a name between 2 and 80 characters.' });
+    return;
   }
-
-  return {
-    baseUrl: env.CONTENT_ADMIN_SERVICE_URL.replace(/\/+$/, ''),
-    token: env.SERVICE_AUTH_TOKEN,
-  };
-}
-
-function getRemoteError(error: unknown): { status: number; message: string } {
-  if (axios.isAxiosError(error)) {
-    const responseData = error.response?.data as { error?: string; message?: string } | undefined;
-    const status = error.response?.status;
-    return {
-      status: status && status >= 400 && status < 500 ? status : 502,
-      message: responseData?.error || responseData?.message || 'Website leads service is unavailable.',
-    };
+  if (!/^(?:[6-9]\d{9}|91[6-9]\d{9})$/.test(mobileDigits)) {
+    res.status(400).json({ success: false, error: 'Enter a valid Indian mobile number.' });
+    return;
   }
-
-  return { status: 502, message: 'Website leads service is unavailable.' };
-}
-
-router.get('/', async (req: AdminRequest, res: Response) => {
-  const service = getServiceConfig();
-  if (!service) {
-    res.status(503).json({
-      success: false,
-      error: 'Website leads service is not configured.',
-    });
+  if (city.length < 2 || city.length > 80) {
+    res.status(400).json({ success: false, error: 'Enter a city between 2 and 80 characters.' });
     return;
   }
 
-  const params = Object.fromEntries(
-    ['page', 'limit', 'search', 'city']
-      .filter((key) => typeof req.query[key] === 'string')
-      .map((key) => [key, req.query[key]])
-  );
+  const serviceCategory = serviceCategories[serviceCategorySlug];
+  if (!serviceCategory) {
+    res.status(400).json({ success: false, error: 'Choose a service category.' });
+    return;
+  }
 
   try {
-    const response = await axios.get(`${service.baseUrl}/api/partner-leads/service`, {
-      params,
-      headers: { 'X-Service-Auth': service.token },
-      timeout: 10000,
+    const lead = await WebsiteLead.create({
+      fullName,
+      mobileNumber: `+91${mobileDigits.slice(-10)}`,
+      city,
+      serviceCategory,
+      serviceCategorySlug,
     });
-    res.status(response.status).json(response.data);
+
+    res.status(201).json({
+      success: true,
+      message: 'Thanks for your interest. Our team will be in touch soon.',
+      leadId: lead._id,
+    });
   } catch (error) {
-    const remoteError = getRemoteError(error);
-    logger.error('Failed to fetch website leads from content admin service', {
-      status: remoteError.status,
-      message: remoteError.message,
+    console.error('Unable to save website lead:', error);
+    res.status(500).json({ success: false, error: 'Unable to submit your enquiry right now.' });
+  }
+});
+
+router.use(adminAuthMiddleware, requireRole('onboarder', 'lead_access_manager'));
+
+router.get('/', async (req, res: Response) => {
+  const requestedPage = Number.parseInt(String(req.query.page || ''), 10);
+  const requestedLimit = Number.parseInt(String(req.query.limit || ''), 10);
+  const page = Number.isFinite(requestedPage) && requestedPage > 0 ? requestedPage : 1;
+  const limit = Number.isFinite(requestedLimit)
+    ? Math.min(100, Math.max(1, requestedLimit))
+    : 25;
+  const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+  const city = typeof req.query.city === 'string' ? req.query.city.trim() : '';
+  const filter: Record<string, unknown> = {};
+
+  if (city) filter.city = city;
+  if (search) {
+    const escapedSearch = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const searchRegex = new RegExp(escapedSearch, 'i');
+    filter.$or = [{ fullName: searchRegex }, { mobileNumber: searchRegex }];
+  }
+
+  try {
+    const [leads, total, totalEnquiries, claimed, cities] = await Promise.all([
+      WebsiteLead.find(filter)
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      WebsiteLead.countDocuments(filter),
+      WebsiteLead.countDocuments(),
+      WebsiteLead.countDocuments({ claimedAt: { $exists: true } }),
+      WebsiteLead.distinct('city'),
+    ]);
+
+    res.status(200).json({
+      success: true,
+      data: leads,
+      cities: cities.filter(Boolean).sort((a, b) => a.localeCompare(b)),
+      summary: {
+        total: totalEnquiries,
+        claimed,
+        unclaimed: totalEnquiries - claimed,
+      },
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
+      },
     });
-    res.status(remoteError.status).json({ success: false, error: remoteError.message });
+  } catch (error) {
+    console.error('Unable to load website leads:', error);
+    res.status(500).json({ success: false, error: 'Unable to load website leads.' });
   }
 });
 
 router.post('/:leadId/claim', async (req: AdminRequest, res: Response) => {
-  const service = getServiceConfig();
-  if (!service) {
-    res.status(503).json({
-      success: false,
-      error: 'Website leads service is not configured.',
-    });
-    return;
-  }
-
   const claimantId = req.admin?.userId || req.admin?.uid;
   if (!claimantId) {
     res.status(401).json({ success: false, error: 'Authenticated user identity is missing.' });
     return;
   }
+  if (!mongoose.Types.ObjectId.isValid(req.params.leadId)) {
+    res.status(400).json({ success: false, error: 'Invalid website lead ID.' });
+    return;
+  }
 
+  const claimedByName = req.admin?.name || req.admin?.email || claimantId;
   try {
-    const response = await axios.post(
-      `${service.baseUrl}/api/partner-leads/service/${encodeURIComponent(req.params.leadId)}/claim`,
-      {
-        claimedBy: claimantId,
-        claimedByName: req.admin?.name || req.admin?.email || claimantId,
-      },
-      {
-        headers: { 'X-Service-Auth': service.token },
-        timeout: 10000,
-      }
-    );
-    res.status(response.status).json(response.data);
-  } catch (error) {
-    const remoteError = getRemoteError(error);
-    logger.error('Failed to claim website lead in content admin service', {
-      leadId: req.params.leadId,
-      actor: claimantId,
-      status: remoteError.status,
-      message: remoteError.message,
+    const lead = await WebsiteLead.findOneAndUpdate(
+      { _id: req.params.leadId, claimedAt: { $exists: false } },
+      { $set: { claimedBy: claimantId, claimedByName, claimedAt: new Date() } },
+      { new: true, runValidators: true }
+    ).lean();
+
+    if (lead) {
+      res.status(200).json({ success: true, data: lead });
+      return;
+    }
+
+    const existingLead = await WebsiteLead.findById(req.params.leadId).lean();
+    if (!existingLead) {
+      res.status(404).json({ success: false, error: 'Website lead not found.' });
+      return;
+    }
+    if (existingLead.claimedBy === claimantId) {
+      res.status(200).json({ success: true, data: existingLead });
+      return;
+    }
+
+    res.status(409).json({
+      success: false,
+      error: 'This website lead has already been claimed.',
+      data: existingLead,
     });
-    res.status(remoteError.status).json({ success: false, error: remoteError.message });
+  } catch (error) {
+    console.error('Unable to claim website lead:', error);
+    res.status(500).json({ success: false, error: 'Unable to claim this website lead.' });
   }
 });
 

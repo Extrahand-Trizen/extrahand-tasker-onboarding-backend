@@ -9,7 +9,7 @@ const dotenv_1 = __importDefault(require("dotenv"));
 dotenv_1.default.config();
 const envSchema = zod_1.z.object({
     NODE_ENV: zod_1.z.enum(['development', 'production', 'test']).default('development'),
-    PORT: zod_1.z.string().transform(Number).default('4006'),
+    PORT: zod_1.z.string().transform(Number).default('4008'),
     MONGODB_URI: zod_1.z.string().url(),
     MONGO_DB: zod_1.z.string().default('extrahand'),
     FIREBASE_PROJECT_ID: zod_1.z.string(),
@@ -29,7 +29,6 @@ const envSchema = zod_1.z.object({
     }),
     FIREBASE_CLIENT_EMAIL: zod_1.z.string().email(),
     SERVICE_AUTH_TOKEN: zod_1.z.string().min(32),
-    CONTENT_ADMIN_SERVICE_URL: zod_1.z.string().url().optional(),
     USER_SERVICE_URL: zod_1.z.string().url().optional(),
     VERIFICATION_SERVICE_URL: zod_1.z.string().url().optional(),
     EMAIL_SERVICE_URL: zod_1.z.string().url('EMAIL_SERVICE_URL must be a valid URL').optional(),

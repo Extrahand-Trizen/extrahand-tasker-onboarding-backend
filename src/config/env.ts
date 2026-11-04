@@ -28,7 +28,6 @@ const envSchema = z.object({
   }),
   FIREBASE_CLIENT_EMAIL: z.string().email(),
   SERVICE_AUTH_TOKEN: z.string().min(32),
-  CONTENT_ADMIN_SERVICE_URL: z.string().url().optional(),
   USER_SERVICE_URL: z.string().url().optional(),
   VERIFICATION_SERVICE_URL: z.string().url().optional(),
   EMAIL_SERVICE_URL: z.string().url('EMAIL_SERVICE_URL must be a valid URL').optional(),
