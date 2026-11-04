@@ -11,6 +11,7 @@ const WebsiteLead_1 = __importDefault(require("../models/WebsiteLead"));
 const router = (0, express_1.Router)();
 const serviceCategories = {
     'hourly-based-services': 'Hourly Based Services',
+    'daily-labour': 'Hourly Based Services',
     'cleaning-services': 'Home Cleaning',
     'home-cleaning': 'Home Cleaning',
     'heating-cooling-services': 'AC Services',
@@ -25,6 +26,16 @@ const serviceCategories = {
     electrician: 'Electrician',
     'plumbing-services': 'Plumbing',
     plumbing: 'Plumbing',
+    'carpentry-services': 'Carpentry',
+    carpentry: 'Carpentry',
+    'beauticians-services': 'Beauty Services',
+    beauty: 'Beauty Services',
+    'painting-services': 'Painting',
+    painting: 'Painting',
+    'car-wash': 'Car Wash',
+    'car-washing': 'Car Wash',
+    'laundry-services': 'Laundry',
+    laundry: 'Laundry',
 };
 router.post('/public', async (req, res) => {
     const fullName = typeof req.body.fullName === 'string' ? req.body.fullName.trim() : '';
