@@ -5,7 +5,7 @@ dotenv.config();
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-  PORT: z.string().transform(Number).default('4006'),
+  PORT: z.string().transform(Number).default('4008'),
   MONGODB_URI: z.string().url(),
   MONGO_DB: z.string().default('extrahand'),
   FIREBASE_PROJECT_ID: z.string(),
@@ -28,6 +28,7 @@ const envSchema = z.object({
   }),
   FIREBASE_CLIENT_EMAIL: z.string().email(),
   SERVICE_AUTH_TOKEN: z.string().min(32),
+  CONTENT_ADMIN_SERVICE_URL: z.string().url().optional(),
   USER_SERVICE_URL: z.string().url().optional(),
   VERIFICATION_SERVICE_URL: z.string().url().optional(),
   EMAIL_SERVICE_URL: z.string().url('EMAIL_SERVICE_URL must be a valid URL').optional(),
@@ -76,4 +77,3 @@ const envSchema = z.object({
 });
 
 export const env = envSchema.parse(process.env);
-

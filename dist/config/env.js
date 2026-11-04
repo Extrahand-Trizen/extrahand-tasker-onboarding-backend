@@ -29,6 +29,7 @@ const envSchema = zod_1.z.object({
     }),
     FIREBASE_CLIENT_EMAIL: zod_1.z.string().email(),
     SERVICE_AUTH_TOKEN: zod_1.z.string().min(32),
+    CONTENT_ADMIN_SERVICE_URL: zod_1.z.string().url().optional(),
     USER_SERVICE_URL: zod_1.z.string().url().optional(),
     VERIFICATION_SERVICE_URL: zod_1.z.string().url().optional(),
     EMAIL_SERVICE_URL: zod_1.z.string().url('EMAIL_SERVICE_URL must be a valid URL').optional(),

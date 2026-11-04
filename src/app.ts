@@ -16,6 +16,7 @@ import microsoftAuthRoutes from './routes/microsoftAuth';
 import passwordAuthRoutes from './routes/passwordAuth';
 import userManagementRoutes from './routes/userManagement';
 import certificateReviewRoutes from './routes/certificateReview';
+import websiteLeadsRoutes from './routes/websiteLeads';
 import { errorHandler } from './middleware/errorHandler';
 import logger from './config/logger';
 
@@ -71,9 +72,9 @@ app.use('/api/v1/onboarding/analytics', analyticsRoutes);
 app.use('/api/v1/onboarding/uploads', uploadsRoutes);
 app.use('/api/v1/onboarding/team', adminUsersRoutes);
 app.use('/api/v1/onboarding/certificates', certificateReviewRoutes);
+app.use('/api/v1/onboarding/website-leads', websiteLeadsRoutes);
 
 // Error handler
 app.use(errorHandler);
 
 export default app;
-
