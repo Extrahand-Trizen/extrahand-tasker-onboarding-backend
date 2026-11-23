@@ -92,8 +92,11 @@ router.get('/', async (req, res) => {
     const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
     const city = typeof req.query.city === 'string' ? req.query.city.trim() : '';
     const filter = {};
-    if (city)
+    const summaryFilter = {};
+    if (city) {
         filter.city = city;
+        summaryFilter.city = city;
+    }
     if (search) {
         const escapedSearch = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const searchRegex = new RegExp(escapedSearch, 'i');
@@ -107,8 +110,8 @@ router.get('/', async (req, res) => {
                 .limit(limit)
                 .lean(),
             WebsiteLead_1.default.countDocuments(filter),
-            WebsiteLead_1.default.countDocuments(),
-            WebsiteLead_1.default.countDocuments({ claimedAt: { $exists: true } }),
+            WebsiteLead_1.default.countDocuments(summaryFilter),
+            WebsiteLead_1.default.countDocuments({ ...summaryFilter, claimedAt: { $exists: true } }),
             WebsiteLead_1.default.distinct('city'),
         ]);
         res.status(200).json({
