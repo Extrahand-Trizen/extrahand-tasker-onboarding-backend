@@ -110,17 +110,56 @@ router.get('/', async (req, res: Response) => {
   }
 
   try {
-    const [leads, total, totalEnquiries, claimed, cities] = await Promise.all([
-      WebsiteLead.find(filter)
-        .sort({ createdAt: -1 })
-        .skip((page - 1) * limit)
-        .limit(limit)
-        .lean(),
-      WebsiteLead.countDocuments(filter),
-      WebsiteLead.countDocuments(summaryFilter),
-      WebsiteLead.countDocuments({ ...summaryFilter, claimedAt: { $exists: true } }),
+    const [deduplicatedLeads, summaryCounts, cities] = await Promise.all([
+      WebsiteLead.aggregate([
+        { $match: filter },
+        { $sort: { createdAt: -1, _id: -1 } },
+        {
+          $group: {
+            _id: { mobileNumber: '$mobileNumber', serviceCategory: '$serviceCategory' },
+            lead: { $first: '$$ROOT' },
+          },
+        },
+        { $replaceRoot: { newRoot: '$lead' } },
+        {
+          $facet: {
+            data: [
+              { $sort: { createdAt: -1, _id: -1 } },
+              { $skip: (page - 1) * limit },
+              { $limit: limit },
+            ],
+            total: [{ $count: 'count' }],
+          },
+        },
+      ]),
+      WebsiteLead.aggregate([
+        { $match: summaryFilter },
+        { $sort: { createdAt: -1, _id: -1 } },
+        {
+          $group: {
+            _id: { mobileNumber: '$mobileNumber', serviceCategory: '$serviceCategory' },
+            lead: { $first: '$$ROOT' },
+          },
+        },
+        { $replaceRoot: { newRoot: '$lead' } },
+        {
+          $group: {
+            _id: null,
+            total: { $sum: 1 },
+            claimed: {
+              $sum: {
+                $cond: [{ $ne: [{ $ifNull: ['$claimedAt', null] }, null] }, 1, 0],
+              },
+            },
+          },
+        },
+      ]),
       WebsiteLead.distinct('city'),
     ]);
+    const leads = deduplicatedLeads[0]?.data || [];
+    const total = deduplicatedLeads[0]?.total[0]?.count || 0;
+    const totalEnquiries = summaryCounts[0]?.total || 0;
+    const claimed = summaryCounts[0]?.claimed || 0;
 
     res.status(200).json({
       success: true,
